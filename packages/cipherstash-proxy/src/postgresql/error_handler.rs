@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn review_r08_prepared_settings_change_signals_reprepare() {
+    fn prepared_settings_change_signals_reprepare() {
         let response = TestHandler.error_to_response(MappingError::PreparedSettingsChanged.into());
         assert_eq!(field(&response, b'C'), Some("26000"));
     }

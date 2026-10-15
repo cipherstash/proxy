@@ -303,7 +303,16 @@ pub async fn prepared_statement_split(cell: Cell) -> Result<(), ProbeFailure> {
         // failure of its own; clear it so this check measures the split.
         // Only on collision: a pooler that manages statements itself (PgCat's
         // cache) is confused by a DEALLOCATE it did not issue.
-        Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::DUPLICATE_PSTATEMENT) => {
+        // Only where the cell expects missing prepared statement support: a
+        // collision behind a pooler that should track statements is a
+        // regression, so it falls through and fails the cell.
+        Err(e)
+            if e.code() == Some(&tokio_postgres::error::SqlState::DUPLICATE_PSTATEMENT)
+                && matches!(
+                    super::expectation(&cell),
+                    super::Expect::Fail(Incompatibility::PreparedStatementMissing, _)
+                ) =>
+        {
             a.simple("ROLLBACK")
                 .await
                 .map_err(|e| format!("rollback: {e}"))?;

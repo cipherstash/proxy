@@ -65,7 +65,6 @@ where
     protocol_state: Arc<RwLock<ConnectionProtocolState>>,
     upstream_tls_roots: Arc<rustls::RootCertStore>,
     session_id_counter: Arc<AtomicU64>,
-    transaction_status: Arc<RwLock<TransactionStatus>>,
 }
 
 /// Context for tracking an in-flight Execute operation.
@@ -418,7 +417,6 @@ where
             encryption,
             reload_sender,
             session_id_counter: Arc::new(AtomicU64::new(1)),
-            transaction_status: Arc::new(RwLock::new(TransactionStatus::Idle)),
         }
     }
 
@@ -724,50 +722,11 @@ where
         Ok(())
     }
 
-    /// Starts a speculative Parse replacement under the same lock as its
-    /// analysed statement and metrics. A rejected named replacement requires
-    /// fresh preparation rather than reusing incomplete encryption metadata.
-    #[cfg(test)]
-    fn begin_statement_preparation(
-        &self,
-        operation: OperationId,
-        name: &Name,
-    ) -> Result<(), Error> {
-        let finished_metrics_scope = {
-            let mut state = self
-                .protocol_state
-                .write()
-                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let metadata = settings_protocol::MetadataSnapshot {
-                statement: state.statements.get(name).cloned(),
-                statement_metrics: state.statement_metrics_scopes.get(name).copied(),
-                ..Default::default()
-            };
-            state
-                .settings_protocol
-                .start_prepare(operation, name.clone(), metadata);
-            state.remove_statement_metadata(name)
-        };
-        self.record_finished_metrics_scope(finished_metrics_scope);
-        Ok(())
-    }
-
-    pub fn transaction_status(&self) -> TransactionStatus {
-        self.transaction_status
-            .read()
-            .map(|status| *status)
-            .unwrap_or(TransactionStatus::Idle)
-    }
-
     fn ready_for_query(
         &self,
         status: TransactionStatus,
         boundary: Option<OperationId>,
     ) -> Result<(), Error> {
-        *self
-            .transaction_status
-            .write()
-            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)? = status;
         let (finished_executions, finished_metrics_scopes) = {
             let mut state = self
                 .protocol_state
@@ -1287,18 +1246,27 @@ where
             suspended: state.suspended_executions.get(&portal).cloned(),
             ..Default::default()
         };
-        let accepted = state.settings_protocol.bind(
-            operation,
-            portal,
-            name,
-            settings,
-            encrypted_values,
-            metadata,
+        state
+            .settings_protocol
+            .bind(
+                operation,
+                portal,
+                name,
+                settings,
+                encrypted_values,
+                metadata,
+            )
+            .map_err(|refusal| self.prepared_settings_changed(refusal))
+    }
+
+    fn prepared_settings_changed(&self, refusal: settings_protocol::SettingsRefusal) -> Error {
+        warn!(
+            target: CONTEXT,
+            client_id = self.client_id,
+            refusal = ?refusal,
+            "Prepared statement refused after effective settings changed"
         );
-        if !accepted {
-            return Err(crate::error::MappingError::PreparedSettingsChanged.into());
-        }
-        Ok(())
+        crate::error::MappingError::PreparedSettingsChanged.into()
     }
 
     fn execute_settings_portal(
@@ -1317,7 +1285,7 @@ where
         } = &mut *state;
         settings_protocol
             .execute(operation, portal, settings)
-            .map_err(|_| crate::error::MappingError::PreparedSettingsChanged.into())
+            .map_err(|refusal| self.prepared_settings_changed(refusal))
     }
 
     fn execute_simple_settings_statements(
@@ -1344,15 +1312,14 @@ where
         let Ok(state) = self.protocol_state.read() else {
             return true;
         };
-        let mut projected = state.settings.clone();
         let mut changed = false;
-        for statement in statements {
+        for (statement, _, changes) in
+            settings_protocol::project_settings_effects(&state.settings, statements)
+        {
             if changed && eql_mapper::requires_type_check(statement) {
                 return true;
             }
-            let command = settings::SettingsCommand::from_statement(statement);
-            changed |= command.may_change_effective(&projected);
-            projected.command_succeeded(&command, command.success_tag());
+            changed |= changes;
         }
         false
     }
@@ -1372,21 +1339,6 @@ where
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
             .settings_protocol
             .sync(operation);
-        Ok(())
-    }
-
-    fn settings_prepared_or_bound(&self, operation: OperationId) -> Result<(), Error> {
-        let finished = {
-            let mut state = self
-                .protocol_state
-                .write()
-                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let metadata = state.settings_protocol.prepared_or_bound(operation);
-            state.take_unreferenced_metrics(metadata.iter().flat_map(|metadata| metadata.metrics()))
-        };
-        for metrics in finished {
-            self.record_finished_metrics_scope(Some(metrics));
-        }
         Ok(())
     }
 
@@ -1445,11 +1397,13 @@ where
         Ok(())
     }
 
-    pub fn settings_in_flight(&self) -> bool {
-        self.protocol_state
+    pub fn settings_in_flight(&self) -> Result<bool, Error> {
+        Ok(self
+            .protocol_state
             .read()
-            .map(|state| state.settings_protocol.in_flight())
-            .unwrap_or(true)
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .settings_protocol
+            .in_flight())
     }
 
     pub fn unsafe_disable_mapping(&self) -> Result<bool, Error> {
@@ -1746,18 +1700,15 @@ where
 // Low-level fixtures for adapter tests that inject a partially observed protocol.
 #[cfg(test)]
 impl<T: EncryptionService> Context<T> {
-    #[cfg(test)]
     pub fn test_execute_simple_schema_statements(
         &self,
         statements: &[sqltk::parser::ast::Statement],
     ) {
         self.execute_simple_schema_statements(statements)
     }
-    #[cfg(test)]
     pub fn test_report_schema_execution_succeeded(&self) {
         self.report_schema_execution_succeeded()
     }
-    #[cfg(test)]
     pub fn test_finish_execution(
         &self,
         operation: OperationId,
@@ -1765,7 +1716,6 @@ impl<T: EncryptionService> Context<T> {
     ) -> Result<Option<DiagnosticResponse>, Error> {
         self.finish_execution(operation, outcome)
     }
-    #[cfg(test)]
     pub fn test_set_operation_error(
         &mut self,
         operation: OperationId,
@@ -1773,7 +1723,6 @@ impl<T: EncryptionService> Context<T> {
     ) -> Result<(), Error> {
         self.set_operation_error(operation, response)
     }
-    #[cfg(test)]
     pub fn test_set_statement_metrics_scope(
         &mut self,
         name: Name,
@@ -1781,11 +1730,9 @@ impl<T: EncryptionService> Context<T> {
     ) -> Result<(), Error> {
         self.set_statement_metrics_scope(name, session_id)
     }
-    #[cfg(test)]
     pub fn test_add_statement(&self, name: Name, statement: Statement) -> Result<(), Error> {
         self.add_statement(name, statement)
     }
-    #[cfg(test)]
     pub fn test_ready_for_query(
         &self,
         status: TransactionStatus,
@@ -1793,10 +1740,6 @@ impl<T: EncryptionService> Context<T> {
     ) -> Result<(), Error> {
         self.ready_for_query(status, boundary)
     }
-}
-
-#[cfg(test)]
-impl<T: EncryptionService> Context<T> {
     pub fn test_set_execute(
         &mut self,
         operation: OperationId,
@@ -1808,10 +1751,6 @@ impl<T: EncryptionService> Context<T> {
     pub fn test_statement_metrics_scope(&self, name: &Name) -> Result<Option<SessionId>, Error> {
         self.get_statement_metrics_scope(name)
     }
-}
-
-#[cfg(test)]
-impl<T: EncryptionService> Context<T> {
     pub fn test_non_execution(&self, operation: OperationId) -> Result<(), Error> {
         self.set_non_execution(operation)
     }
@@ -2338,37 +2277,24 @@ mod tests {
             .is_none());
     }
 
-    #[test]
-    fn pipelined_batch_failure_rebases_analysed_metadata_without_replacing_later_work() {
-        let context = create_context();
+    #[tokio::test]
+    async fn pipelined_batch_failure_rebases_analysed_metadata_without_replacing_later_work() {
+        let mut context = create_context();
         let name = Name::from_static(b"same_name");
-        let install = || {
-            let operation = operation_id();
-            context
-                .begin_statement_preparation(operation, &name)
-                .unwrap();
-            context
-                .prepare_settings_statement(
-                    operation,
-                    name.clone(),
-                    &crate::postgresql::parser::SqlParser::parse_statement("SELECT 1").unwrap(),
-                )
-                .unwrap();
-            context.add_statement(name.clone(), statement()).unwrap();
-            (operation, context.get_statement(&name).unwrap().unwrap())
-        };
-        let (original, original_metadata) = install();
-        context.settings_prepared_or_bound(original).unwrap();
-        let (rejected, _) = install();
-        context.settings_protocol_boundary(operation_id()).unwrap();
-        let (later, later_metadata) = install();
-        context.settings_execution_failed(Some(rejected)).unwrap();
+        let original = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
+        let original_metadata = context.get_statement(&name).unwrap().unwrap();
+        context.preparation_acknowledged(original).unwrap();
+        let rejected = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
+        context.sync(operation_id()).unwrap();
+        let later = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
+        let later_metadata = context.get_statement(&name).unwrap().unwrap();
+        context.postgres_failed(Some(rejected), false).unwrap();
         assert!(Arc::ptr_eq(
             &context.get_statement(&name).unwrap().unwrap(),
             &later_metadata
         ));
         assert!(!context.discarding_extended_messages().unwrap());
-        context.settings_execution_failed(Some(later)).unwrap();
+        context.postgres_failed(Some(later), false).unwrap();
         assert!(Arc::ptr_eq(
             &context.get_statement(&name).unwrap().unwrap(),
             &original_metadata
@@ -2408,28 +2334,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn review_r03_rejected_parse_removes_its_analysed_metadata() {
-        let context = create_context();
+    #[tokio::test]
+    async fn rejected_parse_removes_its_analysed_metadata() {
+        let mut context = create_context();
         let name = Name::from_static(b"named");
-        let parse_sql = |sql| crate::postgresql::parser::SqlParser::parse_statement(sql).unwrap();
-        let original = operation_id();
-        context
-            .begin_statement_preparation(original, &name)
-            .unwrap();
-        context
-            .prepare_settings_statement(original, name.clone(), &parse_sql("BEGIN"))
-            .unwrap();
-        context.settings_prepared_or_bound(original).unwrap();
-        let rejected = operation_id();
-        context
-            .begin_statement_preparation(rejected, &name)
-            .unwrap();
-        context
-            .prepare_settings_statement(rejected, name.clone(), &parse_sql("SELECT 1"))
-            .unwrap();
-        context.add_statement(name.clone(), statement()).unwrap();
-        context.settings_execution_failed(Some(rejected)).unwrap();
+        let original = prepare_lifecycle(&mut context, &name, "BEGIN", None).await;
+        context.preparation_acknowledged(original).unwrap();
+        let rejected = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
+        context.postgres_failed(Some(rejected), false).unwrap();
         assert!(!context
             .protocol_state
             .read()
@@ -2438,8 +2350,76 @@ mod tests {
             .contains_key(&name));
     }
 
+    #[tokio::test]
+    async fn successful_discard_all_removes_statement_and_portal_metadata() {
+        let mut context = create_context();
+        let name = Name::from_static(b"statement");
+        let parse = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
+        context.preparation_acknowledged(parse).unwrap();
+        let bind = operation_id();
+        let knowledge = context.begin_bind(bind, name.clone(), &name).unwrap();
+        context
+            .finish_bind(bind, Portal::passthrough(knowledge.metrics))
+            .unwrap();
+        context.preparation_acknowledged(bind).unwrap();
+        let discard = operation_id();
+        let metrics = context.start_metrics_scope().unwrap();
+        context
+            .register_query(
+                discard,
+                metrics,
+                Portal::passthrough(Some(metrics)),
+                &crate::postgresql::parser::SqlParser::parse_statements("DISCARD ALL").unwrap(),
+            )
+            .unwrap();
+        assert!(context.get_statement(&name).unwrap().is_some());
+        assert!(context.get_portal(&name).unwrap().is_some());
+        context
+            .execution_completed(Some(discard), ExecutionEnd::Command("DISCARD ALL"), false)
+            .unwrap();
+        assert!(context.get_statement(&name).unwrap().is_none());
+        assert!(context
+            .test_statement_metrics_scope(&name)
+            .unwrap()
+            .is_none());
+        assert!(context.get_portal(&name).unwrap().is_none());
+    }
+
     #[test]
-    fn review_r05_plain_transaction_and_reset_batches_are_allowed() {
+    fn settings_simple_query_fails_closed_when_protocol_state_is_unavailable() {
+        let context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(context.settings_simple_query_requires_fail_closed(
+            &crate::postgresql::parser::SqlParser::parse_statements("SELECT 1").unwrap()
+        ));
+    }
+
+    #[test]
+    fn settings_in_flight_when_protocol_state_is_unavailable() {
+        let context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(matches!(
+            context.settings_in_flight(),
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
+    }
+
+    #[test]
+    fn plain_transaction_and_reset_batches_are_allowed() {
         let context = create_context();
         for sql in [
             "ROLLBACK; SELECT now()",
@@ -2627,21 +2607,6 @@ mod tests {
             .get_portal(&passthrough_portal_name)
             .unwrap()
             .is_some());
-    }
-
-    #[test]
-    fn transaction_status_tracks_backend_ready_state() {
-        let context = create_context();
-        assert_eq!(context.transaction_status(), TransactionStatus::Idle);
-
-        context
-            .ready_for_query(TransactionStatus::InTransaction, None)
-            .unwrap();
-
-        assert_eq!(
-            context.transaction_status(),
-            TransactionStatus::InTransaction
-        );
     }
 
     #[test]

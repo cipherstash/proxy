@@ -1,15 +1,22 @@
 # PgBouncer for the connection pooler compatibility matrix (`mise run test:poolers`).
 #
-# The PgBouncer version is selected through the Alpine release, so the matrix
-# pins exact PgBouncer versions without depending on a third-party image:
+# PgBouncer is installed from the Alpine release's package repository, so the
+# Alpine release selects the PgBouncer version. Alpine can update a package
+# within a release, so the build fails unless `pgbouncer --version` reports
+# exactly PGBOUNCER_VERSION:
 #
-#   ALPINE_VERSION=3.18 -> PgBouncer 1.19.0 (before protocol-level prepared statement support)
-#   ALPINE_VERSION=3.22 -> PgBouncer 1.24.0 (supports `max_prepared_statements`)
+#   ALPINE_VERSION=3.18 PGBOUNCER_VERSION=1.19.0 (before protocol-level prepared statement support)
+#   ALPINE_VERSION=3.22 PGBOUNCER_VERSION=1.24.0 (supports `max_prepared_statements`)
 ARG ALPINE_VERSION=3.22
 FROM alpine:${ALPINE_VERSION}
+ARG PGBOUNCER_VERSION
 
 RUN apk add --no-cache pgbouncer \
-  && (id pgbouncer >/dev/null 2>&1 || adduser -D -S pgbouncer)
+  && (id pgbouncer >/dev/null 2>&1 || adduser -D -S pgbouncer) \
+  && installed="$(pgbouncer --version | head -n 1)" \
+  && if [ "${installed}" != "PgBouncer ${PGBOUNCER_VERSION:?PGBOUNCER_VERSION build arg is required}" ]; then \
+       echo "Expected PgBouncer ${PGBOUNCER_VERSION}, installed: ${installed}" >&2; exit 1; \
+     fi
 
 COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini.base
 COPY userlist.txt /etc/pgbouncer/userlist.txt

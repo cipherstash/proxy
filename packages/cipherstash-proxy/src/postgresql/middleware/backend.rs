@@ -1209,6 +1209,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn close_complete_releases_the_closed_statement_rollback_snapshot() {
+        let (mut backend, mut context) = create_backend_with_context();
+        let name = Name::from_static(b"closed");
+        let metrics = context.start_metrics_scope().unwrap();
+        context
+            .test_set_statement_metrics_scope(name.clone(), metrics)
+            .unwrap();
+        let close = operation_id();
+        context
+            .close(
+                close,
+                &pg_proto::Close {
+                    name,
+                    target: pg_proto::DescribeTarget::Statement,
+                },
+            )
+            .unwrap();
+        let retained = |context: &mut Context<TestService>| {
+            let mut found = false;
+            context
+                .update_statement_metadata(metrics, |_| found = true)
+                .unwrap();
+            found
+        };
+        // Until PostgreSQL confirms the Close, its rollback snapshot keeps the
+        // statement's metrics scope alive.
+        assert!(retained(&mut context));
+
+        let output = backend
+            .intercept(Some(close), BackendMessage::CloseComplete)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            output,
+            BackendMiddlewareOutput::Forward(BackendMessage::CloseComplete)
+        );
+        assert!(!retained(&mut context));
+    }
+
+    #[tokio::test]
     async fn publication_failure_closes_connection_before_idle_readiness() {
         let config = Arc::new(TandemConfig::for_testing());
         let encrypt_config = Arc::new(EncryptConfig::default());

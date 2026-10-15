@@ -51,57 +51,133 @@ impl SqlParser {
 /// sqltk has no RESET AST variant. Normalize only complete RESET commands at
 /// token boundaries; quoted strings, comments and other statements stay intact.
 /// The original wire SQL remains authoritative. SET ALL TO DEFAULT is an
-/// internal sentinel rendered back through `statement_sql` when rewriting SQL.
+/// internal sentinel rendered back through `statement_sql` when rewriting SQL,
+/// so a user-written `SET ALL`, which PostgreSQL rejects, is rejected here too.
 fn reset_tokens(sql: &str) -> Result<Vec<TokenWithSpan>, Error> {
     let tokens = Tokenizer::new(&DIALECT, sql)
         .tokenize_with_location()
         .map_err(|error| sqltk::parser::parser::ParserError::TokenizerError(error.to_string()))?;
-    let mut result = Vec::with_capacity(tokens.len());
+    // Built only once a RESET is found; until then the tokens are unchanged.
+    let mut rewritten: Option<Vec<TokenWithSpan>> = None;
+    let mut offset = 0;
     for statement in tokens.split_inclusive(|token| token.token == Token::SemiColon) {
+        let start = offset;
+        offset += statement.len();
         let has_delimiter = statement
             .last()
             .is_some_and(|token| token.token == Token::SemiColon);
         let body = &statement[..statement.len() - usize::from(has_delimiter)];
-        let significant: Vec<_> = body
-            .iter()
-            .filter(|token| !matches!(token.token, Token::Whitespace(_)))
-            .collect();
-        let reset = significant.first().is_some_and(|token| {
-            matches!(&token.token, Token::Word(word)
-            if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("RESET"))
-        });
-        let target = &significant[usize::from(!significant.is_empty())..];
-        let target_tokens: Vec<_> = target.iter().map(|token| &token.token).collect();
-        let valid_target = matches!(target_tokens.as_slice(), [Token::Word(_)])
-            || matches!(
-                target_tokens.as_slice(),
-                [Token::Word(_), Token::Period, Token::Word(_)]
-            );
-        if reset && valid_target {
-            result.push(TokenWithSpan::new(
-                Token::make_keyword("SET"),
-                significant[0].span,
-            ));
-            result.extend(target.iter().map(|token| (*token).clone()));
-            // Generated tokens point to the original target, while every token
-            // outside this RESET retains its original location, including in a batch.
-            let span = target.last().unwrap().span;
-            if matches!(target_tokens.as_slice(), [Token::Word(word)]
-                if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("ROLE"))
-            {
-                result.push(TokenWithSpan::new(Token::make_keyword("NONE"), span));
-            } else {
-                result.push(TokenWithSpan::new(Token::make_keyword("TO"), span));
-                result.push(TokenWithSpan::new(Token::make_keyword("DEFAULT"), span));
+        match leading_command(body) {
+            LeadingCommand::SetAll => {
+                return Err(sqltk::parser::parser::ParserError::ParserError(
+                    "SET ALL is not valid PostgreSQL; use RESET ALL".to_owned(),
+                )
+                .into());
             }
-        } else {
-            result.extend_from_slice(body);
-        }
-        if has_delimiter {
-            result.push(statement.last().unwrap().clone());
+            LeadingCommand::Reset {
+                keyword,
+                target_end,
+                role,
+            } => {
+                let result = rewritten.get_or_insert_with(|| {
+                    let mut result = Vec::with_capacity(tokens.len() + 2);
+                    result.extend_from_slice(&tokens[..start]);
+                    result
+                });
+                result.extend_from_slice(&body[..keyword]);
+                result.push(TokenWithSpan::new(
+                    Token::make_keyword("SET"),
+                    body[keyword].span,
+                ));
+                result.extend_from_slice(&body[keyword + 1..=target_end]);
+                // Generated tokens point to the original target, while every token
+                // outside this RESET retains its original location, including in a batch.
+                let target = &body[target_end];
+                if role {
+                    result.push(TokenWithSpan::new(Token::make_keyword("NONE"), target.span));
+                } else {
+                    result.push(TokenWithSpan::new(Token::make_keyword("TO"), target.span));
+                    result.push(TokenWithSpan::new(
+                        Token::make_keyword("DEFAULT"),
+                        target.span,
+                    ));
+                }
+                result.extend_from_slice(&statement[target_end + 1..]);
+            }
+            LeadingCommand::Other => {
+                if let Some(result) = &mut rewritten {
+                    result.extend_from_slice(statement);
+                }
+            }
         }
     }
-    Ok(result)
+    Ok(rewritten.unwrap_or(tokens))
+}
+
+enum LeadingCommand {
+    /// `RESET name` or `RESET name.name`, by index of the RESET keyword and of
+    /// the last target token within the statement. `RESET ROLE` sets `role`.
+    Reset {
+        keyword: usize,
+        target_end: usize,
+        role: bool,
+    },
+    /// `SET [SESSION | LOCAL] ALL ...`.
+    SetAll,
+    Other,
+}
+
+/// Classifies one statement from its first few significant tokens.
+fn leading_command(body: &[TokenWithSpan]) -> LeadingCommand {
+    let mut significant = body
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| !matches!(token.token, Token::Whitespace(_)))
+        .map(|(index, token)| (index, &token.token));
+    let Some((keyword, first)) = significant.next() else {
+        return LeadingCommand::Other;
+    };
+    if is_keyword(first, "SET") {
+        let mut next = significant.next().map(|(_, token)| token);
+        if next.is_some_and(|token| is_keyword(token, "SESSION") || is_keyword(token, "LOCAL")) {
+            next = significant.next().map(|(_, token)| token);
+        }
+        return if next.is_some_and(|token| is_keyword(token, "ALL")) {
+            LeadingCommand::SetAll
+        } else {
+            LeadingCommand::Other
+        };
+    }
+    if !is_keyword(first, "RESET") {
+        return LeadingCommand::Other;
+    }
+    let (target_end, role) = match (
+        significant.next(),
+        significant.next(),
+        significant.next(),
+        significant.next(),
+    ) {
+        (Some((end, target @ Token::Word(_))), None, None, None) => {
+            (end, is_keyword(target, "ROLE"))
+        }
+        (
+            Some((_, Token::Word(_))),
+            Some((_, Token::Period)),
+            Some((end, Token::Word(_))),
+            None,
+        ) => (end, false),
+        _ => return LeadingCommand::Other,
+    };
+    LeadingCommand::Reset {
+        keyword,
+        target_end,
+        role,
+    }
+}
+
+fn is_keyword(token: &Token, keyword: &str) -> bool {
+    matches!(token, Token::Word(word)
+        if word.quote_style.is_none() && word.value.eq_ignore_ascii_case(keyword))
 }
 
 #[cfg(test)]
@@ -137,5 +213,37 @@ mod tests {
         assert!(SqlParser::parse_statements("RESET ALL unexpected").is_err());
         let quoted = SqlParser::parse_statement("SELECT 'RESET ALL; RESET ROLE'").unwrap();
         assert_eq!(quoted.to_string(), "SELECT 'RESET ALL; RESET ROLE'");
+    }
+
+    #[test]
+    fn lowercase_reset_all_is_normalised_and_rendered_as_reset_all() {
+        let statement = SqlParser::parse_statement("reset all").unwrap();
+        assert_eq!(SqlParser::statement_sql(&statement), "RESET ALL");
+        assert!(matches!(
+            crate::postgresql::context::settings::SettingChange::parse(&statement).unwrap(),
+            Some(crate::postgresql::context::settings::SettingChange::ResetAll)
+        ));
+    }
+
+    #[test]
+    fn reset_role_becomes_set_role_none() {
+        for sql in ["RESET ROLE", "reset role"] {
+            let statement = SqlParser::parse_statement(sql).unwrap();
+            assert_eq!(
+                SqlParser::statement_sql(&statement),
+                "SET ROLE NONE",
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_written_set_all_to_default_is_not_rendered_as_reset_all() {
+        // PostgreSQL rejects `SET ALL TO DEFAULT` (ALL is reserved), so the
+        // rewrite path must not turn it into a successful `RESET ALL`.
+        let rendered = SqlParser::parse_statement("SET ALL TO DEFAULT")
+            .ok()
+            .map(|statement| SqlParser::statement_sql(&statement));
+        assert_ne!(rendered.as_deref(), Some("RESET ALL"));
     }
 }

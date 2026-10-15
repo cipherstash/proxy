@@ -227,6 +227,9 @@ jobs:
         run: python3 tests/tasks/test/pooler_gate_test.py
 
       - name: Build current Proxy and gate supported pooler behavior
+        # Below the job timeout, so a hung gate fails this step and the
+        # evidence upload below still runs.
+        timeout-minutes: 35
         run: mise run test:poolers
 
       - name: Upload matrix and driver evidence
@@ -236,3 +239,8 @@ jobs:
           name: proxy-pooler-compatibility-pg17
           path: target/pooler-results/
           if-no-files-found: warn
+
+      - uses: ./.github/actions/send-slack-notification
+        with:
+          channel: engineering
+          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}

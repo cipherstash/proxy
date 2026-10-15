@@ -1643,7 +1643,7 @@ mod tests {
     }
 
     #[test]
-    fn review_r02_refusal_names_differ_within_postgres_lookup_limit() {
+    fn refusal_names_differ_within_postgres_lookup_limit() {
         let frontend = frontend();
         let response = frontend.error_to_response(MappingError::PreparedSettingsChanged.into());
         let bind = Bind {
@@ -1855,7 +1855,10 @@ mod tests {
         ))).await.unwrap();
         assert!(
             matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
-            if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION"))
+            if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION")
+                && String::from_utf8_lossy(&query).contains(
+                    "cannot change CipherStash settings before a statement that needs mapping"
+                ))
         );
     }
 
@@ -2236,7 +2239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_r01_messages_after_backend_error_do_not_replace_statement() {
+    async fn messages_after_backend_error_do_not_replace_statement() {
         let mut schema = Schema::new("public");
         let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
         table.add_column(Arc::new(eql_mapper::Column::eql(
@@ -3003,7 +3006,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_r1_mapping_disabled_simple_query_error_does_not_suppress_next_query() {
+    async fn mapping_disabled_simple_query_error_does_not_suppress_next_query() {
         let mut config = TandemConfig::for_testing();
         config.disable_mapping_for_testing();
         let (mut frontend, context) = frontend_with_config(config);
@@ -3053,7 +3056,7 @@ mod tests {
     }
 
     #[test]
-    fn review_r2_parse_refusal_names_differ_within_postgres_lookup_limit() {
+    fn parse_refusal_names_differ_within_postgres_lookup_limit() {
         let frontend = frontend();
         let response = frontend.error_to_response(MappingError::PreparedSettingsChanged.into());
         let parse = Parse {
@@ -3142,7 +3145,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_r11_failed_function_call_keeps_the_connection_usable() {
+    async fn failed_function_call_keeps_the_connection_usable() {
         let output = next_query_after_failed_request(
             TandemConfig::for_testing(),
             vec![function_call()],
@@ -3159,7 +3162,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_r11_failed_function_call_with_mapping_disabled_keeps_the_connection_usable() {
+    async fn failed_function_call_with_mapping_disabled_keeps_the_connection_usable() {
         let mut config = TandemConfig::for_testing();
         config.disable_mapping_for_testing();
         let output = next_query_after_failed_request(config, vec![function_call()], false).await;
@@ -3428,6 +3431,30 @@ mod settings_reset_tests {
             .unwrap();
 
         assert_eq!(frontend.context.keyset_identifier().unwrap(), None);
+    }
+
+    /// A keyset change in a simple-query batch must not be bypassed by a later
+    /// statement that is encrypted with the keyset in effect before the batch.
+    #[tokio::test]
+    async fn keyset_setting_before_encrypted_statement_in_one_batch_is_refused() {
+        let (mut frontend, _, recorder) = client();
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(Bytes::from_static(
+                    b"SET CIPHERSTASH.KEYSET_NAME = 'tenant-b'; INSERT INTO encrypted(secret) VALUES ('value')",
+                )),
+            )
+            .await
+            .unwrap();
+        let query = match output {
+            FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            | FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query)) => query,
+            other => panic!("expected a forwarded query, got {other:?}"),
+        };
+        assert_eq!(recorder.selected.lock().unwrap().len(), 0);
+        assert!(String::from_utf8_lossy(&query)
+            .contains("cannot change CipherStash settings before a statement that needs mapping"));
     }
 
     /// `RESET CIPHERSTASH.KEYSET_NAME` returns the keyset to its default.

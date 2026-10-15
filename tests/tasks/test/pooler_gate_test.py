@@ -51,6 +51,32 @@ class ResultGate(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
 
+    def test_out_of_order_and_duplicate_events_are_rejected(self):
+        start = {"Action": "start", "Package": "suite"}
+        run = {"Action": "run", "Package": "suite", "Test": "TestEncryptedRoundTrip"}
+        test_pass = {"Action": "pass", "Package": "suite", "Test": "TestEncryptedRoundTrip"}
+        package_pass = {"Action": "pass", "Package": "suite"}
+        cases = {
+            "duplicate run": ([start, run, run, test_pass, package_pass], "invalid or duplicate test start"),
+            "run before start": ([run, start, test_pass, package_pass], "invalid or duplicate test start"),
+            "duplicate test pass": ([start, run, test_pass, test_pass, package_pass], "invalid or duplicate test completion"),
+            "test pass without run": ([start, test_pass, package_pass], "invalid or duplicate test completion"),
+            "duplicate package pass": ([start, run, test_pass, package_pass, package_pass], "invalid or duplicate package completion"),
+            "package pass before start": ([package_pass, start, run, test_pass], "invalid or duplicate package completion"),
+            "duplicate package start": ([start, start, run, test_pass, package_pass], "invalid or duplicate package start"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            events = Path(directory) / "events.jsonl"
+            for name, (candidate, reason) in cases.items():
+                with self.subTest(name=name):
+                    events.write_text("".join(json.dumps(event) + "\n" for event in candidate))
+                    result = subprocess.run(
+                        [sys.executable, str(CHECKER), str(events), "--exit-code", "0"],
+                        capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(reason, result.stderr)
+
     def test_empty_success_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             events = Path(directory) / "events.jsonl"

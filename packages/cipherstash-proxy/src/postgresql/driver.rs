@@ -217,7 +217,8 @@ where
                             | ForwardedMessage::Frontend(
                                 FrontendMessage::Query(_) | FrontendMessage::Sync
                             )
-                    ) {
+                    ) && (context.schema_ddl_in_flight() || context.settings_in_flight()?)
+                    {
                         // Extended execution requests Flush; Query and Sync already
                         // flush themselves. Drain their settings/schema outcomes
                         // before accepting dependent frontend work. Adding a protocol
@@ -226,9 +227,10 @@ where
                         // leg until those effects resolve; otherwise frontend mapping
                         // call can wait for an outcome this task has not read yet.
                         // Box the whole secondary forwarding state machine so it
-                        // does not enlarge the normal frontend driver's stack frame.
+                        // does not enlarge the normal frontend driver's stack frame;
+                        // it is only built when an outcome is actually in flight.
                         Box::pin(async {
-                            while context.schema_ddl_in_flight() || context.settings_in_flight() {
+                            loop {
                                 let backend = session.forward_backend();
                                 let drained = match connection_timeout {
                                     Some(duration) => tokio::time::timeout(duration, backend)
@@ -252,6 +254,11 @@ where
                                         return Err(error)
                                     }
                                     Err(error) => return Err(invalid_data(error)),
+                                }
+                                if !context.schema_ddl_in_flight()
+                                    && !context.settings_in_flight()?
+                                {
+                                    break;
                                 }
                             }
                             Ok(())
@@ -374,7 +381,7 @@ mod tests {
     use pg_proto::{CancellationRoute, InMemoryCancellationRegistryError};
 
     #[test]
-    fn review_r07_copy_input_resumes_frontend_while_outcomes_are_pending() {
+    fn copy_input_resumes_frontend_while_outcomes_are_pending() {
         let response = pg_proto::CopyResponse {
             overall_format: 0,
             column_formats: vec![0],

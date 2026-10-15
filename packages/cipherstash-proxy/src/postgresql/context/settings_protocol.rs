@@ -10,6 +10,13 @@ use std::{
     sync::Arc,
 };
 
+/// Why a prepared statement or portal no longer matches the effective settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsRefusal {
+    MappingChanged,
+    KeysetChanged,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveSettings {
     keyset: Option<KeysetIdentifier>,
@@ -22,6 +29,31 @@ impl EffectiveSettings {
             mapping_disabled: settings.unsafe_disable_mapping(),
         }
     }
+    fn refusal(&self, current: &Self, keyset_sensitive: bool) -> Option<SettingsRefusal> {
+        if self.mapping_disabled != current.mapping_disabled {
+            Some(SettingsRefusal::MappingChanged)
+        } else if keyset_sensitive && self.keyset != current.keyset {
+            Some(SettingsRefusal::KeysetChanged)
+        } else {
+            None
+        }
+    }
+}
+
+/// Projects a simple-query batch over a copy of the confirmed settings, yielding
+/// each statement, its settings command, and whether it may change the
+/// effective settings after the statements before it succeed.
+pub(super) fn project_settings_effects<'a>(
+    settings: &ConnectionSettings,
+    statements: &'a [Statement],
+) -> impl Iterator<Item = (&'a Statement, SettingsCommand, bool)> + 'a {
+    let mut projected = settings.clone();
+    statements.iter().map(move |statement| {
+        let command = SettingsCommand::from_statement(statement);
+        let changes = command.may_change_effective(&projected);
+        projected.command_succeeded(&command, command.success_tag());
+        (statement, command, changes)
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -156,7 +188,7 @@ impl SettingsProtocol {
         settings: EffectiveSettings,
         encrypted_values: bool,
         metadata: MetadataSnapshot,
-    ) -> bool {
+    ) -> Result<(), SettingsRefusal> {
         let previous = self.portals.remove(&portal);
         self.journal.insert(
             operation,
@@ -168,13 +200,15 @@ impl SettingsProtocol {
             },
         );
         let Some(prepared) = self.prepared.get(name).cloned() else {
-            return true;
+            return Ok(());
         };
-        if prepared.needs_mapping
-            && (prepared.settings.mapping_disabled != settings.mapping_disabled
-                || (prepared.literal_sensitive && prepared.settings.keyset != settings.keyset))
-        {
-            return false;
+        if prepared.needs_mapping {
+            if let Some(refusal) = prepared
+                .settings
+                .refusal(&settings, prepared.literal_sensitive)
+            {
+                return Err(refusal);
+            }
         }
         self.portals.insert(
             portal,
@@ -185,24 +219,25 @@ impl SettingsProtocol {
                 encrypted_values,
             },
         );
-        true
+        Ok(())
     }
     pub fn execute(
         &mut self,
         operation: OperationId,
         portal: &Name,
         connection: &ConnectionSettings,
-    ) -> Result<bool, ()> {
+    ) -> Result<bool, SettingsRefusal> {
         let settings = EffectiveSettings::new(connection);
         let Some(bound) = self.portals.get(portal) else {
             return Ok(false);
         };
-        if bound.prepared.needs_mapping
-            && (bound.settings.mapping_disabled != settings.mapping_disabled
-                || ((bound.encrypted_values || bound.prepared.literal_sensitive)
-                    && bound.settings.keyset != settings.keyset))
-        {
-            return Err(());
+        if bound.prepared.needs_mapping {
+            if let Some(refusal) = bound.settings.refusal(
+                &settings,
+                bound.encrypted_values || bound.prepared.literal_sensitive,
+            ) {
+                return Err(refusal);
+            }
         }
         let command = bound.prepared.command.clone();
         let barrier = command.may_change_effective(connection);
@@ -222,16 +257,13 @@ impl SettingsProtocol {
         statements: &[Statement],
         settings: &ConnectionSettings,
     ) -> bool {
-        let commands: VecDeque<_> = statements
-            .iter()
-            .map(SettingsCommand::from_statement)
-            .collect();
-        let mut projected = settings.clone();
         let mut barrier = false;
-        for command in &commands {
-            barrier |= command.may_change_effective(&projected);
-            projected.command_succeeded(command, command.success_tag());
-        }
+        let commands: VecDeque<_> = project_settings_effects(settings, statements)
+            .map(|(_, command, changes)| {
+                barrier |= changes;
+                command
+            })
+            .collect();
         self.pending.insert(
             operation,
             Pending {
@@ -300,6 +332,12 @@ impl SettingsProtocol {
         self.discarding_until_sync |= boundary.is_none();
         let skipped =
             |id: &OperationId| *id >= operation && boundary.is_none_or(|boundary| *id <= boundary);
+        // PostgreSQL applies a failed barrier's rollback (e.g. COMMIT in an
+        // aborted transaction) at ReadyForQuery; the next Sync must wait for it.
+        self.settings_since_boundary |= self
+            .pending
+            .iter()
+            .any(|(id, pending)| skipped(id) && pending.barrier);
         self.pending.retain(|id, pending| {
             if !skipped(id) {
                 return true;
@@ -462,7 +500,7 @@ impl SettingsProtocol {
 }
 
 #[cfg(test)]
-mod review_regressions {
+mod protocol_regressions {
     use super::*;
     use crate::postgresql::{parser::SqlParser, test_operation_id as operation_id};
     fn prepare(protocol: &mut SettingsProtocol, name: &Name) {
@@ -515,34 +553,40 @@ mod review_regressions {
         let original = named_prepare(&mut protocol, &name, "original");
         protocol.prepared_or_bound(original);
         let original_bind = operation_id();
-        assert!(protocol.bind(
-            original_bind,
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                original_bind,
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.prepared_or_bound(original_bind);
         let rejected = operation_id();
-        assert!(protocol.bind(
-            rejected,
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                rejected,
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.sync(operation_id());
         let later = operation_id();
-        assert!(protocol.bind(
-            later,
-            portal.clone(),
-            &name,
-            settings,
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                later,
+                portal.clone(),
+                &name,
+                settings,
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.failed(Some(rejected));
         assert_eq!(protocol.portals[&portal].operation, later);
         protocol.failed(Some(later));
@@ -579,33 +623,37 @@ mod review_regressions {
         let settings = EffectiveSettings::new(&ConnectionSettings::default());
         prepare(&mut protocol, &name);
         let old = operation_id();
-        protocol.bind(
-            old,
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default(),
-        );
+        protocol
+            .bind(
+                old,
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.prepared_or_bound(old);
         let sync = operation_id();
         protocol.sync(sync);
         let later = operation_id();
-        protocol.bind(
-            later,
-            portal.clone(),
-            &name,
-            settings,
-            false,
-            Default::default(),
-        );
+        protocol
+            .bind(
+                later,
+                portal.clone(),
+                &name,
+                settings,
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.ready(Some(sync), true);
         protocol.failed(Some(later));
         assert!(!protocol.portals.contains_key(&portal));
     }
 
     #[test]
-    fn review_r06_close_parse_bind_can_recover_before_replies() {
+    fn close_parse_bind_can_recover_before_replies() {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"statement");
         prepare(&mut protocol, &name);
@@ -630,58 +678,66 @@ mod review_regressions {
             &SqlParser::parse_statement("SELECT 3").unwrap(),
             EffectiveSettings::new(&ConnectionSettings::default()),
         );
-        assert!(protocol.bind(
-            operation_id(),
-            Name::new(),
-            &name,
-            EffectiveSettings::new(&ConnectionSettings::default()),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                operation_id(),
+                Name::new(),
+                &name,
+                EffectiveSettings::new(&ConnectionSettings::default()),
+                false,
+                Default::default(),
+            )
+            .unwrap();
     }
     #[test]
-    fn review_r06_transaction_end_expires_invalidated_portals() {
+    fn transaction_end_expires_invalidated_portals() {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"statement");
         let portal = Name::from_static(b"portal");
         let settings = EffectiveSettings::new(&ConnectionSettings::default());
         prepare(&mut protocol, &name);
         let first = operation_id();
-        assert!(protocol.bind(
-            first,
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                first,
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.prepared_or_bound(first);
         let rejected = operation_id();
-        assert!(protocol.bind(
-            rejected,
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                rejected,
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         protocol.failed(Some(rejected));
         protocol.ready(Some(operation_id()), true);
-        assert!(protocol.bind(
-            operation_id(),
-            portal.clone(),
-            &name,
-            settings.clone(),
-            false,
-            Default::default()
-        ));
+        protocol
+            .bind(
+                operation_id(),
+                portal.clone(),
+                &name,
+                settings.clone(),
+                false,
+                Default::default(),
+            )
+            .unwrap();
         assert_eq!(
             protocol.execute(operation_id(), &portal, &ConnectionSettings::default()),
             Ok(false)
         );
     }
     #[test]
-    fn review_r09_plain_transaction_control_does_not_require_drain() {
+    fn plain_transaction_control_does_not_require_drain() {
         for sql in ["BEGIN", "SAVEPOINT s", "RELEASE SAVEPOINT s"] {
             let mut protocol = SettingsProtocol::default();
             let statements = SqlParser::parse_statements(sql).unwrap();
@@ -693,7 +749,7 @@ mod review_regressions {
     }
 
     #[test]
-    fn review_r3_readiness_ends_discard_after_failure_without_recorded_boundary() {
+    fn readiness_ends_discard_after_failure_without_recorded_boundary() {
         let mut protocol = SettingsProtocol::default();
         // A FunctionCall or configuration-disabled Query records no boundary;
         // PostgreSQL never discards after it, and ReadyForQuery proves readiness.
@@ -701,5 +757,181 @@ mod review_regressions {
         protocol.failed(Some(failed));
         protocol.ready(Some(failed), true);
         assert!(!protocol.discarding());
+    }
+
+    #[test]
+    fn execute_refuses_encrypted_portal_after_keyset_changes() {
+        let mut protocol = SettingsProtocol::default();
+        let name = Name::from_static(b"insert");
+        let parse = operation_id();
+        protocol.prepare(
+            parse,
+            name.clone(),
+            &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ($1)").unwrap(),
+            EffectiveSettings::new(&ConnectionSettings::default()),
+        );
+        protocol.prepared_or_bound(parse);
+        let mut tenant_b = ConnectionSettings::default();
+        tenant_b.execution_succeeded(
+            &SqlParser::parse_statement("SET CIPHERSTASH.KEYSET_NAME = 'tenant-b'").unwrap(),
+            "SET",
+        );
+        for (portal, encrypted_values, expected) in [
+            (
+                Name::from_static(b"encrypted"),
+                true,
+                Err(SettingsRefusal::KeysetChanged),
+            ),
+            (Name::from_static(b"plain"), false, Ok(false)),
+        ] {
+            protocol
+                .bind(
+                    operation_id(),
+                    portal.clone(),
+                    &name,
+                    EffectiveSettings::new(&ConnectionSettings::default()),
+                    encrypted_values,
+                    Default::default(),
+                )
+                .unwrap();
+            assert_eq!(
+                protocol.execute(operation_id(), &portal, &tenant_b),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn bind_refuses_literal_sensitive_statement_after_keyset_changes() {
+        let mut protocol = SettingsProtocol::default();
+        let name = Name::from_static(b"insert_literal");
+        let parse = operation_id();
+        protocol.prepare(
+            parse,
+            name.clone(),
+            &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ('literal')")
+                .unwrap(),
+            EffectiveSettings::new(&ConnectionSettings::default()),
+        );
+        protocol.capture_literals(&name, true);
+        protocol.prepared_or_bound(parse);
+        let mut tenant_b = ConnectionSettings::default();
+        tenant_b.execution_succeeded(
+            &SqlParser::parse_statement("SET CIPHERSTASH.KEYSET_NAME = 'tenant-b'").unwrap(),
+            "SET",
+        );
+        let bind = |protocol: &mut SettingsProtocol, settings: &ConnectionSettings| {
+            protocol.bind(
+                operation_id(),
+                Name::new(),
+                &name,
+                EffectiveSettings::new(settings),
+                false,
+                Default::default(),
+            )
+        };
+        assert_eq!(
+            bind(&mut protocol, &tenant_b),
+            Err(SettingsRefusal::KeysetChanged)
+        );
+        assert!(!protocol.has_portal(&Name::new()));
+        assert_eq!(bind(&mut protocol, &ConnectionSettings::default()), Ok(()));
+    }
+
+    #[test]
+    fn sync_keeps_successful_settings_change_in_flight_until_ready() {
+        let mut protocol = SettingsProtocol::default();
+        let name = Name::from_static(b"keyset");
+        let parse = operation_id();
+        protocol.prepare(
+            parse,
+            name.clone(),
+            &SqlParser::parse_statement("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
+            EffectiveSettings::new(&ConnectionSettings::default()),
+        );
+        protocol.prepared_or_bound(parse);
+        let bind = operation_id();
+        protocol
+            .bind(
+                bind,
+                name.clone(),
+                &name,
+                EffectiveSettings::new(&ConnectionSettings::default()),
+                false,
+                Default::default(),
+            )
+            .unwrap();
+        protocol.prepared_or_bound(bind);
+        let execute = operation_id();
+        assert_eq!(
+            protocol.execute(execute, &name, &ConnectionSettings::default()),
+            Ok(true)
+        );
+        assert!(protocol.in_flight());
+        assert!(protocol.succeeded(execute).is_some());
+        let sync = operation_id();
+        protocol.sync(sync);
+        assert!(protocol.in_flight());
+        protocol.ready(Some(sync), true);
+        assert!(!protocol.in_flight());
+    }
+
+    #[test]
+    fn failed_simple_query_settings_change_stays_in_flight_until_ready() {
+        let mut protocol = SettingsProtocol::default();
+        let query = operation_id();
+        assert!(protocol.simple_query(
+            query,
+            &SqlParser::parse_statements("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
+            &ConnectionSettings::default(),
+        ));
+        protocol.failed(Some(query));
+        assert!(protocol.in_flight());
+        protocol.ready(Some(query), true);
+        assert!(!protocol.in_flight());
+    }
+
+    #[test]
+    fn failed_extended_commit_keeps_rolled_back_keyset_in_flight_until_ready() {
+        let parse_sql = |sql| SqlParser::parse_statement(sql).unwrap();
+        // BEGIN and the keyset change ran in earlier, already-ready batches.
+        let mut connection = ConnectionSettings::default();
+        connection.execution_succeeded(&parse_sql("BEGIN"), "BEGIN");
+        connection.execution_succeeded(&parse_sql("SET CIPHERSTASH.KEYSET_NAME = 'other'"), "SET");
+        let mut protocol = SettingsProtocol::default();
+        let name = Name::from_static(b"commit");
+        let parse = operation_id();
+        protocol.prepare(
+            parse,
+            name.clone(),
+            &parse_sql("COMMIT"),
+            EffectiveSettings::new(&connection),
+        );
+        protocol.prepared_or_bound(parse);
+        let bind = operation_id();
+        protocol
+            .bind(
+                bind,
+                Name::new(),
+                &name,
+                EffectiveSettings::new(&connection),
+                false,
+                Default::default(),
+            )
+            .unwrap();
+        protocol.prepared_or_bound(bind);
+        // Pipelined: Execute(COMMIT), Sync, Bind+Execute(encrypted INSERT).
+        let commit = operation_id();
+        assert_eq!(
+            protocol.execute(commit, &Name::new(), &connection),
+            Ok(true)
+        );
+        // COMMIT's ErrorResponse is drained before the client's Sync arrives.
+        protocol.failed(Some(commit));
+        connection.execution_failed();
+        protocol.sync(operation_id());
+        // PostgreSQL rolled the keyset back, but Context restores it only at
+        // ReadyForQuery: the following Bind must wait for readiness.
+        assert!(protocol.in_flight());
     }
 }

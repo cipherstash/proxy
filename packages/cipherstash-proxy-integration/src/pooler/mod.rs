@@ -317,9 +317,11 @@ where
     }
 }
 
-/// Why a pooler cannot sit behind Proxy.
+/// Why a pooler cannot sit behind Proxy. The probe connects to the pooler
+/// directly; Proxy's upstream connections are inferred to fail because Proxy
+/// requests protocol 3.2 at startup.
 const REJECTS_PROTOCOL_3_2: &str =
-    "the pooler rejects Proxy's protocol 3.2 startup packet, so Proxy cannot connect to it";
+    "the pooler rejects a protocol 3.2 startup packet, which Proxy sends upstream, so Proxy's upstream connections through it fail (CRUD not run)";
 /// Why a named statement fails when its Bind lands on another server connection.
 const NO_PREPARED_STATEMENT_SUPPORT: &str =
     "the pooler does not track prepared statements, so Bind/Execute reach a server connection that never saw the Parse";

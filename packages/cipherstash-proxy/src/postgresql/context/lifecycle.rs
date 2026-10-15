@@ -433,7 +433,18 @@ impl<S: EncryptionService> Context<S> {
     }
 
     pub fn close_acknowledged(&self, operation: OperationId) -> Result<(), Error> {
-        self.settings_prepared_or_bound(operation)
+        let finished = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| ContextError::ProtocolStateUnavailable)?;
+            let metadata = state.settings_protocol.prepared_or_bound(operation);
+            state.take_unreferenced_metrics(metadata.iter().flat_map(|metadata| metadata.metrics()))
+        };
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
+        Ok(())
     }
 
     /// Called after buffered rows have been decrypted with their old settings.

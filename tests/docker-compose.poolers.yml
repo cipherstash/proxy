@@ -74,7 +74,7 @@ services:
     <<: *proxy
     container_name: proxy-mt
     ports:
-      - 6442:6432
+      - "127.0.0.1:6442:6432"
     environment:
       <<: *proxy-environment
       CS_DEFAULT_KEYSET_ID: ""
@@ -86,9 +86,10 @@ services:
       context: ./poolers/pgbouncer
       args:
         ALPINE_VERSION: "3.18"
+        PGBOUNCER_VERSION: "1.19.0"
     container_name: pgbouncer-1-19
     ports:
-      - 6461:6432
+      - "127.0.0.1:6461:6432"
 
   pgbouncer-1-24:
     <<: *pgbouncer
@@ -97,11 +98,12 @@ services:
       context: ./poolers/pgbouncer
       args:
         ALPINE_VERSION: "3.22"
+        PGBOUNCER_VERSION: "1.24.0"
     container_name: pgbouncer-1-24
     environment:
       PGBOUNCER_MAX_PREPARED_STATEMENTS: "0"
     ports:
-      - 6462:6432
+      - "127.0.0.1:6462:6432"
 
   pgbouncer-1-24-ps:
     <<: *pgbouncer
@@ -110,11 +112,12 @@ services:
       context: ./poolers/pgbouncer
       args:
         ALPINE_VERSION: "3.22"
+        PGBOUNCER_VERSION: "1.24.0"
     container_name: pgbouncer-1-24-ps
     environment:
       PGBOUNCER_MAX_PREPARED_STATEMENTS: "200"
     ports:
-      - 6463:6432
+      - "127.0.0.1:6463:6432"
 
   pgcat-1-2:
     <<: *pgcat
@@ -122,7 +125,7 @@ services:
     environment:
       PGCAT_PREPARED_STATEMENTS_CACHE_SIZE: "0"
     ports:
-      - 6464:6432
+      - "127.0.0.1:6464:6432"
 
   pgcat-1-2-ps:
     <<: *pgcat
@@ -130,7 +133,7 @@ services:
     environment:
       PGCAT_PREPARED_STATEMENTS_CACHE_SIZE: "500"
     ports:
-      - 6465:6432
+      - "127.0.0.1:6465:6432"
 
   # app -> Proxy -> pooler -> PostgreSQL.
   # Proxy forwards the client's startup `database` upstream unchanged, so a
@@ -141,7 +144,7 @@ services:
     container_name: proxy-via-pgbouncer-1-19
     depends_on: [pgbouncer-1-19]
     ports:
-      - 6451:6432
+      - "127.0.0.1:6451:6432"
     environment:
       <<: *proxy-environment
       CS_DATABASE__HOST: pgbouncer-1-19
@@ -153,7 +156,7 @@ services:
     container_name: proxy-via-pgbouncer-1-24
     depends_on: [pgbouncer-1-24]
     ports:
-      - 6452:6432
+      - "127.0.0.1:6452:6432"
     environment:
       <<: *proxy-environment
       CS_DATABASE__HOST: pgbouncer-1-24
@@ -165,7 +168,7 @@ services:
     container_name: proxy-via-pgbouncer-1-24-ps
     depends_on: [pgbouncer-1-24-ps]
     ports:
-      - 6453:6432
+      - "127.0.0.1:6453:6432"
     environment:
       <<: *proxy-environment
       CS_DATABASE__HOST: pgbouncer-1-24-ps
@@ -177,7 +180,7 @@ services:
     container_name: proxy-via-pgcat-1-2
     depends_on: [pgcat-1-2]
     ports:
-      - 6454:6432
+      - "127.0.0.1:6454:6432"
     environment:
       <<: *proxy-environment
       CS_DATABASE__HOST: pgcat-1-2
@@ -189,7 +192,7 @@ services:
     container_name: proxy-via-pgcat-1-2-ps
     depends_on: [pgcat-1-2-ps]
     ports:
-      - 6455:6432
+      - "127.0.0.1:6455:6432"
     environment:
       <<: *proxy-environment
       CS_DATABASE__HOST: pgcat-1-2-ps

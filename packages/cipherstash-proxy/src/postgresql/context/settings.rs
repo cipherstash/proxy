@@ -16,7 +16,7 @@ use crate::error::{EncryptError, Error};
 use crate::proxy::schema::postgres_identifier;
 use cipherstash_client::IdentifiedBy;
 use sqltk::parser::ast::ContextModifier;
-use sqltk::parser::ast::{DiscardObject, Expr, Set, Statement, Value};
+use sqltk::parser::ast::{DiscardObject, Expr, ObjectName, ObjectNamePart, Set, Statement, Value};
 
 /// A validated change, recorded during preparation and applied after execution.
 #[derive(Clone, Debug)]
@@ -48,35 +48,41 @@ impl SettingChange {
         else {
             return Ok(None);
         };
-        let variable = variable.to_string().to_ascii_uppercase();
         // RESET is normalized to SET ... TO DEFAULT by SqlParser. DEFAULT
         // follows the same scope as a value, including a temporary local reset.
         let scope = SettingScope::from(*scope);
         let is_default = matches!(values.as_slice(), [Expr::Identifier(value)]
             if value.quote_style.is_none() && value.value.eq_ignore_ascii_case("DEFAULT"));
-        if is_default {
-            return Ok(match variable.as_str() {
-                "ALL" if scope == SettingScope::Session => Some(Self::ResetAll),
-                "CIPHERSTASH.KEYSET_ID" | "CIPHERSTASH.KEYSET_NAME" => {
-                    Some(Self::ResetKeyset(scope))
-                }
-                "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" => Some(Self::ResetMapping(scope)),
-                _ => None,
-            });
+        // Only the unquoted ALL keyword, as produced by RESET ALL, resets every
+        // setting. A quoted "all" names an ordinary parameter.
+        let is_all_keyword = matches!(variable.0.as_slice(), [ObjectNamePart::Identifier(name)]
+            if name.quote_style.is_none() && name.value.eq_ignore_ascii_case("ALL"));
+        if is_all_keyword && is_default && scope == SettingScope::Session {
+            return Ok(Some(Self::ResetAll));
         }
-        if variable == "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" {
-            return Ok(match values.first() {
-                Some(Expr::Value(value)) if matches!(value.value, Value::Boolean(_)) => {
-                    let Value::Boolean(value) = value.value else {
-                        unreachable!()
-                    };
-                    Some(Self::Mapping(scope, value))
-                }
-                _ => None,
-            });
-        }
-        if variable != "CIPHERSTASH.KEYSET_ID" && variable != "CIPHERSTASH.KEYSET_NAME" {
-            return Ok(None);
+        let variable = setting_name(variable);
+        match variable.as_str() {
+            "CIPHERSTASH.KEYSET_ID" | "CIPHERSTASH.KEYSET_NAME" if is_default => {
+                return Ok(Some(Self::ResetKeyset(scope)))
+            }
+            "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" if is_default => {
+                return Ok(Some(Self::ResetMapping(scope)))
+            }
+            "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" => {
+                let [value] = values.as_slice() else {
+                    return Err(EncryptError::InvalidMappingSettingValue.into());
+                };
+                return parse_bool(value)
+                    .map(|disabled| Some(Self::Mapping(scope, disabled)))
+                    .ok_or_else(|| EncryptError::InvalidMappingSettingValue.into());
+            }
+            "CIPHERSTASH.KEYSET_ID" | "CIPHERSTASH.KEYSET_NAME" => (),
+            // Proxy owns the cipherstash namespace, so a name it cannot
+            // interpret is rejected rather than forwarded and ignored.
+            name if name.starts_with("CIPHERSTASH.") => {
+                return Err(EncryptError::UnknownCipherStashSetting { setting: variable }.into())
+            }
+            _ => return Ok(None),
         }
         let value = match values.first() {
             Some(Expr::Value(value)) => match &value.value {
@@ -103,6 +109,46 @@ impl SettingChange {
             IdentifiedBy::Name(value.into())
         };
         Ok(Some(Self::Keyset(scope, KeysetIdentifier(identifier))))
+    }
+}
+
+/// The configuration parameter name as PostgreSQL resolves it. Quoting only
+/// groups characters into one part, and parameter names compare
+/// case-insensitively, so `"cipherstash.keyset_name"`,
+/// `cipherstash."keyset_name"` and `CIPHERSTASH.KEYSET_NAME` are the same name.
+fn setting_name(variable: &ObjectName) -> String {
+    variable
+        .0
+        .iter()
+        .map(|part| match part {
+            ObjectNamePart::Identifier(ident) => ident.value.to_ascii_uppercase(),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Interprets a value as PostgreSQL's `parse_bool` does: `true`, `false`,
+/// `yes`, `no` and their unambiguous prefixes, `on`, `off` (at least two
+/// characters), `1` and `0`, ignoring case and surrounding whitespace.
+fn parse_bool(value: &Expr) -> Option<bool> {
+    let value = match value {
+        Expr::Value(value) => match &value.value {
+            Value::Boolean(value) => return Some(*value),
+            Value::SingleQuotedString(value) | Value::DoubleQuotedString(value) => value.clone(),
+            Value::Number(value, _) => value.to_string(),
+            _ => return None,
+        },
+        Expr::Identifier(value) => value.value.clone(),
+        _ => return None,
+    };
+    let value = value.trim().to_ascii_lowercase();
+    let is_prefix = |word: &str, min: usize| value.len() >= min && word.starts_with(&value);
+    if is_prefix("true", 1) || is_prefix("yes", 1) || is_prefix("on", 2) || value == "1" {
+        Some(true)
+    } else if is_prefix("false", 1) || is_prefix("no", 1) || is_prefix("off", 2) || value == "0" {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -262,6 +308,7 @@ struct SettingsSnapshot {
 
 impl ConnectionSettings {
     /// Applies only a command confirmed successful by PostgreSQL.
+    #[cfg(test)]
     pub fn execution_succeeded(&mut self, statement: &Statement, command_tag: &str) {
         self.command_succeeded(&SettingsCommand::from_statement(statement), command_tag);
     }
@@ -370,6 +417,7 @@ impl ConnectionSettings {
     }
 
     /// True when no value has been set.
+    #[cfg(test)]
     pub fn is_default(&self) -> bool {
         self.keyset().is_none() && !self.unsafe_disable_mapping()
     }
@@ -387,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn review_r04_known_keyset_setting_never_silently_ignores_value() {
+    fn known_keyset_setting_never_silently_ignores_value() {
         for sql in [
             "SET CIPHERSTASH.KEYSET_ID = unquoted",
             "SET CIPHERSTASH.KEYSET_NAME = true",
@@ -819,16 +867,170 @@ mod tests {
         ] {
             assert!(SettingChange::parse(&parse(sql)).is_err(), "{sql}");
         }
-        for sql in [
-            "SET CIPHERSTASH.UNKNOWN = 'value'",
-            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = 1",
-            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = '1'",
-            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = t",
-            "DISCARD PLANS",
-            "DISCARD TEMP",
-        ] {
+        for sql in ["DISCARD PLANS", "DISCARD TEMP"] {
             assert!(
                 SettingChange::parse(&parse(sql)).unwrap().is_none(),
+                "{sql}"
+            );
+        }
+    }
+
+    fn parse_one(sql: &str) -> Result<Option<SettingChange>, Error> {
+        let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
+        SettingChange::parse(&statements[0])
+    }
+
+    #[test]
+    fn quoted_cipherstash_setting_names_are_normalised_like_postgres() {
+        let tenant = || KeysetIdentifier(IdentifiedBy::Name("tenant_b".to_owned().into()));
+        for sql in [
+            "SET cipherstash.\"keyset_name\" = 'tenant_b'",
+            "SET \"cipherstash\".\"keyset_name\" = 'tenant_b'",
+            "SET \"cipherstash\".keyset_name = 'tenant_b'",
+            "SET \"CipherStash\".\"KEYSET_NAME\" = 'tenant_b'",
+            "SET \"cipherstash.keyset_name\" = 'tenant_b'",
+        ] {
+            let mut settings = ConnectionSettings::default();
+            succeeds(&mut settings, sql, "SET");
+            assert_eq!(settings.keyset(), Some(tenant()), "{sql}");
+        }
+        for sql in [
+            "RESET \"cipherstash.keyset_name\"",
+            "RESET cipherstash.\"keyset_name\"",
+            "SET \"cipherstash\".\"keyset_id\" TO DEFAULT",
+        ] {
+            let mut settings = ConnectionSettings::default();
+            succeeds(
+                &mut settings,
+                "SET CIPHERSTASH.KEYSET_NAME = 'tenant_b'",
+                "SET",
+            );
+            succeeds(&mut settings, sql, "RESET");
+            assert_eq!(settings.keyset(), None, "{sql}");
+        }
+        for sql in [
+            "SET cipherstash.\"unsafe_disable_mapping\" = true",
+            "SET \"cipherstash.unsafe_disable_mapping\" = true",
+        ] {
+            let mut settings = ConnectionSettings::default();
+            succeeds(&mut settings, sql, "SET");
+            assert!(settings.unsafe_disable_mapping(), "{sql}");
+        }
+        let mut settings = ConnectionSettings::default();
+        succeeds(
+            &mut settings,
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            "SET",
+        );
+        succeeds(
+            &mut settings,
+            "RESET \"cipherstash.unsafe_disable_mapping\"",
+            "RESET",
+        );
+        assert!(!settings.unsafe_disable_mapping());
+    }
+
+    #[test]
+    fn quoted_all_is_an_ordinary_parameter_not_reset_all() {
+        for sql in ["SET \"all\" TO DEFAULT", "RESET \"ALL\""] {
+            assert!(parse_one(sql).unwrap().is_none(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn uninterpretable_cipherstash_setting_names_are_rejected() {
+        for sql in [
+            "SET CIPHERSTASH.UNKNOWN = 'value'",
+            "SET cipherstash.\"unknown\" = 'value'",
+            "SET \"cipherstash.unknown\" = 'value'",
+        ] {
+            assert!(parse_one(sql).is_err(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn unsafe_disable_mapping_accepts_postgres_boolean_spellings() {
+        for (value, expected) in [
+            ("true", true),
+            ("false", false),
+            ("on", true),
+            ("off", false),
+            ("'off'", false),
+            ("'false'", false),
+            ("'true'", true),
+            ("yes", true),
+            ("no", false),
+            ("'YES'", true),
+            ("1", true),
+            ("0", false),
+            ("'1'", true),
+            ("'0'", false),
+            ("t", true),
+            ("f", false),
+            ("tr", true),
+            ("fa", false),
+            ("y", true),
+            ("n", false),
+            ("'OFF'", false),
+            ("'of'", false),
+        ] {
+            let sql = format!("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = {value}");
+            let change = parse_one(&sql).unwrap();
+            assert!(
+                matches!(change, Some(SettingChange::Mapping(SettingScope::Session, disabled)) if disabled == expected),
+                "{sql}: {change:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsafe_disable_mapping_rejects_values_postgres_does_not_parse_as_boolean() {
+        for value in ["'o'", "2", "'maybe'", "maybe", "'tru e'", "true, false"] {
+            let sql = format!("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = {value}");
+            assert!(parse_one(&sql).is_err(), "{sql}");
+        }
+    }
+
+    #[test]
+    fn mapping_disable_cannot_be_kept_by_a_non_boolean_literal_off() {
+        let mut settings = ConnectionSettings::default();
+        succeeds(
+            &mut settings,
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            "SET",
+        );
+        succeeds(
+            &mut settings,
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = off",
+            "SET",
+        );
+        assert!(!settings.unsafe_disable_mapping());
+    }
+
+    #[test]
+    fn commit_may_restore_an_uncommitted_session_setting() {
+        let mut settings = ConnectionSettings::default();
+        succeeds(&mut settings, "BEGIN", "BEGIN");
+        succeeds(
+            &mut settings,
+            "SET CIPHERSTASH.KEYSET_NAME = 'in-transaction'",
+            "SET",
+        );
+        let commit = crate::postgresql::parser::SqlParser::parse_statement("COMMIT").unwrap();
+        assert!(SettingsCommand::from_statement(&commit).may_change_effective(&settings));
+    }
+
+    #[test]
+    fn keyset_setting_with_more_than_one_value_is_rejected() {
+        for sql in [
+            "SET CIPHERSTASH.KEYSET_NAME = 'first', 'second'",
+            "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590', '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+        ] {
+            assert!(
+                matches!(
+                    parse_one(sql),
+                    Err(Error::Encrypt(EncryptError::InvalidKeysetSettingValue { .. }))
+                ),
                 "{sql}"
             );
         }
