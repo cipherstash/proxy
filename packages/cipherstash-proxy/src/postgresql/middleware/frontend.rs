@@ -139,6 +139,8 @@ impl<S: EncryptionService> Frontend<S> {
                 FrontendMessage::Parse(parse) => {
                     self.context.unmapped_parse(operation, &parse.statement)?
                 }
+                FrontendMessage::FunctionCall(_) => self.context.function_call(operation)?,
+                FrontendMessage::Sync => self.context.unmapped_sync(operation)?,
                 _ => {}
             }
             return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
@@ -257,6 +259,9 @@ impl<S: EncryptionService> Frontend<S> {
             }
             FrontendMessage::Close(close) => {
                 self.context.close(operation, &close)?;
+            }
+            FrontendMessage::FunctionCall(_) => {
+                self.context.function_call(operation)?;
             }
             _ => {
                 debug!(target: PROTOCOL,
@@ -1492,11 +1497,13 @@ impl<S: EncryptionService> Frontend<S> {
     fn extended_parse_error(
         &self,
         mut parse: Parse,
-        response: &pg_proto::DiagnosticResponse,
+        _response: &pg_proto::DiagnosticResponse,
     ) -> FrontendMessage {
-        let marker = self.extended_error_marker(response);
-        parse.query =
-            bytes::Bytes::from(format!("SELECT NULL::\"{}\"", marker.replace('"', "\"\"")));
+        // Backend replaces PostgreSQL's error with the refusal's diagnostic.
+        // A predictable type name could refer to a type the client created,
+        // turning the intended refusal into a successful Parse.
+        let name = String::from_utf8_lossy(&Self::refusal_name()).into_owned();
+        parse.query = bytes::Bytes::from(format!("SELECT NULL::\"{name}\""));
         parse.parameter_types.clear();
         FrontendMessage::Parse(parse)
     }
@@ -1516,27 +1523,6 @@ impl<S: EncryptionService> Frontend<S> {
         // PostgreSQL named objects use NAMEDATALEN-byte hash keys. Put all
         // entropy inside the first 63 bytes, regardless of diagnostic length.
         bytes::Bytes::from(format!("__cipherstash_{}", uuid::Uuid::new_v4()))
-    }
-
-    fn extended_error_marker(&self, response: &pg_proto::DiagnosticResponse) -> String {
-        let code = response
-            .fields
-            .iter()
-            .find(|field| field.code == b'C')
-            .map(|field| String::from_utf8_lossy(&field.value))
-            .unwrap_or_default();
-        let message = response
-            .fields
-            .iter()
-            .find(|field| field.code == b'M')
-            .map(|field| String::from_utf8_lossy(&field.value))
-            .unwrap_or_default();
-        let message = message
-            .chars()
-            .filter(|character| character.is_ascii_graphic() || *character == ' ')
-            .take(40)
-            .collect::<String>();
-        format!("__cipherstash_proxy_error_{code}_{message}")
     }
 }
 
@@ -3014,6 +3000,245 @@ mod tests {
             context.get_execute(operation),
             Err(Error::Context(crate::error::ContextError::UnknownOperation))
         ));
+    }
+
+    #[tokio::test]
+    async fn review_r1_mapping_disabled_simple_query_error_does_not_suppress_next_query() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        let (mut frontend, context) = frontend_with_config(config);
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let failed = operation_id();
+
+        frontend
+            .intercept(
+                failed,
+                FrontendMessage::Query(bytes::Bytes::from_static(b"SELECT 1/0")),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(failed),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "division by zero".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(failed),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(bytes::Bytes::from_static(b"SELECT 1")),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                output,
+                pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
+    }
+
+    #[test]
+    fn review_r2_parse_refusal_names_differ_within_postgres_lookup_limit() {
+        let frontend = frontend();
+        let response = frontend.error_to_response(MappingError::PreparedSettingsChanged.into());
+        let parse = Parse {
+            statement: bytes::Bytes::new(),
+            query: bytes::Bytes::from_static(b"SELECT 1"),
+            parameter_types: vec![],
+        };
+        let refused_type = |message: FrontendMessage| {
+            let FrontendMessage::Parse(parse) = message else {
+                unreachable!()
+            };
+            let query = String::from_utf8(parse.query.to_vec()).unwrap();
+            let name = query
+                .split_once('"')
+                .map(|(_, rest)| rest.trim_end_matches('"').replace("\"\"", "\""))
+                .unwrap();
+            name.as_bytes()[..name.len().min(63)].to_vec()
+        };
+        let first = refused_type(frontend.extended_parse_error(parse.clone(), &response));
+        let second = refused_type(frontend.extended_parse_error(parse, &response));
+        assert_ne!(first, second);
+    }
+
+    /// Drives one failed simple-protocol request through Frontend and Backend
+    /// and returns how the next Query is handled.
+    async fn next_query_after_failed_request(
+        config: TandemConfig,
+        request: Vec<FrontendMessage>,
+        copy_in: bool,
+    ) -> pg_proto::FrontendMiddlewareOutput {
+        let (mut frontend, context) = frontend_with_config(config);
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let failed = operation_id();
+        let mut request = request.into_iter();
+        frontend
+            .intercept(failed, request.next().unwrap())
+            .await
+            .unwrap();
+        if copy_in {
+            backend
+                .intercept(
+                    Some(failed),
+                    pg_proto::BackendMessage::CopyInResponse(pg_proto::CopyResponse {
+                        overall_format: 0,
+                        column_formats: vec![],
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+        for message in request {
+            frontend.intercept(operation_id(), message).await.unwrap();
+        }
+        let result = backend
+            .intercept(
+                Some(failed),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement("failed".to_owned()),
+                ),
+            )
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+        let result = backend
+            .intercept(
+                Some(failed),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(bytes::Bytes::from_static(b"SELECT 1")),
+            )
+            .await
+            .unwrap()
+    }
+
+    fn function_call() -> FrontendMessage {
+        FrontendMessage::FunctionCall(pg_proto::FunctionCall {
+            function_oid: 952,
+            argument_formats: vec![],
+            arguments: vec![],
+            result_format: 0,
+        })
+    }
+
+    #[tokio::test]
+    async fn review_r11_failed_function_call_keeps_the_connection_usable() {
+        let output = next_query_after_failed_request(
+            TandemConfig::for_testing(),
+            vec![function_call()],
+            false,
+        )
+        .await;
+        assert!(
+            matches!(
+                output,
+                pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_r11_failed_function_call_with_mapping_disabled_keeps_the_connection_usable() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        let output = next_query_after_failed_request(config, vec![function_call()], false).await;
+        assert!(
+            matches!(
+                output,
+                pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mapping_disabled_extended_error_after_sync_does_not_suppress_pipelined_query() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        let (mut frontend, context) = frontend_with_config(config);
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let failed = operation_id();
+
+        frontend
+            .intercept(
+                failed,
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: bytes::Bytes::new(),
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        frontend
+            .intercept(operation_id(), FrontendMessage::Sync)
+            .await
+            .unwrap();
+        let result = backend
+            .intercept(
+                Some(failed),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement("failed".to_owned()),
+                ),
+            )
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+
+        // The client pipelined this Query after Sync, before the error arrived.
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(bytes::Bytes::from_static(b"SELECT 1")),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                output,
+                pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn simple_copy_fail_error_belongs_to_its_query() {
+        let output = next_query_after_failed_request(
+            TandemConfig::for_testing(),
+            vec![
+                FrontendMessage::Query(bytes::Bytes::from_static(b"COPY t FROM STDIN")),
+                FrontendMessage::CopyFail(bytes::Bytes::from_static(b"cancelled")),
+            ],
+            true,
+        )
+        .await;
+        assert!(
+            matches!(
+                output,
+                pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
     }
 
     #[tokio::test]

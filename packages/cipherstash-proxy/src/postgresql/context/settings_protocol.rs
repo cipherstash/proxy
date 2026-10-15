@@ -283,9 +283,14 @@ impl SettingsProtocol {
             .remove(&operation)
             .map(|mutation| mutation.metadata)
     }
-    pub(super) fn failed(&mut self, operation: Option<OperationId>) -> Vec<RestoreMetadata> {
+    /// Rolls back the failed operation's skipped mutations. Returns the restored
+    /// metadata and the metrics scopes whose only journal reference was dropped.
+    pub(super) fn failed(
+        &mut self,
+        operation: Option<OperationId>,
+    ) -> (Vec<RestoreMetadata>, Vec<SessionId>) {
         let Some(operation) = operation else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
         let boundary = self
             .boundaries
@@ -314,6 +319,7 @@ impl SettingsProtocol {
             .rev()
             .collect();
         let mut restored = Vec::new();
+        let mut released = Vec::new();
         for id in mutations {
             let Mutation {
                 name,
@@ -331,7 +337,7 @@ impl SettingsProtocol {
                 } else {
                     Previous::Portal(None)
                 };
-                metadata = MetadataSnapshot::default();
+                released.extend(std::mem::take(&mut metadata).metrics());
             }
             // Later pipelined batches may have already replaced this name.
             // Rebase their rollback snapshot instead of clobbering the live object.
@@ -344,7 +350,7 @@ impl SettingsProtocol {
                 })
             {
                 later.previous = previous;
-                later.metadata = metadata;
+                released.extend(std::mem::replace(&mut later.metadata, metadata).metrics());
                 continue;
             }
             match previous {
@@ -365,16 +371,13 @@ impl SettingsProtocol {
                     }
                 }
             }
-            if !retain_previous {
-                metadata = MetadataSnapshot::default();
-            }
             restored.push(RestoreMetadata {
                 name,
                 statement,
                 metadata,
             });
         }
-        restored
+        (restored, released)
     }
     pub fn discarding(&self) -> bool {
         self.discarding_until_sync
@@ -399,6 +402,8 @@ impl SettingsProtocol {
     pub fn ready(&mut self, operation: Option<OperationId>, idle: bool) -> Vec<SessionId> {
         let mut retired_metrics = Vec::new();
         self.settings_since_boundary = false;
+        // PostgreSQL only reports readiness once it has stopped discarding.
+        self.discarding_until_sync = false;
         if let Some(operation) = operation {
             self.pending.retain(|id, _| *id > operation);
             self.boundaries.retain(|id| *id > operation);
@@ -453,9 +458,6 @@ impl SettingsProtocol {
                 close: true,
             },
         );
-    }
-    pub(super) fn closed(&mut self, operation: OperationId) -> Option<MetadataSnapshot> {
-        self.prepared_or_bound(operation)
     }
 }
 
@@ -688,5 +690,16 @@ mod review_regressions {
                 "{sql}"
             );
         }
+    }
+
+    #[test]
+    fn review_r3_readiness_ends_discard_after_failure_without_recorded_boundary() {
+        let mut protocol = SettingsProtocol::default();
+        // A FunctionCall or configuration-disabled Query records no boundary;
+        // PostgreSQL never discards after it, and ReadyForQuery proves readiness.
+        let failed = operation_id();
+        protocol.failed(Some(failed));
+        protocol.ready(Some(failed), true);
+        assert!(!protocol.discarding());
     }
 }

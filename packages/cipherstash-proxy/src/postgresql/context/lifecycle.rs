@@ -58,7 +58,34 @@ impl<S: EncryptionService> Context<S> {
     pub fn unmapped_query(&mut self, operation: OperationId) -> Result<(), Error> {
         let metrics = self.start_metrics_scope()?;
         self.add_portal(operation, Name::new(), Portal::passthrough(Some(metrics)))?;
-        self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))
+        self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))?;
+        self.readiness_boundary(operation)
+    }
+
+    /// PostgreSQL ends extended-protocol error discard at Sync. Correlate it
+    /// even when mapping is disabled, so a failure before it does not discard
+    /// the client's following batch.
+    pub fn unmapped_sync(&self, operation: OperationId) -> Result<(), Error> {
+        self.settings_protocol_boundary(operation)
+    }
+
+    /// FunctionCall is a simple-protocol request: PostgreSQL answers it with
+    /// FunctionCallResponse or ErrorResponse, then ReadyForQuery, and never
+    /// discards later messages after its failure.
+    pub fn function_call(&self, operation: OperationId) -> Result<(), Error> {
+        self.readiness_boundary(operation)
+    }
+
+    /// Registers a simple-protocol request that PostgreSQL ends with
+    /// ReadyForQuery, so its outcome correlates and its failure is bounded.
+    fn readiness_boundary(&self, operation: OperationId) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| ContextError::ProtocolStateUnavailable)?;
+        state.operations.entry(operation).or_default();
+        state.settings_protocol.boundary(operation);
+        Ok(())
     }
 
     pub fn begin_parse(&mut self, operation: OperationId, name: Name) -> Result<SessionId, Error> {
@@ -390,7 +417,7 @@ impl<S: EncryptionService> Context<S> {
                 .protocol_state
                 .write()
                 .map_err(|_| ContextError::ProtocolStateUnavailable)?;
-            let metadata = state.settings_protocol.closed(operation);
+            let metadata = state.settings_protocol.prepared_or_bound(operation);
             let finished = state
                 .take_unreferenced_metrics(metadata.iter().flat_map(|metadata| metadata.metrics()));
             state
@@ -406,7 +433,7 @@ impl<S: EncryptionService> Context<S> {
     }
 
     pub fn close_acknowledged(&self, operation: OperationId) -> Result<(), Error> {
-        self.settings_closed(operation)
+        self.settings_prepared_or_bound(operation)
     }
 
     /// Called after buffered rows have been decrypted with their old settings.
