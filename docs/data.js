@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792027746736,
+  "lastUpdate": 1792027779896,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27054,6 +27054,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.763101,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "612d09ed2ba3d72b92b789c045b88d28eb03d06e",
+          "message": "Merge pull request #470 from cipherstash/claude/project-thread-v9m494\n\nci: add Rust MSRV build and latest-stable lint checks",
+          "timestamp": "2026-10-15T12:23:44+11:00",
+          "tree_id": "5d8165ee5cd3c935d827ed203dfffbabd9f1412d",
+          "url": "https://github.com/cipherstash/proxy/commit/612d09ed2ba3d72b92b789c045b88d28eb03d06e"
+        },
+        "date": 1792027778420,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.184015,
             "unit": "Number"
           }
         ]
