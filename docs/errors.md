@@ -13,6 +13,8 @@
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
   - [Dependent statement after DDL](#mapping-dependent-statement-after-ddl)
+  - [Dependent statement after settings](#mapping-dependent-statement-after-settings)
+  - [Prepared settings changed](#mapping-prepared-settings-changed)
   - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Internal Error](#mapping-internal-error)
@@ -21,6 +23,7 @@
   - [Invalid encrypted value](#encrypt-invalid-inbound-eql-payload)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
+  - [Invalid keyset setting value](#encrypt-invalid-keyset-setting-value)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
@@ -303,12 +306,6 @@ Wait for the command to succeed before preparing or binding encrypted values und
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
-## Invalid keyset setting value <a id='encrypt-invalid-keyset-setting-value'></a>
-
-`CIPHERSTASH.KEYSET_ID` and `CIPHERSTASH.KEYSET_NAME` require a single value.
-Use a quoted UUID or keyset name, or `DEFAULT` to reset it. Unsupported values are
-rejected instead of silently retaining the previous keyset.
-
 ## Prepared settings changed <a id='mapping-prepared-settings-changed'></a>
 
 The prepared statement or bound values no longer match confirmed connection settings. This can
@@ -524,6 +521,37 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- TODO: Link to config -->
 
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Invalid keyset setting value <a id='encrypt-invalid-keyset-setting-value'></a>
+
+`SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` was given a value Proxy does not accept.
+Unsupported values are rejected instead of silently retaining the previous keyset.
+
+### Error message
+
+```
+Setting '{setting}' requires exactly one value. Use a quoted UUID for KEYSET_ID, a keyset name (quoted, unquoted, or numeric) for KEYSET_NAME, or DEFAULT to reset.
+```
+
+### How to fix
+
+Provide exactly one value of a supported form:
+
+- `CIPHERSTASH.KEYSET_ID` accepts a UUID, normally quoted. A value that is not a valid UUID
+  returns [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed).
+- `CIPHERSTASH.KEYSET_NAME` accepts a keyset name as a quoted string, an unquoted identifier,
+  or a number.
+- Either setting accepts `DEFAULT` (or `RESET`) to clear the selected keyset.
+
+```
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_ID { TO | = } '{KeysetId}'
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_NAME { TO | = } '{KeysetName}'
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_ID { TO | = } DEFAULT
+```
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
