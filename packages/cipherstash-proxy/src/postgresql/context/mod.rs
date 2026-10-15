@@ -179,8 +179,8 @@ impl ConnectionProtocolState {
         &mut self,
         operation: Option<OperationId>,
     ) -> Vec<SessionMetricsContext> {
-        let mut candidates = Vec::new();
-        for restore in self.settings_protocol.failed(operation) {
+        let (restored, mut candidates) = self.settings_protocol.failed(operation);
+        for restore in restored {
             if restore.statement {
                 candidates.extend(self.statement_metrics_scopes.remove(&restore.name));
                 self.statements.remove(&restore.name);
@@ -215,7 +215,6 @@ impl ConnectionProtocolState {
             }
         }
         self.settings.execution_failed();
-        candidates.extend(self.statement_metrics.keys().copied());
         self.take_unreferenced_metrics(candidates)
     }
 }
@@ -1376,17 +1375,13 @@ where
         Ok(())
     }
 
-    fn settings_closed(&self, operation: OperationId) -> Result<(), Error> {
-        self.settings_prepared_or_bound(operation)
-    }
-
     fn settings_prepared_or_bound(&self, operation: OperationId) -> Result<(), Error> {
         let finished = {
             let mut state = self
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let metadata = state.settings_protocol.closed(operation);
+            let metadata = state.settings_protocol.prepared_or_bound(operation);
             state.take_unreferenced_metrics(metadata.iter().flat_map(|metadata| metadata.metrics()))
         };
         for metrics in finished {
@@ -2254,6 +2249,8 @@ mod tests {
         let later = prepare_lifecycle(&mut context, &name, "SELECT 3", Some(statement())).await;
         let later_metadata = context.get_statement(&name).unwrap().unwrap();
         context.postgres_failed(Some(rejected), false).unwrap();
+        // Rebasing the later snapshot releases the rejected Parse's scope.
+        assert_eq!(context.active_metrics_scopes().unwrap(), 2);
         assert_eq!(
             context.get_statement(&name).unwrap().unwrap(),
             later_metadata
@@ -2267,6 +2264,7 @@ mod tests {
             &context.get_statement(&name).unwrap().unwrap(),
             &original_metadata
         ));
+        assert_eq!(context.active_metrics_scopes().unwrap(), 1);
         assert!(context.discarding_extended_messages().unwrap());
     }
 
