@@ -360,7 +360,7 @@ pub enum EncryptError {
     )]
     KeysetIdCouldNotBeParsed { id: String },
 
-    #[error("Setting '{setting}' requires one string value. Use a quoted UUID for KEYSET_ID or a quoted keyset name for KEYSET_NAME. For help visit {}#encrypt-invalid-keyset-setting-value", ERROR_DOC_BASE_URL)]
+    #[error("Setting '{setting}' requires exactly one value. Use a quoted UUID for KEYSET_ID, a keyset name (quoted, unquoted, or numeric) for KEYSET_NAME, or DEFAULT to reset. For help visit {}#encrypt-invalid-keyset-setting-value", ERROR_DOC_BASE_URL)]
     InvalidKeysetSettingValue { setting: String },
 
     #[error(

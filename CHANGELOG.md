@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Pooler regression gate**: the compatibility task and a PostgreSQL 17 CI job now require fresh, complete Go driver runs on supported direct/session configurations, alongside the Rust isolation matrix. Diagnostic runs of unsupported configurations remain available separately.
-
 - **Application-generated EQL values in statements**: SQL literals and bound parameters may now carry EQL v3 storage payloads or query-only SEM operands produced by an application. Proxy authenticates every stored ciphertext, requires its authenticated descriptor to name the inferred destination column, and independently re-derives every SEM term before forwarding it without double encryption. Query-only operands contain no ciphertext to authenticate, so Proxy instead validates their version, identifier, term shape, column capabilities, and syntactic query role; they are rejected in storage positions. This includes bare SteVec selector hashes matching `^[0-9a-f]{32}$`: in JSON selector query positions a match is treated as already hashed, while a non-match remains plaintext and is encrypted normally. A matching plaintext selector is inherently ambiguous and is intentionally treated as already hashed. Invalid payloads fail closed with one generic, transaction-aborting error so validation details cannot be used as an oracle.
 
   Compatibility note: on every encrypted column type, Proxy reserves three JSON object shapes for application-generated EQL: storage payloads with top-level `v` and `i` plus at least one of `c`, `h`, or `sv`; scalar query payloads with `v` and `i` plus at least one of `hm`, `bf`, `ob`, or `op`; and SteVec query payloads whose only top-level key is `sv`. An object matching one of these shapes is validated as EQL rather than encrypted as plaintext, and there is no opt-out. Query-only shapes are rejected in storage positions. Before upgrading, audit plaintext application writes for these key combinations; [Invalid encrypted value](docs/errors.md#encrypt-invalid-inbound-eql-payload) includes a `jsonb` scan predicate.
@@ -32,11 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Ordinary transaction and COPY traffic**: transaction and reset batches that do not change effective CipherStash settings remain usable, and COPY input can progress while transaction outcomes are pending. Settings tracking avoids unnecessary transaction barriers and repeated SQL tree copies.
 
-- **Pooler test reliability**: isolation probes restore connection settings after early failures, and Go test JSON output is kept separate from stderr diagnostics.
-
 - **CipherStash settings execution and rollback**: preparing a settings command no longer changes the active keyset or mapping controls. Changes take effect after successful execution; transaction and savepoint rollback restore earlier settings, and rejected `DISCARD ALL` preserves them. Successful `RESET` commands also restore the corresponding settings without losing transaction rollback behavior. Proxy rejects unsafe mixed simple-query batches and reuse of prepared work whose encrypted values or mapping were made stale by a settings change, with guidance to issue separate queries or prepare and bind again.
-
-- **Pooler compatibility validation**: unsupported configurations must now demonstrate their specific incompatibility. Connection failures, timeouts, and inconclusive isolation checks no longer count as expected failures; startup rejection is reported separately from CRUD coverage.
 
 - **Database error detail in Proxy's logs**: logged database errors again include the message PostgreSQL returned, not just the error kind. The upgraded PostgreSQL client library stopped appending the underlying cause when an error is rendered as text, which left entries such as `Database connection error` reading only `db error`. Proxy now renders the cause itself, so the server's message is back in the log line.
 
