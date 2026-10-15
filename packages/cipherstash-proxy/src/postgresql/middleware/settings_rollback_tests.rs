@@ -13,7 +13,7 @@ use crate::{
 };
 use bytes::Bytes;
 use cipherstash_client::{encryption::Plaintext, IdentifiedBy};
-use pg_proto::{BackendMessage, FrontendMessage, TransactionStatus};
+use pg_proto::{BackendMessage, FrontendMessage, FrontendMiddlewareOutput, TransactionStatus};
 use std::sync::{Arc, Mutex};
 
 /// The external cipher records the keyset requested by an actual encrypted INSERT.
@@ -53,15 +53,20 @@ impl EncryptionService for Cipher {
 struct Client {
     frontend: Frontend<Cipher>,
     backend: Backend<Cipher>,
+    context: Context<Cipher>,
     cipher: Cipher,
 }
 
 impl Client {
     fn new() -> Self {
+        Self::with_mapping_disabled(false)
+    }
+
+    fn with_mapping_disabled(disable_mapping: bool) -> Self {
         let mut config = TandemConfig::for_testing();
         config.encrypt.default_keyset_id = None;
         config.disable_mapping_for_testing();
-        config.development.as_mut().unwrap().disable_mapping = false;
+        config.development.as_mut().unwrap().disable_mapping = disable_mapping;
         config.development.as_mut().unwrap().enable_mapping_errors = true;
         let mut schema = eql_mapper::Schema::new("public");
         let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
@@ -90,7 +95,8 @@ impl Client {
         );
         Self {
             frontend: Frontend::new(context.clone()),
-            backend: Backend::new(context),
+            backend: Backend::new(context.clone()),
+            context,
             cipher,
         }
     }
@@ -201,7 +207,7 @@ impl Client {
             .unwrap();
     }
 
-    async fn fail_query(&mut self) {
+    async fn fail_query(&mut self, status: TransactionStatus) {
         let operation = operation_id();
         self.frontend
             .intercept(
@@ -221,13 +227,31 @@ impl Client {
             )
             .await
             .unwrap();
+        // The Query boundary, not ReadyForQuery, ends the discard state.
+        assert!(!self.context.discarding_extended_messages().unwrap());
         self.backend
+            .intercept(Some(operation), BackendMessage::ReadyForQuery(status))
+            .await
+            .unwrap();
+    }
+
+    async fn query_is_forwarded(&mut self) {
+        assert!(!self.context.discarding_extended_messages().unwrap());
+        let output = self
+            .frontend
             .intercept(
-                Some(operation),
-                BackendMessage::ReadyForQuery(TransactionStatus::FailedTransaction),
+                operation_id(),
+                FrontendMessage::Query(Bytes::from_static(b"SELECT 1")),
             )
             .await
             .unwrap();
+        assert!(
+            matches!(
+                output,
+                FrontendMiddlewareOutput::Forward(FrontendMessage::Query(_))
+            ),
+            "{output:?}"
+        );
     }
 }
 
@@ -443,7 +467,9 @@ async fn failed_transaction_commit_restores_encryption_keyset_and_mapping() {
             TransactionStatus::InTransaction,
         )
         .await;
-    client.fail_query().await;
+    client
+        .fail_query(TransactionStatus::FailedTransaction)
+        .await;
     client
         .command("COMMIT", "ROLLBACK", TransactionStatus::Idle)
         .await;
@@ -484,7 +510,9 @@ async fn rollback_to_savepoint_recovers_encryption_after_backend_error() {
             TransactionStatus::InTransaction,
         )
         .await;
-    client.fail_query().await;
+    client
+        .fail_query(TransactionStatus::FailedTransaction)
+        .await;
     client
         .command(
             "ROLLBACK TO recovery",
@@ -528,4 +556,85 @@ async fn transaction_completion_restores_session_keyset_and_enables_mapping() {
             .await;
         client.encrypted_insert_uses(named("session")).await;
     }
+}
+
+#[tokio::test]
+async fn failed_simple_query_with_mapping_disabled_does_not_suppress_next_query() {
+    for status in [
+        TransactionStatus::Idle,
+        TransactionStatus::FailedTransaction,
+    ] {
+        let mut client = Client::with_mapping_disabled(true);
+        client.fail_query(status).await;
+        client.query_is_forwarded().await;
+    }
+}
+
+#[tokio::test]
+async fn failed_pipelined_execute_with_mapping_disabled_does_not_suppress_next_query() {
+    let mut client = Client::with_mapping_disabled(true);
+    let (parse, bind, execute, sync) = (
+        operation_id(),
+        operation_id(),
+        operation_id(),
+        operation_id(),
+    );
+    // The driver sends the whole batch before PostgreSQL answers any of it.
+    for (operation, message) in [
+        (
+            parse,
+            FrontendMessage::Parse(pg_proto::Parse {
+                statement: Bytes::new(),
+                query: Bytes::from_static(b"INSERT INTO plain VALUES (1)"),
+                parameter_types: Vec::new(),
+            }),
+        ),
+        (
+            bind,
+            FrontendMessage::Bind(pg_proto::Bind {
+                portal: Bytes::new(),
+                statement: Bytes::new(),
+                parameter_formats: Vec::new(),
+                parameters: Vec::new(),
+                result_formats: Vec::new(),
+            }),
+        ),
+        (
+            execute,
+            FrontendMessage::Execute(pg_proto::Execute {
+                portal: Bytes::new(),
+                max_rows: 0,
+            }),
+        ),
+        (sync, FrontendMessage::Sync),
+    ] {
+        client.frontend.intercept(operation, message).await.unwrap();
+    }
+    for (operation, message) in [
+        (parse, BackendMessage::ParseComplete),
+        (bind, BackendMessage::BindComplete),
+        (
+            execute,
+            BackendMessage::ErrorResponse(crate::postgresql::diagnostics::invalid_sql_statement(
+                "duplicate key value".to_owned(),
+            )),
+        ),
+    ] {
+        client
+            .backend
+            .intercept(Some(operation), message)
+            .await
+            .unwrap();
+    }
+
+    // The driver pipelined this Query, so it can arrive before ReadyForQuery.
+    client.query_is_forwarded().await;
+    client
+        .backend
+        .intercept(
+            Some(sync),
+            BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+        )
+        .await
+        .unwrap();
 }
