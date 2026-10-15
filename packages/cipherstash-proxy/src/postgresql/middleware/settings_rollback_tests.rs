@@ -13,7 +13,7 @@ use crate::{
 };
 use bytes::Bytes;
 use cipherstash_client::{encryption::Plaintext, IdentifiedBy};
-use pg_proto::{BackendMessage, FrontendMessage, TransactionStatus};
+use pg_proto::{BackendMessage, FrontendMessage, FrontendMiddlewareOutput, TransactionStatus};
 use std::sync::{Arc, Mutex};
 
 /// The external cipher records the keyset requested by an actual encrypted INSERT.
@@ -58,10 +58,14 @@ struct Client {
 
 impl Client {
     fn new() -> Self {
+        Self::with_mapping_disabled(false)
+    }
+
+    fn with_mapping_disabled(disable_mapping: bool) -> Self {
         let mut config = TandemConfig::for_testing();
         config.encrypt.default_keyset_id = None;
         config.disable_mapping_for_testing();
-        config.development.as_mut().unwrap().disable_mapping = false;
+        config.development.as_mut().unwrap().disable_mapping = disable_mapping;
         config.development.as_mut().unwrap().enable_mapping_errors = true;
         let mut schema = eql_mapper::Schema::new("public");
         let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
@@ -528,4 +532,21 @@ async fn transaction_completion_restores_session_keyset_and_enables_mapping() {
             .await;
         client.encrypted_insert_uses(named("session")).await;
     }
+}
+
+#[tokio::test]
+async fn failed_simple_query_with_mapping_disabled_does_not_suppress_next_query() {
+    let mut client = Client::with_mapping_disabled(true);
+    client.fail_query().await;
+
+    let output = client
+        .frontend
+        .intercept(
+            operation_id(),
+            FrontendMessage::Query(Bytes::from_static(b"SELECT 1")),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(output, FrontendMiddlewareOutput::Forward(_)));
 }

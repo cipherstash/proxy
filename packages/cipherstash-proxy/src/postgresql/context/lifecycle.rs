@@ -58,7 +58,10 @@ impl<S: EncryptionService> Context<S> {
     pub fn unmapped_query(&mut self, operation: OperationId) -> Result<(), Error> {
         let metrics = self.start_metrics_scope()?;
         self.add_portal(operation, Name::new(), Portal::passthrough(Some(metrics)))?;
-        self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))
+        self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))?;
+        // A simple query is its own protocol boundary. Without one, a backend error
+        // waits for a Sync that simple-query clients never send.
+        self.settings_protocol_boundary(operation)
     }
 
     pub fn begin_parse(&mut self, operation: OperationId, name: Name) -> Result<SessionId, Error> {
