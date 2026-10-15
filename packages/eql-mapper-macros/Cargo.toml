@@ -3,6 +3,7 @@ name = "eql-mapper-macros"
 description = "Macros to reduce boilerplate in the implementation of eql-mapper"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [lib]

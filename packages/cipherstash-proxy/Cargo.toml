@@ -2,6 +2,7 @@
 name = "cipherstash-proxy"
 version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 
 [dependencies]
 async-trait = "0.1"

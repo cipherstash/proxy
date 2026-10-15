@@ -2,6 +2,7 @@
 name = "showcase"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Healthcare data model demonstrating EQL v3 searchable encryption with realistic encrypted application patterns"
 
 [dependencies]

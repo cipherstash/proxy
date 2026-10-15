@@ -67,6 +67,91 @@ jobs:
           channel: engineering
           webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
 
+  # Toolchain checks outside the pinned toolchain. Neither needs PostgreSQL,
+  # credentials, or the test matrix.
+  #
+  # MSRV: builds the production binary on `rust-version` from Cargo.toml, so a
+  # change that raises the compiler requirement fails here.
+  msrv:
+    name: Build (Rust MSRV)
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        shell: /bin/bash -l {0}
+        run: |
+          set -euo pipefail
+          # Read the root manifest directly: cargo itself would need the
+          # rust-toolchain.toml toolchain installed first.
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [[ -z "${msrv}" ]]; then
+            echo "::error::Cargo.toml [workspace.package] has no rust-version"
+            exit 1
+          fi
+          echo "MSRV: ${msrv}"
+          echo "version=${msrv}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        shell: /bin/bash -l {0}
+        run: rustup toolchain install "${{ steps.msrv.outputs.version }}" --profile minimal --no-self-update
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-${{ steps.msrv.outputs.version }}
+
+      - name: Build production binary
+        shell: /bin/bash -l {0}
+        env:
+          # Overrides rust-toolchain.toml.
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+        run: |
+          set -euo pipefail
+          rustc --version
+          declared=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "cipherstash-proxy") | .rust_version')
+          if [[ "${declared}" != "${{ steps.msrv.outputs.version }}" ]]; then
+            echo "::error::cipherstash-proxy rust-version is '${declared}', expected '${{ steps.msrv.outputs.version }}'"
+            exit 1
+          fi
+          cargo build --locked --release --package cipherstash-proxy
+
+  # Latest stable: early warning that a new Rust release breaks the build or
+  # adds Clippy lints, before the pinned toolchain is bumped to it.
+  stable:
+    name: Lint (Rust stable)
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 30
+    env:
+      # Overrides rust-toolchain.toml.
+      RUSTUP_TOOLCHAIN: stable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install latest stable Rust
+        shell: /bin/bash -l {0}
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt --no-self-update
+          rustc --version
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: stable
+
+      - name: Check formatting
+        shell: /bin/bash -l {0}
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        shell: /bin/bash -l {0}
+        run: cargo clippy --locked --all --no-deps --all-targets --all-features -- -D warnings
+
   burn-in:
     name: Encrypted burn-in (PostgreSQL 17)
     runs-on: blacksmith-16vcpu-ubuntu-2204
