@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792026208186,
+  "lastUpdate": 1792027705666,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27000,6 +27000,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.930414,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "485fe46999c550f18bf66e237af9b51eb018f1ff",
+          "message": "Merge pull request #468 from cipherstash/ci/pin-rust-toolchain\n\nci: pin the Rust toolchain to 1.99.0",
+          "timestamp": "2026-10-15T12:22:15+11:00",
+          "tree_id": "9c43936c60ff60427b7fb70d7db6dc1bd2aa9548",
+          "url": "https://github.com/cipherstash/proxy/commit/485fe46999c550f18bf66e237af9b51eb018f1ff"
+        },
+        "date": 1792027704233,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.797329,
             "unit": "Number"
           }
         ]
