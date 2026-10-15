@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792038115805,
+  "lastUpdate": 1792046698692,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27108,6 +27108,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.120327,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "629468dd01b1b8061b090058d4f917b47d71d96e",
+          "message": "build(deps): bump rustls from 0.23.43 to 0.23.45",
+          "timestamp": "2026-10-15T01:23:49Z",
+          "url": "https://github.com/cipherstash/proxy/pull/471/commits/629468dd01b1b8061b090058d4f917b47d71d96e"
+        },
+        "date": 1792046697156,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.758467,
             "unit": "Number"
           }
         ]
