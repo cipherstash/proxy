@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792109981567,
+  "lastUpdate": 1792125737551,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27187,6 +27187,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.087197,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "a7514a2a281fb677e1ce762e441a236f4d90b655",
+          "message": "build(deps): bump hickory-resolver from 0.26.1 to 0.26.3",
+          "timestamp": "2026-10-15T22:42:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/466/commits/a7514a2a281fb677e1ce762e441a236f4d90b655"
+        },
+        "date": 1792125736104,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 34.451242,
             "unit": "Number"
           }
         ]
