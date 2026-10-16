@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792125737551,
+  "lastUpdate": 1792128149862,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27212,6 +27212,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 34.451242,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6bd63109892afbd68d1f86432e105f7959861654",
+          "message": "Merge pull request #466 from cipherstash/dependabot/cargo/hickory-resolver-0.26.3\n\nbuild(deps): bump hickory-resolver from 0.26.1 to 0.26.3",
+          "timestamp": "2026-10-16T16:17:41+11:00",
+          "tree_id": "3c03f4aa99cb8cd58b34b18e79e91926b79b10d6",
+          "url": "https://github.com/cipherstash/proxy/commit/6bd63109892afbd68d1f86432e105f7959861654"
+        },
+        "date": 1792128148345,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.825018,
             "unit": "Number"
           }
         ]
