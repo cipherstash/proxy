@@ -9,3 +9,5 @@ mod middleware;
 
 pub use manager::{CommittedSchemaStore, SchemaManager};
 pub use middleware::{SchemaMiddleware, TransactionStatus};
+
+pub(crate) use middleware::postgres_identifier;

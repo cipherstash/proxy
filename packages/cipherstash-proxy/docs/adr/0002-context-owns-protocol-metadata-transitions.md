@@ -21,3 +21,13 @@ Statement metrics scopes belong to execution occurrences, not prepared Statement
 resumed execution retains one scope until completion or failure; distinct Portals and repeated
 executions receive distinct scopes, while Parse timing remains knowledge of the prepared Statement
 that may be attributed to each execution observation. Existing Prometheus metric names remain stable.
+
+Context exposes focused semantic lifecycle methods rather than a generic event dispatcher or operation handles.
+Parse and Bind have explicit local preparation phases around asynchronous mapping; finishing local preparation does not acknowledge PostgreSQL execution or retire its rollback journal.
+Journal mutations include their complete metadata snapshots when created.
+The underlying settings state machine and rollback algorithm remain private implementation.
+
+Backend decrypts buffered rows before reporting the following PostgreSQL outcome, preserving the effective connection settings those rows belong to.
+A local decryption failure ends local execution observation without inventing a PostgreSQL failure; later suppressed replies still report their actual settings and schema outcomes.
+Context owns readiness cleanup, awaited schema publication, and schema readiness in that order, before Backend forwards readiness.
+Tests exercise these lifecycle methods, while adapter tests retain wire ordering and refusal coverage.

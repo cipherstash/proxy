@@ -52,11 +52,16 @@ def execute(val, column, binary=None, prepare=None, expected=None):
             sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
             cursor.execute(sql, [])
 
-            # Attempt to nsert a value
+            # A cached mapped statement must not execute after mapping changes.
+            # A fresh statement reaches PostgreSQL unchanged and rejects plaintext.
             id = make_id()
             sql = "INSERT INTO encrypted (id, {}) VALUES (%s, %s)".format(column);
-            with pytest.raises(psycopg.errors.InvalidTextRepresentation):
-                cursor.execute(sql, [id, val], binary=binary, prepare=prepare)
+            if prepare:
+                with pytest.raises(psycopg.errors.InvalidSqlStatementName, match="no longer match confirmed connection state"):
+                    cursor.execute(sql, [id, val], binary=binary, prepare=prepare)
+            else:
+                with pytest.raises(psycopg.errors.InvalidTextRepresentation):
+                    cursor.execute(sql, [id, val], binary=binary, prepare=prepare)
 
 
             sql = "SELECT encrypted_text FROM encrypted"
@@ -72,18 +77,14 @@ def execute(val, column, binary=None, prepare=None, expected=None):
             cursor.execute(sql, [])
 
             sql = "SELECT encrypted_text FROM encrypted"
-            cursor.execute(sql, [], binary=binary, prepare=prepare)
-
-            row = cursor.fetchone()
-
-            (result,) = row
-            # The prepared statement was prepared while mapping was disabled
-            # We only ever decrypt if a statement was mapped and we can link to that statement
-            # Data returned from the prepared statement is never decrypted
+            # A statement prepared without mapping cannot be reused after it is enabled.
             if prepare:
-                assert("encrypted_text" in str(result))
+                with pytest.raises(psycopg.errors.InvalidSqlStatementName, match="no longer match confirmed connection state"):
+                    cursor.execute(sql, [], binary=binary, prepare=prepare)
             else:
-                assert(result == val)
+                cursor.execute(sql, [], binary=binary, prepare=prepare)
+                (result,) = cursor.fetchone()
+                assert result == val
 
 
             # Bust the prepared statement caching

@@ -25,6 +25,9 @@ mod multitenant;
 mod ore_order_helpers;
 mod passthrough;
 mod pipeline;
+/// Connection pooler compatibility matrix; see `mise run test:poolers`.
+#[cfg(all(test, feature = "pooler-tests"))]
+mod pooler;
 /// Database-backed transaction-aware schema middleware regressions.
 mod schema_change;
 mod select;

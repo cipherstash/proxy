@@ -18,6 +18,7 @@ codebase has used it for both a connection and a single statement.
 **Context**:
 The mutable state belonging to one connection — its prepared statements, portals,
 pending describes and executes, and keyset.
+Context owns the correlated transitions of this metadata throughout preparation, execution, failure, and readiness.
 
 **Frontend** / **Backend**:
 The two halves of the proxy pipeline by direction of travel: Frontend carries client to
@@ -32,6 +33,10 @@ are different things; do not call either of them a Statement here.
 **Portal**:
 A prepared statement bound to parameter values, ready to execute. Either `Encrypted`,
 carrying the analysed statement, or `Passthrough` when nothing in it is encrypted.
+
+**Local preparation**:
+Proxy's speculative analysis of a Parse or Bind before PostgreSQL acknowledges it.
+Finishing local preparation neither confirms execution nor changes effective connection settings.
 
 **Statement metrics scope**:
 The measurement window around one statement execution occurrence. A simple Query owns one;
@@ -100,9 +105,12 @@ produces only the term needed to match. The statement's EQL term shape decides w
 ### Control plane
 
 **`SET CIPHERSTASH.*`**:
-Proxy's in-band control API, intercepted rather than forwarded — `KEYSET_ID`,
-`KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING`. These are the supported spellings; log messages
-that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
+Proxy's in-band control API — `KEYSET_ID`, `KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING` — whose effective values come from successfully executed commands, never preparation alone.
+Values have PostgreSQL transaction and savepoint scope: session values survive commit, local values end with the transaction, rollback restores earlier values, and successful `DISCARD ALL` resets them.
+Successful `RESET` restores the corresponding defaults while remaining subject to transaction and savepoint rollback.
+
+**Effective connection settings**:
+The keyset and mapping controls currently applicable to encryption and decryption on one Proxy connection, including any transaction-local overrides; behind a pooler their scope is a security boundary.
 
 **Reload**:
 Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces
