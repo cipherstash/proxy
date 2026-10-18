@@ -123,7 +123,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             )));
         }
 
-        for (key, _) in encrypted_literals.iter() {
+        for key in encrypted_literals.keys() {
             if !self.literal_exists_for_node_key(*key) {
                 return Err(EqlMapperError::Transform(String::from(
                     "encrypted literals refers to a literal node which is not present in the SQL statement"
