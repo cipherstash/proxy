@@ -177,6 +177,10 @@ where
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
+            let deallocation = is_deallocation(&bytes);
+            if code == u8::from(BackendCode::ReadyForQuery) {
+                self.context.ready_for_query(transaction_status(&bytes));
+            }
             self.write_with_flush(bytes).await?;
 
             // The frontend starts a session and enqueues an execute for every
@@ -195,6 +199,9 @@ where
                 | BackendCode::ErrorResponse => {
                     self.context.complete_execution();
                     self.context.finish_session();
+                    if deallocation {
+                        self.context.complete_deallocation();
+                    }
                 }
                 _ => {}
             }
@@ -231,6 +238,9 @@ where
 
                 self.context.complete_execution();
                 self.context.finish_session();
+                if is_deallocation(&bytes) {
+                    self.context.complete_deallocation();
+                }
             }
             BackendCode::ErrorResponse => {
                 if let Some(b) = self.error_response_handler(&bytes)? {
@@ -280,6 +290,7 @@ where
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
                 );
+                self.context.ready_for_query(transaction_status(&bytes));
                 if self.context.schema_changed() {
                     self.context.reload_schema().await;
                 }
@@ -727,6 +738,29 @@ where
     }
 }
 
+/// The command tag of a `CommandComplete` message, without the trailing NUL
+fn command_tag(bytes: &BytesMut) -> &[u8] {
+    // code (1) + length (4) + tag + NUL
+    let end = bytes.len().saturating_sub(1);
+    bytes.get(5..end).unwrap_or_default()
+}
+
+/// Whether a `CommandComplete` confirms a `DEALLOCATE` or `DISCARD ALL`
+fn is_deallocation(bytes: &BytesMut) -> bool {
+    if bytes.first() != Some(&b'C') {
+        return false;
+    }
+    matches!(
+        command_tag(bytes),
+        b"DEALLOCATE" | b"DEALLOCATE ALL" | b"DISCARD ALL"
+    )
+}
+
+/// The transaction status (`I`, `T` or `E`) of a `ReadyForQuery` message
+fn transaction_status(bytes: &BytesMut) -> u8 {
+    bytes.get(5).copied().unwrap_or(b'I')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,5 +924,68 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A statement that is prepared and described but never executed gets no
+    /// execute-terminating message, so its session must be released by the
+    /// `ReadyForQuery` that ends its batch.
+    #[tokio::test]
+    async fn ready_for_query_releases_state_for_a_prepare_only_batch() {
+        log::init(LogConfig::default());
+
+        const STATEMENTS: usize = 256;
+
+        let ready_for_query = backend_message(b'Z', b"I");
+        let mut server_bytes = BytesMut::new();
+        for _ in 0..STATEMENTS {
+            server_bytes.extend_from_slice(&ready_for_query);
+        }
+
+        let (client_sender, _client_receiver) = mpsc::unbounded_channel();
+        let reader = Cursor::new(server_bytes.to_vec());
+        let mut backend = Backend::new(client_sender, reader, passthrough_context());
+
+        for i in 0..STATEMENTS {
+            // Frontend: Parse, Describe, Sync
+            backend.context.start_session();
+            backend.context.sync_sent();
+
+            // Backend: ReadyForQuery
+            backend.rewrite().await.unwrap();
+
+            assert_eq!(
+                backend.context.session_metrics_queue_len(),
+                0,
+                "session_metrics queue not drained at statement {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn deallocation_command_tags() {
+        assert!(super::is_deallocation(&command_complete("DEALLOCATE")));
+        assert!(super::is_deallocation(&command_complete("DEALLOCATE ALL")));
+        assert!(super::is_deallocation(&command_complete("DISCARD ALL")));
+        assert!(!super::is_deallocation(&command_complete("DISCARD PLANS")));
+        assert!(!super::is_deallocation(&command_complete("SELECT 1")));
+        assert!(!super::is_deallocation(&error_response_bytes()));
+    }
+
+    #[test]
+    fn ready_for_query_transaction_status() {
+        assert_eq!(
+            super::transaction_status(&backend_message(b'Z', b"T")),
+            b'T'
+        );
+        assert_eq!(
+            super::transaction_status(&backend_message(b'Z', b"I")),
+            b'I'
+        );
+    }
+
+    fn command_complete(tag: &str) -> BytesMut {
+        let mut body = tag.as_bytes().to_vec();
+        body.push(0);
+        backend_message(b'C', &body)
     }
 }

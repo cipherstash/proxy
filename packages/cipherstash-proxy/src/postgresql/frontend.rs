@@ -1,5 +1,5 @@
 use super::context::phase_timing::PhaseTimer;
-use super::context::{Context, SessionId, Statement};
+use super::context::{Context, Deallocation, SessionId, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
@@ -101,6 +101,8 @@ where
     context: Context<S>,
     /// Error state flag for extended query protocol error handling
     error_state: Option<ErrorState>,
+    /// SQL deallocations in the simple `Query` being handled, queued once it is forwarded
+    deallocations: Vec<Deallocation>,
 }
 
 #[derive(Debug)]
@@ -132,6 +134,7 @@ where
             server_writer,
             context,
             error_state: None,
+            deallocations: vec![],
         }
     }
 
@@ -169,12 +172,15 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
+        let code = Code::from(code);
+
         if self.context.mapping_disabled() {
+            if produces_ready_for_query(code) {
+                self.context.sync_sent();
+            }
             self.write_to_server(bytes).await?;
             return Ok(());
         }
-
-        let code = Code::from(code);
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
@@ -191,7 +197,12 @@ where
 
         match code {
             Code::Query => {
-                match self.query_handler(&bytes).await {
+                let result = self.query_handler(&bytes).await;
+                let deallocations = std::mem::take(&mut self.deallocations);
+                if result.is_ok() {
+                    self.context.add_deallocations(deallocations);
+                }
+                match result {
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
@@ -292,6 +303,9 @@ where
             }
         }
 
+        if produces_ready_for_query(code) {
+            self.context.sync_sent();
+        }
         self.write_to_server(bytes).await?;
         Ok(())
     }
@@ -390,6 +404,10 @@ where
 
         // Simple Query may contain many statements
         let parsed_statements = SqlParser::parse_statements(&query.statement)?;
+        self.deallocations = parsed_statements
+            .iter()
+            .filter_map(to_deallocation)
+            .collect();
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -1158,6 +1176,33 @@ where
     }
 }
 
+/// `Sync`, `Query` and `FunctionCall` are each answered with exactly one `ReadyForQuery`
+fn produces_ready_for_query(code: Code) -> bool {
+    matches!(code, Code::Sync | Code::Query | Code::Unknown('F'))
+}
+
+/// The prepared statements a `DEALLOCATE` or `DISCARD ALL` statement removes, if any
+fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
+    match statement {
+        ast::Statement::Deallocate { name, .. } => {
+            if name.quote_style.is_none() && name.value.eq_ignore_ascii_case("all") {
+                Some(Deallocation::AllStatements)
+            } else if name.quote_style.is_none() {
+                // Unquoted identifiers are folded to lower case by PostgreSQL
+                Some(Deallocation::Statement(Name::from(
+                    name.value.to_lowercase().as_str(),
+                )))
+            } else {
+                Some(Deallocation::Statement(Name::from(name.value.as_str())))
+            }
+        }
+        ast::Statement::Discard {
+            object_type: ast::DiscardObject::ALL,
+        } => Some(Deallocation::AllStatements),
+        _ => None,
+    }
+}
+
 fn literals_to_plaintext(
     literals: &Vec<(EqlTerm, &ast::Value)>,
     literal_columns: &Vec<Option<Column>>,
@@ -1218,5 +1263,56 @@ where
         self.error_state = Some(ErrorState); // Frontend-specific: set error state for extended query protocol
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{to_deallocation, Deallocation};
+    use crate::postgresql::messages::Name;
+    use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
+
+    fn deallocation(sql: &str) -> Option<Deallocation> {
+        let statements = Parser::new(&PostgreSqlDialect {})
+            .try_with_sql(sql)
+            .unwrap()
+            .parse_statements()
+            .unwrap();
+        to_deallocation(statements.first().unwrap())
+    }
+
+    #[test]
+    fn sql_that_removes_prepared_statements() {
+        assert_eq!(
+            deallocation("DEALLOCATE _pg3_1"),
+            Some(Deallocation::Statement(Name::from("_pg3_1")))
+        );
+        assert_eq!(
+            deallocation("DEALLOCATE PREPARE a1"),
+            Some(Deallocation::Statement(Name::from("a1")))
+        );
+        // Unquoted names are folded to lower case, quoted names are not
+        assert_eq!(
+            deallocation("DEALLOCATE S_1"),
+            Some(Deallocation::Statement(Name::from("s_1")))
+        );
+        assert_eq!(
+            deallocation(r#"DEALLOCATE "S_1""#),
+            Some(Deallocation::Statement(Name::from("S_1")))
+        );
+        assert_eq!(
+            deallocation("DEALLOCATE ALL"),
+            Some(Deallocation::AllStatements)
+        );
+        assert_eq!(
+            deallocation("DISCARD ALL"),
+            Some(Deallocation::AllStatements)
+        );
+    }
+
+    #[test]
+    fn sql_that_keeps_prepared_statements() {
+        assert_eq!(deallocation("DISCARD PLANS"), None);
+        assert_eq!(deallocation("SELECT 1"), None);
     }
 }
