@@ -1,5 +1,5 @@
 use super::super::context::phase_timing::PhaseTimer;
-use super::super::context::{Context, SessionId, Statement};
+use super::super::context::{Context, Deallocation, SessionId, Statement};
 use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::parser::SqlParser;
 use super::super::rewrite::bind::Bind;
@@ -205,9 +205,12 @@ impl<S: EncryptionService> Frontend<S> {
                 let statement = parse.statement.clone();
                 let failed_parse = parse.clone();
                 match self.parse_handler(parse).await {
-                    Ok(Some(mapped)) => outbound_message = mapped,
+                    Ok(Some(mapped)) => {
+                        self.context.set_statement_operation(operation, statement)?;
+                        outbound_message = mapped;
+                    }
                     // No mapping needed, don't change the bytes
-                    Ok(None) => (),
+                    Ok(None) => self.context.set_statement_operation(operation, statement)?,
                     Err(err) => {
                         self.context.close_statement(&statement)?;
                         warn!(
@@ -376,6 +379,13 @@ impl<S: EncryptionService> Frontend<S> {
         // Simple Query may contain many statements
         let query_text = String::from_utf8_lossy(&query).into_owned();
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
+        self.context.set_deallocations(
+            operation,
+            parsed_statements
+                .iter()
+                .filter_map(to_deallocation)
+                .collect(),
+        )?;
         self.context.prepare_schema_for_statement().await?;
         if self
             .context
@@ -1387,6 +1397,28 @@ impl<S: EncryptionService> Frontend<S> {
     }
 }
 
+/// The prepared statements a `DEALLOCATE` or `DISCARD ALL` statement removes, if any
+fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
+    match statement {
+        ast::Statement::Deallocate { name, .. } => {
+            if name.quote_style.is_none() && name.value.eq_ignore_ascii_case("all") {
+                Some(Deallocation::AllStatements)
+            } else if name.quote_style.is_none() {
+                // Unquoted identifiers are folded to lower case by PostgreSQL
+                Some(Deallocation::Statement(Name::from(
+                    name.value.to_lowercase(),
+                )))
+            } else {
+                Some(Deallocation::Statement(Name::from(name.value.clone())))
+            }
+        }
+        ast::Statement::Discard {
+            object_type: ast::DiscardObject::ALL,
+        } => Some(Deallocation::AllStatements),
+        _ => None,
+    }
+}
+
 fn quote_literal(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('\'', "''");
     if value.contains('\\') {
@@ -1683,10 +1715,11 @@ impl<S: EncryptionService> Frontend<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::{quote_literal, Frontend};
+    use super::{quote_literal, to_deallocation, Frontend};
     use crate::config::TandemConfig;
     use crate::error::{EncryptError, Error, MappingError};
     use crate::postgresql::context::statement::{OutputParam, OutputParamSource};
+    use crate::postgresql::context::Deallocation;
     use crate::postgresql::context::Statement;
     use crate::postgresql::context::{Context, KeysetIdentifier};
     use crate::postgresql::error_handler::PostgreSqlErrorHandler;
@@ -2234,5 +2267,34 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    fn deallocation(sql: &str) -> Option<Deallocation> {
+        let statement = crate::postgresql::parser::SqlParser::parse_statement(sql).unwrap();
+        to_deallocation(&statement)
+    }
+
+    #[test]
+    fn sql_that_removes_prepared_statements() {
+        let statement = |name: &'static str| {
+            Some(Deallocation::Statement(bytes::Bytes::from_static(
+                name.as_bytes(),
+            )))
+        };
+        assert_eq!(deallocation("DEALLOCATE _pg3_1"), statement("_pg3_1"));
+        assert_eq!(deallocation("DEALLOCATE PREPARE a1"), statement("a1"));
+        // Unquoted names are folded to lower case, quoted names are not
+        assert_eq!(deallocation("DEALLOCATE S_1"), statement("s_1"));
+        assert_eq!(deallocation(r#"DEALLOCATE "S_1""#), statement("S_1"));
+        assert_eq!(
+            deallocation("DEALLOCATE ALL"),
+            Some(Deallocation::AllStatements)
+        );
+        assert_eq!(
+            deallocation("DISCARD ALL"),
+            Some(Deallocation::AllStatements)
+        );
+        assert_eq!(deallocation("DISCARD PLANS"), None);
+        assert_eq!(deallocation("SELECT 1"), None);
     }
 }
