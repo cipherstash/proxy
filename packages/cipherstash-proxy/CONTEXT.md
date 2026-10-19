@@ -30,6 +30,13 @@ A type-analysed SQL statement — its param columns, projection columns, literal
 and PostgreSQL param type OIDs. The parsed AST and EQL Mapper's `TypeCheckedStatement`
 are different things; do not call either of them a Statement here.
 
+**Prepared statement**:
+A name the client prepared on its connection with Parse, and everything Proxy keeps for
+it: the Parse that prepared it, its Statement when it touches encrypted columns, its
+statement metrics scope, and whether its SQL is a deallocation. It lasts until a Close, a
+Parse that reuses the name, or a `DEALLOCATE` or `DISCARD ALL` that PostgreSQL confirms,
+and all of it is released together.
+
 **Portal**:
 A prepared statement bound to parameter values, ready to execute. Either `Encrypted`,
 carrying the analysed statement, or `Passthrough` when nothing in it is encrypted.

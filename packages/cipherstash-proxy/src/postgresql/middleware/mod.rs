@@ -339,11 +339,12 @@ mod tests {
     async fn encrypted_connection_stores_the_statements_it_prepares() {
         let mut connection = Connection::encrypted();
         prepare(&mut connection, &["a1"]).await;
-        assert_eq!(connection.sizes().statements, 1);
+        let a1 = Bytes::from_static(b"a1");
+        assert!(connection.context.get_statement(&a1).unwrap().is_some());
 
         let mut connection = Connection::new();
         prepare(&mut connection, &["a1"]).await;
-        assert_eq!(connection.sizes().statements, 0);
+        assert!(connection.context.get_statement(&a1).unwrap().is_none());
     }
 
     both_configs! {
@@ -696,7 +697,7 @@ mod tests {
             .await;
 
         // Keeping it can only leak; removing it would let its next Bind through unencrypted
-        assert_eq!(connection.sizes().statements, 1);
+        assert_eq!(connection.sizes().prepared_statements, 1);
     }
 
     both_configs! {
@@ -721,7 +722,7 @@ mod tests {
             }
             // Only the unnamed statement holding the last DEALLOCATE remains
             assert_eq!(connection.sizes(), after_first.unwrap());
-            assert_eq!(connection.sizes().statement_operations, 1);
+            assert_eq!(connection.sizes().prepared_statements, 1);
         }
     }
 
@@ -760,8 +761,7 @@ mod tests {
                     .await;
 
                 // Only the unnamed statement that ran the deallocation remains
-                assert_eq!(connection.sizes().statement_operations, 1, "{sql}");
-                assert_eq!(connection.sizes().statement_metrics_scopes, 1, "{sql}");
+                assert_eq!(connection.sizes().prepared_statements, 1, "{sql}");
                 assert_eq!(connection.sizes().portals, 0, "{sql}");
             }
         }
@@ -886,7 +886,7 @@ mod tests {
             // PostgreSQL has no statement `a1`, so Proxy must not restore the deallocated one
             assert!(!connection.holds_statement(b"a1"));
             assert_eq!(connection.sizes().settings_statements, 0);
-            assert_eq!(connection.sizes().statement_operations, 0);
+            assert_eq!(connection.sizes().prepared_statements, 0);
         }
     }
 
@@ -1050,6 +1050,7 @@ mod tests {
             connection.execute_prepared(b"disable", b"SET").await;
             connection.simple("DISCARD ALL", b"DISCARD ALL").await;
             assert!(!connection.context.unsafe_disable_mapping().unwrap());
+            assert_eq!(connection.sizes().prepared_statements, 0);
 
             connection
                 .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
@@ -1453,6 +1454,7 @@ mod tests {
                     .server(sync, ready(TransactionStatus::Idle))
                     .await;
             }
+            assert_eq!(connection.sizes().prepared_statements, 0);
         }
 
         #[tokio::test]
