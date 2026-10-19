@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792387400085,
+  "lastUpdate": 1792388239897,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27391,6 +27391,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.872169,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "846e99f8680f8ec94eb6e9fb5931a81af049aedd",
+          "message": "Merge pull request #472 from cipherstash/claude/project-thread-i1no80\n\nfix(proxy): release statement state on SQL DEALLOCATE and after each execution (CIP-5015)",
+          "timestamp": "2026-10-19T15:32:13+10:00",
+          "tree_id": "eb619231ecd99eb2449f69a5baa4383c15370585",
+          "url": "https://github.com/cipherstash/proxy/commit/846e99f8680f8ec94eb6e9fb5931a81af049aedd"
+        },
+        "date": 1792388238414,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.436253,
             "unit": "Number"
           }
         ]
