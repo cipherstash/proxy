@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792390713247,
+  "lastUpdate": 1792400375550,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27470,6 +27470,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.516127,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "00f37773e40b2090782eaef1ac61378c37e328cb",
+          "message": "Merge pull request #474 from cipherstash/claude/project-thread-gvoja6\n\nfix(proxy): reset keyset and mapping settings on DISCARD ALL and RESET (CIP-5021)",
+          "timestamp": "2026-10-19T18:54:21+10:00",
+          "tree_id": "debd06a3b319de66e316c68739602b7c0e604429",
+          "url": "https://github.com/cipherstash/proxy/commit/00f37773e40b2090782eaef1ac61378c37e328cb"
+        },
+        "date": 1792400373996,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.839885,
             "unit": "Number"
           }
         ]
