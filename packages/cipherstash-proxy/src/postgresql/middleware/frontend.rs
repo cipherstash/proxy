@@ -228,14 +228,11 @@ impl<S: EncryptionService> Frontend<S> {
                 let (portal, statement) = (bind.portal.clone(), bind.statement.clone());
                 match self.bind_handler(operation, Bind::try_from(bind)?).await {
                     Ok(Some(mapped)) => {
-                        self.context
-                            .bind_statement_deallocation(&portal, &statement)?;
+                        self.context.bind_statement_effects(&portal, &statement)?;
                         outbound_message = mapped;
                     }
                     // No mapping needed, don't change the bytes
-                    Ok(None) => self
-                        .context
-                        .bind_statement_deallocation(&portal, &statement)?,
+                    Ok(None) => self.context.bind_statement_effects(&portal, &statement)?,
                     Err(err) => match err {
                         Error::Mapping(MappingError::InvalidParameter(_)) => {
                             warn!(target: PROTOCOL,

@@ -951,6 +951,53 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn a_set_sent_after_a_reset_is_kept() {
+            let mut connection = connection();
+            connection.simple(KEYSET_ID, b"SET").await;
+
+            // The next client's SET is sent before PostgreSQL confirms the reset
+            let reset = connection.query("DISCARD ALL").await;
+            let set = connection.query(KEYSET_ID).await;
+            connection
+                .server(reset, command_complete(b"DISCARD ALL"))
+                .await;
+            connection
+                .server(reset, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(set, command_complete(b"SET")).await;
+            connection.server(set, ready(TransactionStatus::Idle)).await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+        }
+
+        #[tokio::test]
+        async fn a_set_of_one_setting_after_a_reset_keeps_the_other_reset() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            let parse = connection.parse_sql(b"", "RESET ALL".to_owned()).await;
+            let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            let set = connection
+                .query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection.server(execute, command_complete(b"RESET")).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(set, command_complete(b"SET")).await;
+            connection.server(set, ready(TransactionStatus::Idle)).await;
+
+            assert_eq!(connection.context.keyset_identifier(), None);
+            assert!(connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
         async fn resets_in_one_query_apply_in_order() {
             let mut connection = connection();
             connection.set_keyset_and_disable_mapping().await;

@@ -63,6 +63,7 @@ where
     upstream_tls_roots: Arc<rustls::RootCertStore>,
     unsafe_disable_mapping: Arc<AtomicBool>,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
+    settings_changes: Arc<SettingsChanges>,
     session_id_counter: Arc<AtomicU64>,
     transaction_status: Arc<RwLock<TransactionStatus>>,
 }
@@ -119,7 +120,25 @@ struct OperationContext {
     deallocations: VecDeque<Deallocation>,
     /// `RESET` and `DISCARD ALL` statements in a simple Query or an executed portal, applied
     /// in order as PostgreSQL confirms each one
-    settings_resets: VecDeque<SettingsReset>,
+    settings_resets: VecDeque<PendingSettingsReset>,
+}
+
+/// How many times each connection setting has been changed with `SET CIPHERSTASH.*`.
+///
+/// A reset is applied when PostgreSQL confirms it, after the client may have sent a later
+/// `SET`. Comparing these counts keeps the reset from undoing that `SET`.
+#[derive(Debug, Default)]
+struct SettingsChanges {
+    keyset: AtomicU64,
+    unsafe_disable_mapping: AtomicU64,
+}
+
+/// A settings reset sent to PostgreSQL, with the settings changes made before it was sent
+#[derive(Clone, Copy, Debug)]
+struct PendingSettingsReset {
+    reset: SettingsReset,
+    keyset_changes: u64,
+    unsafe_disable_mapping_changes: u64,
 }
 
 /// A connection setting returned to its startup value by SQL `RESET` or `DISCARD ALL`.
@@ -402,6 +421,7 @@ where
             reload_sender,
             unsafe_disable_mapping: Arc::new(AtomicBool::new(false)),
             keyset_id: Arc::new(RwLock::new(None)),
+            settings_changes: Arc::new(SettingsChanges::default()),
             session_id_counter: Arc::new(AtomicU64::new(1)),
             transaction_status: Arc::new(RwLock::new(TransactionStatus::Idle)),
         }
@@ -638,7 +658,9 @@ where
         let context = state.operations.entry(operation).or_default();
         context.execute = Some(execute);
         context.deallocations.extend(deallocation);
-        context.settings_resets.extend(settings_reset);
+        context
+            .settings_resets
+            .extend(settings_reset.map(|reset| self.pending_settings_reset(reset)));
         Ok(())
     }
 
@@ -780,11 +802,7 @@ where
 
     /// Carry the deallocation and settings reset of `statement`, if any, onto the portal just
     /// bound from it.
-    pub fn bind_statement_deallocation(
-        &self,
-        portal: &Name,
-        statement: &Name,
-    ) -> Result<(), Error> {
+    pub fn bind_statement_effects(&self, portal: &Name, statement: &Name) -> Result<(), Error> {
         let mut state = self
             .protocol_state
             .write()
@@ -933,20 +951,37 @@ where
             .entry(operation)
             .or_default()
             .settings_resets
-            .extend(resets);
+            .extend(
+                resets
+                    .into_iter()
+                    .map(|reset| self.pending_settings_reset(reset)),
+            );
         Ok(())
+    }
+
+    /// A settings reset being sent to PostgreSQL now
+    fn pending_settings_reset(&self, reset: SettingsReset) -> PendingSettingsReset {
+        PendingSettingsReset {
+            reset,
+            keyset_changes: self.settings_changes.keyset.load(Ordering::Acquire),
+            unsafe_disable_mapping_changes: self
+                .settings_changes
+                .unsafe_disable_mapping
+                .load(Ordering::Acquire),
+        }
     }
 
     ///
     /// Handle a `CommandComplete` from PostgreSQL for a `RESET` or `DISCARD ALL`.
     ///
     /// Applies the next settings reset in the operation, returning the settings PostgreSQL has
-    /// just reset to their startup values. Without this, a connection pool that resets a
+    /// just reset to their startup values, unless the client has changed a setting since it
+    /// sent the reset. Without this, a connection pool that resets a
     /// connection between clients hands the next client the previous client's keyset and
     /// `UNSAFE_DISABLE_MAPPING` setting.
     ///
     pub fn complete_settings_reset(&self, operation: OperationId) -> Result<(), Error> {
-        let Some(reset) = self
+        let Some(pending) = self
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
@@ -957,12 +992,20 @@ where
             return Ok(());
         };
 
-        debug!(target: CONTEXT, client_id = self.client_id, msg = "Reset settings", ?reset);
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Reset settings", ?pending);
+        let reset = pending.reset;
 
-        if matches!(
-            reset,
-            SettingsReset::All | SettingsReset::UnsafeDisableMapping
-        ) {
+        let unsafe_disable_mapping_unchanged = self
+            .settings_changes
+            .unsafe_disable_mapping
+            .load(Ordering::Acquire)
+            == pending.unsafe_disable_mapping_changes;
+        if unsafe_disable_mapping_unchanged
+            && matches!(
+                reset,
+                SettingsReset::All | SettingsReset::UnsafeDisableMapping
+            )
+        {
             self.unsafe_disable_mapping.store(false, Ordering::Release);
         }
 
@@ -970,19 +1013,23 @@ where
             .keyset_id
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let keyset_unchanged =
+            self.settings_changes.keyset.load(Ordering::Acquire) == pending.keyset_changes;
         // The keyset is set by ID or by name, and each RESET clears only its own setting
-        if matches!(
-            (reset, &*keyset_id),
-            (SettingsReset::All, _)
-                | (
-                    SettingsReset::KeysetId,
-                    Some(KeysetIdentifier(IdentifiedBy::Uuid(_)))
-                )
-                | (
-                    SettingsReset::KeysetName,
-                    Some(KeysetIdentifier(IdentifiedBy::Name(_)))
-                )
-        ) {
+        if keyset_unchanged
+            && matches!(
+                (reset, &*keyset_id),
+                (SettingsReset::All, _)
+                    | (
+                        SettingsReset::KeysetId,
+                        Some(KeysetIdentifier(IdentifiedBy::Uuid(_)))
+                    )
+                    | (
+                        SettingsReset::KeysetName,
+                        Some(KeysetIdentifier(IdentifiedBy::Name(_)))
+                    )
+            )
+        {
             *keyset_id = None;
         }
         Ok(())
@@ -1575,6 +1622,9 @@ where
                 })) = values.first()
                 {
                     self.unsafe_disable_mapping.store(*value, Ordering::Release);
+                    self.settings_changes
+                        .unsafe_disable_mapping
+                        .fetch_add(1, Ordering::AcqRel);
                     return Some(*value);
                 }
             }
@@ -1631,6 +1681,7 @@ where
                         .keyset_id
                         .write()
                         .map(|mut guard| *guard = Some(identifier.clone()));
+                    self.settings_changes.keyset.fetch_add(1, Ordering::AcqRel);
 
                     return Ok(Some(identifier));
                 } else {
@@ -1686,6 +1737,7 @@ where
                         .keyset_id
                         .write()
                         .map(|mut guard| *guard = Some(identifier.clone()));
+                    self.settings_changes.keyset.fetch_add(1, Ordering::AcqRel);
 
                     return Ok(Some(identifier));
                 } else {
