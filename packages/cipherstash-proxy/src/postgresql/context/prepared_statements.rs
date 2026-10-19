@@ -46,6 +46,10 @@ impl<K> PreparedStatements<K>
 where
     K: Copy + PartialOrd,
 {
+    pub fn contains(&self, name: &Name) -> bool {
+        self.statements.contains_key(name)
+    }
+
     pub fn statement(&self, name: &Name) -> Option<Arc<Statement>> {
         self.statements.get(name)?.statement.clone()
     }

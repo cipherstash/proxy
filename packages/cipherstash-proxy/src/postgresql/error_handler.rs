@@ -44,6 +44,9 @@ pub trait PostgreSqlErrorHandler {
                 )
             }
             Error::Mapping(MappingError::PreparedSettingsChanged) => diagnostics::prepared_statement_invalidated(err.to_string()),
+            Error::Mapping(MappingError::UnknownPreparedStatement { .. }) => {
+                diagnostics::invalid_sql_statement_name(err.to_string())
+            }
             Error::Mapping(err) => diagnostics::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,

@@ -992,6 +992,17 @@ impl<S: EncryptionService> Frontend<S> {
                 .finish_bind(operation, Portal::passthrough(None))?;
             return Ok(None);
         }
+
+        // Proxy stores a Statement only for statements that touch encrypted columns, so a name it
+        // has no Parse for could be one whose values must be encrypted. Refuse it rather than
+        // send the values as they are.
+        if !self.context.is_prepared(&bind.prepared_statement)? {
+            return Err(MappingError::UnknownPreparedStatement {
+                name: String::from_utf8_lossy(&bind.prepared_statement).into_owned(),
+            }
+            .into());
+        }
+
         let session_id = knowledge.metrics;
 
         let result = async {

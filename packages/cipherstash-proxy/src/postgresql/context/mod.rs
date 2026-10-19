@@ -1072,6 +1072,15 @@ where
         Ok(())
     }
 
+    /// Whether a Parse on this connection prepared `name`.
+    pub fn is_prepared(&self, name: &Name) -> Result<bool, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.prepared_statements.contains(name))
+    }
+
     pub fn get_statement(&self, name: &Name) -> Result<Option<Arc<Statement>>, Error> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let state = self

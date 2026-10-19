@@ -11,6 +11,7 @@ pub const CODE_SYNTAX_ERROR: &str = "42601";
 pub const CODE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
 pub const CODE_IDLE_SESSION_TIMEOUT: &str = "57P05";
 pub const CODE_SYSTEM_ERROR: &str = "58000";
+pub const CODE_INVALID_SQL_STATEMENT_NAME: &str = "26000";
 
 fn response(fields: impl IntoIterator<Item = (u8, String)>) -> DiagnosticResponse {
     DiagnosticResponse {
@@ -62,6 +63,11 @@ pub fn invalid_sql_statement(message: String) -> DiagnosticResponse {
         fields.push((b'P', position.to_string()));
     }
     response(fields)
+}
+
+/// The statement named by a Bind does not exist. PostgreSQL's own response to the same case.
+pub fn invalid_sql_statement_name(message: String) -> DiagnosticResponse {
+    standard("ERROR", CODE_INVALID_SQL_STATEMENT_NAME, message)
 }
 
 pub fn invalid_parameter(message: String, table: &str, column: &str) -> DiagnosticResponse {

@@ -95,8 +95,8 @@ mod tests {
     use bytes::Bytes;
     use eql_mapper::Schema;
     use pg_proto::{
-        BackendMessage, Bind, Close, Describe, DescribeTarget, Execute, FrontendMessage, Parse,
-        TransactionStatus,
+        BackendMessage, BackendMiddlewareOutput, Bind, Close, Describe, DescribeTarget, Execute,
+        FrontendMessage, FrontendMiddlewareOutput, Parse, TransactionStatus,
     };
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -218,16 +218,29 @@ mod tests {
 
         /// Client sends a message; returns the operation pg-proto assigns it
         async fn client(&mut self, message: FrontendMessage) -> OperationId {
-            let operation = test_operation_id();
-            self.frontend.intercept(operation, message).await.unwrap();
-            operation
+            self.client_output(message).await.0
         }
 
-        async fn server(&mut self, operation: OperationId, message: BackendMessage) {
+        /// Client sends a message; returns its operation and what Proxy sends PostgreSQL
+        async fn client_output(
+            &mut self,
+            message: FrontendMessage,
+        ) -> (OperationId, FrontendMiddlewareOutput) {
+            let operation = test_operation_id();
+            let output = self.frontend.intercept(operation, message).await.unwrap();
+            (operation, output)
+        }
+
+        /// PostgreSQL responds to an operation; returns what Proxy sends the client
+        async fn server(
+            &mut self,
+            operation: OperationId,
+            message: BackendMessage,
+        ) -> BackendMiddlewareOutput {
             self.backend
                 .intercept(Some(operation), message)
                 .await
-                .unwrap();
+                .unwrap()
         }
 
         async fn parse(&mut self, statement: &'static [u8]) -> OperationId {
@@ -958,6 +971,86 @@ mod tests {
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
             assert_eq!(statement_names(&connection), vec!["d".to_owned()]);
+        }
+    }
+
+    fn bind_message(statement: &'static [u8]) -> FrontendMessage {
+        FrontendMessage::Bind(Bind {
+            portal: Bytes::new(),
+            statement: Bytes::from_static(statement),
+            parameter_formats: vec![],
+            parameters: vec![],
+            result_formats: vec![],
+        })
+    }
+
+    both_configs! {
+        async fn bind_to_a_statement_proxy_did_not_see_prepared_fails_closed(connect) {
+            let mut connection = connect();
+
+            let (bind, output) = connection.client_output(bind_message(b"missing")).await;
+            connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+
+            // Proxy cannot tell whether the statement needs encryption, so its values never
+            // reach PostgreSQL under that name
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_ne!(forwarded.statement, Bytes::from_static(b"missing"));
+
+            // PostgreSQL rejects the redirected Bind, and the client sees Proxy's error
+            let output = connection.server(bind, error()).await;
+            let BackendMiddlewareOutput::Forward(BackendMessage::ErrorResponse(response)) = output
+            else {
+                panic!("expected an ErrorResponse, got {output:?}");
+            };
+            let code = response.fields.iter().find(|field| field.code == b'C').unwrap();
+            assert_eq!(code.value, Bytes::from_static(b"26000"));
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // The connection stays usable
+            prepare(&mut connection, &["a1"]).await;
+            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_eq!(forwarded.statement, Bytes::from_static(b"a1"));
+        }
+    }
+
+    both_configs! {
+        async fn statements_prepared_while_mapping_is_disabled_stay_prepared_after_it_is_enabled(connect) {
+            let mut connection = connect();
+            for (sql, prepared) in [
+                ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", Some("a1")),
+                ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", None),
+            ] {
+                let query = connection.query(sql).await;
+                connection.server(query, command_complete(b"SET")).await;
+                connection
+                    .server(query, ready(TransactionStatus::Idle))
+                    .await;
+                if let Some(name) = prepared {
+                    prepare(&mut connection, &[name]).await;
+                }
+            }
+
+            // Every Parse records its name, also while mapping is disabled
+            assert!(connection
+                .context
+                .is_prepared(&Bytes::from_static(b"a1"))
+                .unwrap());
+
+            // The Bind is still refused, because the statement was prepared under different
+            // effective settings
+            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_ne!(forwarded.statement, Bytes::from_static(b"a1"));
         }
     }
 
