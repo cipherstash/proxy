@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792372628861,
+  "lastUpdate": 1792380281262,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27316,6 +27316,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.119218,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "8565d569170540e1409e913719f34168254fc2b3",
+          "message": "fix(proxy): release statement state on SQL DEALLOCATE and after each execution (CIP-5015)",
+          "timestamp": "2026-10-17T06:31:57Z",
+          "url": "https://github.com/cipherstash/proxy/pull/472/commits/8565d569170540e1409e913719f34168254fc2b3"
+        },
+        "date": 1792380279779,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 34.773829,
             "unit": "Number"
           }
         ]
