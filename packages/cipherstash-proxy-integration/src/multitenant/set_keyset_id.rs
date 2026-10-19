@@ -369,4 +369,48 @@ mod tests {
         let result = client.query(&sql, &[]).await;
         assert!(result.is_ok());
     }
+
+    ///
+    /// Tests that a connection pool's reset clears the keyset, so that one client's keyset is
+    /// not carried over to the next client of a pooled connection.
+    /// Test both extended and simple query protocols
+    ///
+    #[tokio::test]
+    async fn pool_reset_clears_keyset_id() {
+        trace();
+        clear().await;
+
+        let tenant_keyset_id_1 = std::env::var("CS_TENANT_KEYSET_ID_1")
+            .map(|s| Uuid::parse_str(&s).unwrap())
+            .unwrap();
+
+        let insert_sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
+        let set_sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
+
+        let client = connect_with_tls(PROXY).await;
+
+        for reset in [
+            "DISCARD ALL",
+            "RESET ALL",
+            "RESET CIPHERSTASH.KEYSET_ID",
+            "SET CIPHERSTASH.KEYSET_ID TO DEFAULT",
+        ] {
+            // Simple query
+            client.simple_query(&set_sql).await.unwrap();
+            client.query(insert_sql, &[&random_id(), &1]).await.unwrap();
+            client.simple_query(reset).await.unwrap();
+
+            // CS_DEFAULT_KEYSET_ID is not set for these tests, so a keyset is required again
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_err(), "{reset}");
+
+            // Extended query
+            client.execute(&set_sql, &[]).await.unwrap();
+            client.query(insert_sql, &[&random_id(), &1]).await.unwrap();
+            client.execute(reset, &[]).await.unwrap();
+
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_err(), "{reset}");
+        }
+    }
 }
