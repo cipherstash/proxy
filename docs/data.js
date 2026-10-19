@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792388239897,
+  "lastUpdate": 1792389550120,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27420,6 +27420,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.436253,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6da115554a88335af3eb491e861782d475529739",
+          "message": "fix(proxy): reset keyset and mapping settings on DISCARD ALL and RESET (CIP-5021)",
+          "timestamp": "2026-10-19T05:32:17Z",
+          "url": "https://github.com/cipherstash/proxy/pull/474/commits/6da115554a88335af3eb491e861782d475529739"
+        },
+        "date": 1792389548716,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.58539,
             "unit": "Number"
           }
         ]
