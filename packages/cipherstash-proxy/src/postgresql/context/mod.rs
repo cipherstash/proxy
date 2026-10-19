@@ -101,6 +101,8 @@ where
     statement_resets: Arc<RwLock<HashMap<Name, SettingsReset>>>,
     /// Portals bound from one of those statements
     portal_resets: Arc<RwLock<HashMap<Name, SettingsReset>>>,
+    /// Statements whose SQL is a `SET CIPHERSTASH.<setting>`, applied each time they run
+    statement_settings: Arc<RwLock<HashMap<Name, sqltk::parser::ast::Statement>>>,
 }
 
 /// A connection setting returned to its startup value by SQL `RESET`, `DISCARD ALL` or
@@ -267,6 +269,7 @@ pub(crate) struct StateSizes {
     pub pending_settings_resets: usize,
     pub statement_resets: usize,
     pub portal_resets: usize,
+    pub statement_settings: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -323,6 +326,7 @@ where
             settings_changes: Arc::new(Mutex::new(SettingsChanges::default())),
             statement_resets: Arc::new(RwLock::new(HashMap::new())),
             portal_resets: Arc::new(RwLock::new(HashMap::new())),
+            statement_settings: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -499,6 +503,7 @@ where
             pending_settings_resets: self.pending_settings_resets.read().unwrap().len(),
             statement_resets: self.statement_resets.read().unwrap().len(),
             portal_resets: self.portal_resets.read().unwrap().len(),
+            statement_settings: self.statement_settings.read().unwrap().len(),
         }
     }
 
@@ -618,6 +623,11 @@ where
             .statement_resets
             .write()
             .map(|mut guarded| guarded.remove(name));
+
+        let _ = self
+            .statement_settings
+            .write()
+            .map(|mut guarded| guarded.remove(name));
     }
 
     /// Record whether the SQL parsed as statement `name` is a `DEALLOCATE` or `DISCARD ALL`.
@@ -653,6 +663,29 @@ where
                 None => guarded.remove(&name),
             };
         });
+    }
+
+    /// Record whether the SQL parsed as statement `name` is a `SET CIPHERSTASH.<setting>`, so
+    /// that executing it again applies the setting again.
+    pub fn set_statement_setting(
+        &mut self,
+        name: Name,
+        setting: Option<sqltk::parser::ast::Statement>,
+    ) {
+        let _ = self.statement_settings.write().map(|mut guarded| {
+            match setting {
+                Some(setting) => guarded.insert(name, setting),
+                None => guarded.remove(&name),
+            };
+        });
+    }
+
+    /// The `SET CIPHERSTASH.<setting>` that statement `name` runs, if any
+    pub fn statement_setting(&self, name: &Name) -> Option<sqltk::parser::ast::Statement> {
+        self.statement_settings
+            .read()
+            .ok()
+            .and_then(|statements| statements.get(name).cloned())
     }
 
     /// Carry the settings reset of `statement`, if any, onto the portal bound from it.

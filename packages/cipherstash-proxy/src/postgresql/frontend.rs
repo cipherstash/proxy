@@ -809,6 +809,8 @@ where
                 self.context
                     .set_statement_deallocation(message.name.to_owned(), None);
                 self.context
+                    .set_statement_setting(message.name.to_owned(), None);
+                self.context
                     .set_statement_reset(message.name.to_owned(), Some(to_settings_reset(reset)));
                 self.context.update_statement_metadata(session_id, |m| {
                     m.statement_type = Some(StatementType::Other);
@@ -824,6 +826,10 @@ where
         // executed `SET` with the same tag and a reset later in the batch must wait for its own
         self.context
             .set_statement_reset(message.name.to_owned(), to_statement_reset(&statement));
+        self.context.set_statement_setting(
+            message.name.to_owned(),
+            is_cipherstash_set(&statement).then(|| statement.clone()),
+        );
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -942,6 +948,21 @@ where
         if schema_changed {
             self.context.set_schema_changed();
         }
+    }
+
+    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` again for this
+    /// execution, as PostgreSQL does. Parse applied it once, but a reset since then may have
+    /// cleared it. Applying it counts as a change, so a reset sent before it does not undo it.
+    fn apply_statement_setting(&mut self, name: &Name) -> Result<(), Error> {
+        let Some(statement) = self.context.statement_setting(name) else {
+            return Ok(());
+        };
+        self.context.maybe_set_unsafe_disable_mapping(&statement);
+        // As on Parse, a keyset SET is ignored while mapping is disabled
+        if !self.context.unsafe_disable_mapping() {
+            self.handle_set_keyset(&statement)?;
+        }
+        Ok(())
     }
 
     ///
@@ -1070,6 +1091,7 @@ where
                     .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
                 self.context
                     .bind_portal_settings_reset(&bind.portal, &bind.prepared_statement);
+                self.apply_statement_setting(&bind.prepared_statement)?;
             }
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
@@ -1116,6 +1138,7 @@ where
 
         debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
         self.context.add_portal(bind.portal.to_owned(), portal);
+        self.apply_statement_setting(&bind.prepared_statement)?;
 
         if bind.requires_rewrite() {
             let bytes = BytesMut::try_from(bind)?;
@@ -1331,6 +1354,19 @@ fn to_statement_reset(statement: &ast::Statement) -> Option<SettingsReset> {
         ast::Statement::Set(set) => Some(to_set_default_reset(set).unwrap_or(SettingsReset::Other)),
         _ => None,
     }
+}
+
+/// Whether `statement` is a `SET CIPHERSTASH.<setting>`, spelled as the `maybe_set_*` handlers
+/// match it
+fn is_cipherstash_set(statement: &ast::Statement) -> bool {
+    let ast::Statement::Set(ast::Set::SingleAssignment { variable, .. }) = statement else {
+        return false;
+    };
+    variable
+        .0
+        .first()
+        .and_then(|part| part.as_ident())
+        .is_some_and(|ident| ident.value == "CIPHERSTASH")
 }
 
 /// The setting a `SET <setting> TO DEFAULT` returns to its startup value
