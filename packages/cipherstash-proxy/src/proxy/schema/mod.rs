@@ -8,6 +8,8 @@ mod manager;
 mod middleware;
 
 pub use manager::{CommittedSchemaStore, SchemaManager};
+#[cfg(test)]
+pub(crate) use middleware::committed_store_from_ddl;
 pub use middleware::{SchemaMiddleware, TransactionStatus};
 
 pub(crate) use middleware::postgres_identifier;
