@@ -26,7 +26,7 @@ use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
@@ -617,10 +617,16 @@ where
             .execute
             .write()
             .map(|mut queue| queue.discard_before(answered));
-        let _ = self
-            .session_metrics
-            .write()
-            .map(|mut queue| queue.discard_before(answered));
+        // A statement prepared in an earlier batch is usually executed in a later one, so its
+        // session must survive until then. Retention stays bounded by the live statements.
+        let live_sessions: HashSet<SessionId> = self
+            .statement_sessions
+            .read()
+            .map(|sessions| sessions.values().copied().collect())
+            .unwrap_or_default();
+        let _ = self.session_metrics.write().map(|mut queue| {
+            queue.retain_from(answered, |session| live_sessions.contains(&session.id()))
+        });
         let _ = self.pending_deallocations.write().map(|mut pending| {
             while pending.front().is_some_and(|(g, _)| *g < answered) {
                 pending.pop_front();
@@ -1273,6 +1279,18 @@ impl<T> Queue<T> {
         }
     }
 
+    /// Discards items queued before `generation` unless `keep` returns true for them.
+    pub fn retain_from(&mut self, generation: u64, keep: impl Fn(&T) -> bool) {
+        let items = std::mem::take(&mut self.queue);
+        let generations = std::mem::take(&mut self.generations);
+        for (item, g) in items.into_iter().zip(generations) {
+            if g >= generation || keep(&item) {
+                self.queue.push_back(item);
+                self.generations.push_back(g);
+            }
+        }
+    }
+
     pub fn next(&self) -> Option<&T> {
         self.queue.front()
     }
@@ -1903,7 +1921,7 @@ mod tests {
     }
 
     #[test]
-    pub fn prepare_without_execute_retains_no_session_metrics() {
+    pub fn prepare_without_execute_retains_only_the_live_statement_session() {
         let mut context = create_context();
         context.ready_for_query(b'I');
         let name = Name::unnamed();
@@ -1914,12 +1932,40 @@ mod tests {
             context.complete_describe();
             context.ready_for_query(b'I');
         }
-        assert_eq!(context.state_sizes().session_metrics, 0);
+        // Only the session of the statement that still exists is kept for a later execution
+        assert_eq!(context.state_sizes().session_metrics, 1);
         assert_eq!(context.state_sizes().describe, 0);
     }
 
     #[test]
-    pub fn pipelined_batch_failing_part_way_retains_nothing() {
+    pub fn statement_prepared_in_an_earlier_batch_keeps_its_session_for_execution() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        let name = Name::unnamed();
+
+        // Parse, Describe, Sync
+        parse(&mut context, &name);
+        let session_id = context.get_statement_session(&name).unwrap();
+        describe(&mut context, &name, Target::Statement);
+        context.sync_sent();
+        context.complete_describe();
+        context.ready_for_query(b'I');
+
+        // Bind, Execute, Sync
+        bind(&mut context, &name, &name);
+        context.set_execute_for_portal(name.clone());
+        context.sync_sent();
+        assert_eq!(context.latest_session_id(), Some(session_id));
+        execution_finished(&mut context);
+        context.ready_for_query(b'I');
+
+        let sizes = context.state_sizes();
+        assert_eq!(sizes.session_metrics, 0);
+        assert_eq!(sizes.execute, 0);
+    }
+
+    #[test]
+    pub fn pipelined_batch_failing_part_way_retains_only_the_live_statement_session() {
         let mut context = create_context();
         context.ready_for_query(b'I');
         let name = Name::unnamed();
@@ -1940,7 +1986,8 @@ mod tests {
         let sizes = context.state_sizes();
         assert_eq!(sizes.describe, 0);
         assert_eq!(sizes.execute, 0);
-        assert_eq!(sizes.session_metrics, 0);
+        // The skipped Parse's session is kept while the statement name refers to it
+        assert_eq!(sizes.session_metrics, 1);
         assert_eq!(sizes.portals, 0);
     }
 
