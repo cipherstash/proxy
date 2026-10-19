@@ -401,7 +401,12 @@ mod tests {
 
         let client = connect_with_tls(*PROXY).await;
 
-        for reset in ["DISCARD ALL", "RESET ALL", "RESET CIPHERSTASH.KEYSET_ID"] {
+        for reset in [
+            "DISCARD ALL",
+            "RESET ALL",
+            "RESET CIPHERSTASH.KEYSET_ID",
+            "SET CIPHERSTASH.KEYSET_ID TO DEFAULT",
+        ] {
             // Simple query
             client.simple_query(&set_sql).await.unwrap();
             client.query(insert_sql, &[&random_id(), &1]).await.unwrap();

@@ -189,6 +189,7 @@ mod tests {
             "DISCARD ALL",
             "RESET ALL",
             "RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING",
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT",
         ] {
             // Simple query
             client

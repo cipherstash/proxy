@@ -1076,13 +1076,77 @@ mod tests {
             assert_eq!(connection.sizes().statement_resets, 0);
         }
 
+        #[tokio::test]
+        async fn set_to_default_resets_that_setting() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            connection
+                .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT", b"SET")
+                .await;
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+
+            connection
+                .extended("SET CIPHERSTASH.KEYSET_ID = default".to_owned(), b"SET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+        }
+
+        #[tokio::test]
+        async fn set_keyset_name_to_default_is_not_a_keyset_named_default() {
+            let mut connection = connection();
+            connection
+                .simple("SET CIPHERSTASH.KEYSET_NAME = 'tenant'", b"SET")
+                .await;
+            connection
+                .simple("SET CIPHERSTASH.KEYSET_NAME TO DEFAULT", b"SET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            // Not a request for a keyset, so not refused when there is a default keyset
+            let mut connection = Connection::new();
+            let message = FrontendMessage::Query(Bytes::from_static(
+                b"SET CIPHERSTASH.KEYSET_NAME TO DEFAULT",
+            ));
+            let output = connection
+                .frontend
+                .intercept(test_operation_id(), message.clone())
+                .await
+                .unwrap();
+            assert!(
+                matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(forwarded) if forwarded == message)
+            );
+        }
+
+        #[tokio::test]
+        async fn set_to_default_after_other_sets_in_one_query() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            // Each SET is confirmed with its own tag, so only the second SET is a reset
+            let query = connection
+                .query("SET search_path = public; SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT; SET CIPHERSTASH.KEYSET_ID TO DEFAULT")
+                .await;
+            connection.server(query, command_complete(b"SET")).await;
+            connection.server(query, command_complete(b"SET")).await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+        }
+
         #[test]
         fn settings_reset_command_tags() {
             use super::super::backend::is_settings_reset;
             assert!(is_settings_reset(b"RESET"));
             assert!(is_settings_reset(b"DISCARD ALL\0"));
             assert!(!is_settings_reset(b"DISCARD PLANS"));
-            assert!(!is_settings_reset(b"SET"));
+            assert!(is_settings_reset(b"SET"));
+            assert!(!is_settings_reset(b"SELECT 1"));
         }
     }
 }

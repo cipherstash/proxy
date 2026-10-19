@@ -411,13 +411,8 @@ impl<S: EncryptionService> Frontend<S> {
                 .filter_map(to_deallocation)
                 .collect(),
         )?;
-        self.context.set_settings_resets(
-            operation,
-            parsed_statements
-                .iter()
-                .filter_map(to_discard_all_reset)
-                .collect(),
-        )?;
+        self.context
+            .set_settings_resets(operation, to_settings_resets(&parsed_statements))?;
         self.context.prepare_schema_for_statement().await?;
         if self
             .context
@@ -902,7 +897,7 @@ impl<S: EncryptionService> Frontend<S> {
             self.context
                 .set_statement_deallocation(message.statement.to_owned(), deallocation)?;
         }
-        if let Some(reset) = to_discard_all_reset(&statement) {
+        if let Some(reset) = to_statement_reset(&statement).filter(|r| *r != SettingsReset::Other) {
             self.context
                 .set_statement_reset(message.statement.to_owned(), reset)?;
         }
@@ -1043,6 +1038,13 @@ impl<S: EncryptionService> Frontend<S> {
     /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
     ///
     fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
+        // `SET CIPHERSTASH.KEYSET_* TO DEFAULT` is a reset, applied once PostgreSQL confirms it
+        if matches!(
+            to_statement_reset(statement),
+            Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
+        ) {
+            return Ok(());
+        }
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
             debug!(client_id = self.context.client_id, ?keyset_identifier);
 
@@ -1485,27 +1487,71 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
 fn to_settings_reset(reset: &ResetStatement) -> SettingsReset {
     match reset {
         ResetStatement::All => SettingsReset::All,
-        ResetStatement::Parameter(name) => match name.as_slice() {
-            [namespace, setting] if namespace == "cipherstash" => match setting.as_str() {
-                "keyset_id" => SettingsReset::KeysetId,
-                "keyset_name" => SettingsReset::KeysetName,
-                "unsafe_disable_mapping" => SettingsReset::UnsafeDisableMapping,
-                _ => SettingsReset::Other,
-            },
-            _ => SettingsReset::Other,
-        },
+        ResetStatement::Parameter(name) => setting_reset(name),
     }
 }
 
-/// `DISCARD ALL` resets every setting, as `RESET ALL` does
-fn to_discard_all_reset(statement: &ast::Statement) -> Option<SettingsReset> {
-    matches!(
-        statement,
+/// The Proxy setting named `name`, in lower case, as a reset
+fn setting_reset(name: &[String]) -> SettingsReset {
+    match name {
+        [namespace, setting] if namespace == "cipherstash" => match setting.as_str() {
+            "keyset_id" => SettingsReset::KeysetId,
+            "keyset_name" => SettingsReset::KeysetName,
+            "unsafe_disable_mapping" => SettingsReset::UnsafeDisableMapping,
+            _ => SettingsReset::Other,
+        },
+        _ => SettingsReset::Other,
+    }
+}
+
+/// The settings resets in a simple Query, one for each `DISCARD ALL` and `SET`, as PostgreSQL
+/// confirms each with its own `CommandComplete`. Empty if none of them resets a Proxy setting.
+fn to_settings_resets(statements: &[ast::Statement]) -> Vec<SettingsReset> {
+    let resets = statements
+        .iter()
+        .filter_map(to_statement_reset)
+        .collect::<Vec<_>>();
+    if resets.iter().all(|reset| *reset == SettingsReset::Other) {
+        return vec![];
+    }
+    resets
+}
+
+/// The settings reset by a `DISCARD ALL` or `SET` statement.
+///
+/// `DISCARD ALL` resets every setting, as `RESET ALL` does, and `SET <setting> TO DEFAULT`
+/// resets that setting, as `RESET <setting>` does. Any other `SET` is `Other`.
+fn to_statement_reset(statement: &ast::Statement) -> Option<SettingsReset> {
+    match statement {
         ast::Statement::Discard {
             object_type: ast::DiscardObject::ALL,
-        }
-    )
-    .then_some(SettingsReset::All)
+        } => Some(SettingsReset::All),
+        ast::Statement::Set(set) => Some(to_set_default_reset(set).unwrap_or(SettingsReset::Other)),
+        _ => None,
+    }
+}
+
+/// The setting a `SET <setting> TO DEFAULT` returns to its startup value
+fn to_set_default_reset(set: &ast::Set) -> Option<SettingsReset> {
+    let ast::Set::SingleAssignment {
+        variable, values, ..
+    } = set
+    else {
+        return None;
+    };
+    let [ast::Expr::Identifier(value)] = values.as_slice() else {
+        return None;
+    };
+    if value.quote_style.is_some() || !value.value.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    let name = variable
+        .0
+        .iter()
+        .filter_map(|part| part.as_ident())
+        .map(|ident| ident.value.to_lowercase())
+        .collect::<Vec<_>>();
+    Some(setting_reset(&name))
 }
 
 fn quote_literal(value: &str) -> String {

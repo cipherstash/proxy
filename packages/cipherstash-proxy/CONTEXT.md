@@ -103,9 +103,9 @@ produces only the term needed to match. The statement's EQL term shape decides w
 Proxy's in-band control API, intercepted rather than forwarded — `KEYSET_ID`,
 `KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING`. These are the supported spellings; log messages
 that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
-`DISCARD ALL`, `RESET ALL` and `RESET CIPHERSTASH.<setting>` return these settings to their
-startup values once PostgreSQL confirms the command, as connection pools rely on between
-clients.
+`DISCARD ALL`, `RESET ALL`, `RESET CIPHERSTASH.<setting>` and
+`SET CIPHERSTASH.<setting> TO DEFAULT` return these settings to their startup values once
+PostgreSQL confirms the command, as connection pools rely on between clients.
 
 **Reload**:
 Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces
