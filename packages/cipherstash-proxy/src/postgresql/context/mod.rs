@@ -26,7 +26,7 @@ use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
@@ -114,7 +114,8 @@ struct OperationContext {
     describe: Option<DescribeContext>,
     execute: Option<ExecuteContext>,
     error_response: Option<DiagnosticResponse>,
-    /// SQL deallocations in a simple Query, applied in order as PostgreSQL confirms each one
+    /// SQL deallocations in a simple Query or an executed portal, applied in order as
+    /// PostgreSQL confirms each one
     deallocations: VecDeque<Deallocation>,
 }
 
@@ -143,6 +144,7 @@ pub(crate) struct ProtocolStateSizes {
     pub statements: usize,
     pub statement_metrics_scopes: usize,
     pub statement_operations: usize,
+    pub statement_deallocations: usize,
     pub portals: usize,
     pub portal_operations: usize,
 }
@@ -156,8 +158,17 @@ struct ConnectionProtocolState<K = OperationId> {
     statement_metrics_scopes: HashMap<Name, SessionId>,
     /// The Parse operation that prepared each named statement
     statement_operations: HashMap<Name, K>,
+    /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
+    statement_deallocations: HashMap<Name, Deallocation>,
     portals: HashMap<Name, Arc<Portal>>,
-    portal_operations: HashMap<Name, K>,
+    portal_operations: HashMap<Name, PortalOwner<K>>,
+}
+
+/// The Bind operation that created a portal, and the SQL deallocation it runs when executed
+#[derive(Debug)]
+struct PortalOwner<K> {
+    operation: K,
+    deallocation: Option<Deallocation>,
 }
 
 impl<K> Default for ConnectionProtocolState<K> {
@@ -169,6 +180,7 @@ impl<K> Default for ConnectionProtocolState<K> {
             statements: HashMap::new(),
             statement_metrics_scopes: HashMap::new(),
             statement_operations: HashMap::new(),
+            statement_deallocations: HashMap::new(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
         }
@@ -589,9 +601,15 @@ where
                 metrics.start = Instant::now();
                 metrics.records_statement_metrics = true;
                 state.statement_metrics.insert(execution_id, metrics);
-                ExecuteContext::new(name, portal, Some(execution_id))
+                ExecuteContext::new(name.clone(), portal, Some(execution_id))
             });
-        state.operations.entry(operation).or_default().execute = Some(execute);
+        let deallocation = state
+            .portal_operations
+            .get(&name)
+            .and_then(|owner| owner.deallocation.clone());
+        let context = state.operations.entry(operation).or_default();
+        context.execute = Some(execute);
+        context.deallocations.extend(deallocation);
         Ok(())
     }
 
@@ -681,6 +699,7 @@ where
             let session_id = state.statement_metrics_scopes.remove(name);
             state.statements.remove(name);
             state.statement_operations.remove(name);
+            state.statement_deallocations.remove(name);
             let metrics_scope_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
             if !metrics_scope_in_use {
                 session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
@@ -700,6 +719,38 @@ where
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
             .statement_operations
             .insert(name, operation);
+        Ok(())
+    }
+
+    /// Record that the SQL of statement `name` is a `DEALLOCATE` or `DISCARD ALL`, so that
+    /// executing it through the extended protocol releases what it removes.
+    pub fn set_statement_deallocation(
+        &self,
+        name: Name,
+        deallocation: Deallocation,
+    ) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_deallocations
+            .insert(name, deallocation);
+        Ok(())
+    }
+
+    /// Carry the deallocation of `statement`, if any, onto the portal just bound from it.
+    pub fn bind_statement_deallocation(
+        &self,
+        portal: &Name,
+        statement: &Name,
+    ) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let deallocation = state.statement_deallocations.get(statement).cloned();
+        if let Some(owner) = state.portal_operations.get_mut(portal) {
+            owner.deallocation = deallocation;
+        }
         Ok(())
     }
 
@@ -735,7 +786,7 @@ where
     /// a deallocated name.
     ///
     pub fn complete_deallocation(&self, operation: OperationId) -> Result<(), Error> {
-        let names = {
+        let finished_metrics = {
             let mut state = self
                 .protocol_state
                 .write()
@@ -750,31 +801,39 @@ where
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
-            let names = match deallocation {
-                Deallocation::Statement(name) => vec![name],
+            let names: HashSet<Name> = match deallocation {
+                Deallocation::Statement(name) => HashSet::from([name]),
                 Deallocation::AllStatements => state
                     .statements
                     .keys()
                     .chain(state.statement_metrics_scopes.keys())
                     .chain(state.statement_operations.keys())
+                    .chain(state.statement_deallocations.keys())
                     // The unnamed statement is not removed by DEALLOCATE ALL or DISCARD ALL
                     .filter(|name| !name.is_empty())
                     .cloned()
                     .collect(),
             };
-            names
-                .into_iter()
-                .filter(|name| {
-                    state
-                        .statement_operations
-                        .get(name)
-                        .is_none_or(|prepared| *prepared < operation)
-                })
-                .collect::<Vec<_>>()
+
+            let mut candidates = Vec::new();
+            for name in names {
+                let prepared_earlier = state
+                    .statement_operations
+                    .get(&name)
+                    .is_none_or(|prepared| *prepared < operation);
+                if !prepared_earlier {
+                    continue;
+                }
+                state.statements.remove(&name);
+                state.statement_operations.remove(&name);
+                state.statement_deallocations.remove(&name);
+                candidates.extend(state.statement_metrics_scopes.remove(&name));
+            }
+            state.take_unreferenced_metrics(candidates)
         };
 
-        for name in names {
-            self.close_statement(&name)?;
+        for metrics in finished_metrics {
+            self.record_finished_metrics_scope(Some(metrics));
         }
         Ok(())
     }
@@ -792,6 +851,7 @@ where
             statements: state.statements.len(),
             statement_metrics_scopes: state.statement_metrics_scopes.len(),
             statement_operations: state.statement_operations.len(),
+            statement_deallocations: state.statement_deallocations.len(),
             portals: state.portals.len(),
             portal_operations: state.portal_operations.len(),
         }
@@ -828,8 +888,8 @@ where
                 let portal_names = state
                     .portal_operations
                     .iter()
-                    .filter_map(|(name, operation)| {
-                        (*operation <= boundary).then_some(name.clone())
+                    .filter_map(|(name, owner)| {
+                        (owner.operation <= boundary).then_some(name.clone())
                     })
                     .collect::<Vec<_>>();
                 for name in portal_names {
@@ -959,7 +1019,13 @@ where
                     .remove(&name)
                     .and_then(|(_, execute)| execute.session_id()),
             );
-            state.portal_operations.insert(name.clone(), operation);
+            state.portal_operations.insert(
+                name.clone(),
+                PortalOwner {
+                    operation,
+                    deallocation: None,
+                },
+            );
             state.portals.insert(name, Arc::new(portal));
             state.take_unreferenced_metrics(candidates)
         };

@@ -228,10 +228,17 @@ impl<S: EncryptionService> Frontend<S> {
             }
             FrontendMessage::Bind(bind) => {
                 let failed_bind = bind.clone();
+                let (portal, statement) = (bind.portal.clone(), bind.statement.clone());
                 match self.bind_handler(operation, Bind::try_from(bind)?).await {
-                    Ok(Some(mapped)) => outbound_message = mapped,
+                    Ok(Some(mapped)) => {
+                        self.context
+                            .bind_statement_deallocation(&portal, &statement)?;
+                        outbound_message = mapped;
+                    }
                     // No mapping needed, don't change the bytes
-                    Ok(None) => (),
+                    Ok(None) => self
+                        .context
+                        .bind_statement_deallocation(&portal, &statement)?,
                     Err(err) => match err {
                         Error::Mapping(MappingError::InvalidParameter(_)) => {
                             warn!(target: PROTOCOL,
@@ -845,6 +852,10 @@ impl<S: EncryptionService> Frontend<S> {
 
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
         let statement = SqlParser::parse_statement(&statement_text)?;
+        if let Some(deallocation) = to_deallocation(&statement) {
+            self.context
+                .set_statement_deallocation(message.statement.to_owned(), deallocation)?;
+        }
 
         self.context.prepare_schema_for_statement().await?;
         if eql_mapper::requires_type_check(&statement) {
@@ -1405,8 +1416,9 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
                 Some(Deallocation::AllStatements)
             } else if name.quote_style.is_none() {
                 // Unquoted identifiers are folded to lower case by PostgreSQL
+                // (ASCII letters only, as `downcase_identifier` does for UTF-8)
                 Some(Deallocation::Statement(Name::from(
-                    name.value.to_lowercase(),
+                    name.value.to_ascii_lowercase(),
                 )))
             } else {
                 Some(Deallocation::Statement(Name::from(name.value.clone())))
@@ -2286,6 +2298,8 @@ mod tests {
         // Unquoted names are folded to lower case, quoted names are not
         assert_eq!(deallocation("DEALLOCATE S_1"), statement("s_1"));
         assert_eq!(deallocation(r#"DEALLOCATE "S_1""#), statement("S_1"));
+        // Only ASCII letters are folded, as PostgreSQL does
+        assert_eq!(deallocation("DEALLOCATE ÄB1"), statement("Äb1"));
         assert_eq!(
             deallocation("DEALLOCATE ALL"),
             Some(Deallocation::AllStatements)

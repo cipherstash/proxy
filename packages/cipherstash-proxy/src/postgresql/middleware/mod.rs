@@ -189,6 +189,28 @@ mod tests {
             .await
         }
 
+        async fn parse_sql(&mut self, statement: &'static [u8], sql: String) -> OperationId {
+            self.client(FrontendMessage::Parse(Parse {
+                statement: Bytes::from_static(statement),
+                query: Bytes::from(sql),
+                parameter_types: vec![],
+            }))
+            .await
+        }
+
+        /// Parse, Bind, Execute and Sync `sql` as the unnamed statement, with PostgreSQL's
+        /// responses
+        async fn extended(&mut self, sql: String, tag: &'static [u8]) {
+            let parse = self.parse_sql(b"", sql).await;
+            let bind = self.bind(Bytes::new(), Bytes::new()).await;
+            let execute = self.execute(Bytes::new()).await;
+            let sync = self.client(FrontendMessage::Sync).await;
+            self.server(parse, BackendMessage::ParseComplete).await;
+            self.server(bind, BackendMessage::BindComplete).await;
+            self.server(execute, command_complete(tag)).await;
+            self.server(sync, ready(TransactionStatus::Idle)).await;
+        }
+
         async fn bind(&mut self, statement: Bytes, portal: Bytes) -> OperationId {
             self.client(FrontendMessage::Bind(Bind {
                 portal,
@@ -426,6 +448,72 @@ mod tests {
                 .await;
 
             assert_eq!(connection.sizes(), ProtocolStateSizes::default(), "{sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn extended_protocol_sql_deallocate_retains_nothing() {
+        let mut connection = Connection::new();
+        let mut after_first = None;
+        for i in 0..ITERATIONS {
+            let name = format!("_pg3_{i}");
+            let parse = connection.parse_named(name.clone()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            connection
+                .extended(format!("DEALLOCATE {name}"), b"DEALLOCATE")
+                .await;
+            after_first.get_or_insert_with(|| connection.sizes());
+        }
+        // Only the unnamed statement holding the last DEALLOCATE remains
+        assert_eq!(connection.sizes(), after_first.unwrap());
+        assert_eq!(connection.sizes().statement_operations, 1);
+    }
+
+    #[tokio::test]
+    async fn extended_protocol_deallocate_all_and_discard_all_retain_nothing() {
+        for (sql, tag) in [
+            ("DEALLOCATE ALL", &b"DEALLOCATE ALL"[..]),
+            ("DISCARD ALL", &b"DISCARD ALL"[..]),
+        ] {
+            let mut connection = Connection::new();
+            for i in 0..ITERATIONS {
+                let parse = connection.parse_named(format!("a{i}")).await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+            }
+
+            let tag = Bytes::copy_from_slice(tag);
+            let parse = connection.parse_sql(b"", sql.to_owned()).await;
+            let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, BackendMessage::CommandComplete(tag))
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // Only the unnamed statement that ran the deallocation remains
+            assert_eq!(connection.sizes().statement_operations, 1, "{sql}");
+            assert_eq!(connection.sizes().statement_metrics_scopes, 1, "{sql}");
+            assert_eq!(connection.sizes().portals, 0, "{sql}");
         }
     }
 
