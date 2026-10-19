@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Memory growth on long-lived connections**: Proxy now releases the prepared-statement, portal and statement-metrics state it keeps for each client connection once PostgreSQL has finished with it. Previously some common client patterns left state behind until the connection closed, so with a connection pool that keeps connections open, memory grew steadily until Proxy was restarted. The affected patterns were statements prepared and described but never executed, prepared statements removed with SQL `DEALLOCATE`, `DEALLOCATE ALL` or `DISCARD ALL` (used by psycopg 3, Rails and connection-pool reset queries), uniquely named portals, pipelined batches that fail part-way, and statements rejected by Proxy. No configuration change is required.
+- **Memory growth on long-lived connections**: Proxy now releases the prepared-statement, portal and statement-metrics state it keeps for each client connection once PostgreSQL has finished with it. Previously some common client patterns left state behind until the connection closed, so with a connection pool that keeps connections open, memory grew steadily until Proxy was restarted. The affected patterns were statements prepared and described but never executed, prepared statements removed with SQL `DEALLOCATE`, `DEALLOCATE ALL` or `DISCARD ALL` (used by psycopg 3, Rails and connection-pool reset queries, whether sent as a simple query or through the extended protocol), uniquely named portals, pipelined batches that fail part-way, and statements rejected by Proxy. No configuration change is required.
 
 ## [2.2.4] - 2026-06-18
 

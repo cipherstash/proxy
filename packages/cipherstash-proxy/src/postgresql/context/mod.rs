@@ -80,6 +80,10 @@ where
     ready_generation: Arc<AtomicU64>,
     statement_generations: Arc<RwLock<HashMap<Name, u64>>>,
     pending_deallocations: Arc<RwLock<VecDeque<(u64, Deallocation)>>>,
+    /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
+    statement_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
+    /// Portals bound from one of those statements
+    portal_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
 }
 
 /// A prepared-statement removal requested with SQL rather than a protocol `Close`.
@@ -189,6 +193,8 @@ pub(crate) struct StateSizes {
     pub execute: usize,
     pub session_metrics: usize,
     pub pending_deallocations: usize,
+    pub statement_deallocations: usize,
+    pub portal_deallocations: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -234,6 +240,8 @@ where
             ready_generation: Arc::new(AtomicU64::new(0)),
             statement_generations: Arc::new(RwLock::new(HashMap::new())),
             pending_deallocations: Arc::new(RwLock::new(VecDeque::new())),
+            statement_deallocations: Arc::new(RwLock::new(HashMap::new())),
+            portal_deallocations: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -354,6 +362,15 @@ where
     /// Set execute state for portal, looking up session ID internally.
     pub fn set_execute_for_portal(&mut self, name: Name) {
         let session_id = self.get_portal_session_id(&name);
+        // A portal running `DEALLOCATE` or `DISCARD ALL` through the extended protocol
+        let deallocation = self
+            .portal_deallocations
+            .read()
+            .ok()
+            .and_then(|portals| portals.get(&name).cloned());
+        if let Some(deallocation) = deallocation {
+            self.add_deallocations(vec![deallocation]);
+        }
         self.set_execute(name, session_id);
     }
 
@@ -389,6 +406,8 @@ where
             execute: self.execute.read().unwrap().queue.len(),
             session_metrics: self.session_metrics.read().unwrap().queue.len(),
             pending_deallocations: self.pending_deallocations.read().unwrap().len(),
+            statement_deallocations: self.statement_deallocations.read().unwrap().len(),
+            portal_deallocations: self.portal_deallocations.read().unwrap().len(),
         }
     }
 
@@ -486,6 +505,36 @@ where
             .statement_generations
             .write()
             .map(|mut guarded| guarded.remove(name));
+
+        let _ = self
+            .statement_deallocations
+            .write()
+            .map(|mut guarded| guarded.remove(name));
+    }
+
+    /// Record whether the SQL parsed as statement `name` is a `DEALLOCATE` or `DISCARD ALL`.
+    pub fn set_statement_deallocation(&mut self, name: Name, deallocation: Option<Deallocation>) {
+        let _ = self.statement_deallocations.write().map(|mut guarded| {
+            match deallocation {
+                Some(deallocation) => guarded.insert(name, deallocation),
+                None => guarded.remove(&name),
+            };
+        });
+    }
+
+    /// Carry the deallocation of `statement`, if any, onto the portal bound from it.
+    pub fn bind_portal_deallocation(&mut self, portal: &Name, statement: &Name) {
+        let deallocation = self
+            .statement_deallocations
+            .read()
+            .ok()
+            .and_then(|statements| statements.get(statement).cloned());
+        let _ = self.portal_deallocations.write().map(|mut guarded| {
+            match deallocation {
+                Some(deallocation) => guarded.insert(portal.clone(), deallocation),
+                None => guarded.remove(portal),
+            };
+        });
     }
 
     /// Close both statement and its associated portal.
@@ -560,6 +609,10 @@ where
                 }
             }
         });
+        let _ = self
+            .portal_deallocations
+            .write()
+            .map(|mut guarded| guarded.remove(name));
     }
 
     /// The generation assigned to protocol state created now.
@@ -644,6 +697,10 @@ where
                 queue.discard_before(generation);
                 !queue.is_empty()
             });
+            let _ = self
+                .portal_deallocations
+                .write()
+                .map(|mut guarded| guarded.retain(|name, _| portals.contains_key(name)));
         });
     }
 
@@ -696,8 +753,13 @@ where
                 if let Ok(statements) = self.statements.read() {
                     names.extend(statements.keys().cloned());
                 }
+                if let Ok(statements) = self.statement_deallocations.read() {
+                    names.extend(statements.keys().cloned());
+                }
                 // The unnamed statement is not removed by DEALLOCATE ALL or DISCARD ALL
                 names.retain(|name| !name.is_unnamed());
+                let mut seen = HashSet::new();
+                names.retain(|name| seen.insert(name.clone()));
                 names
             }
         };
@@ -2167,6 +2229,57 @@ mod tests {
 
         assert!(context.get_statement(&name).is_some());
         assert_eq!(context.state_sizes().pending_deallocations, 0);
+    }
+
+    /// Parse, Bind, Execute and Sync `deallocation` as the unnamed statement, with
+    /// PostgreSQL's responses
+    fn extended_deallocation(context: &mut Context<TestService>, deallocation: Deallocation) {
+        let unnamed = Name::unnamed();
+        parse(context, &unnamed);
+        context.set_statement_deallocation(unnamed.clone(), Some(deallocation));
+        bind(context, &unnamed, &unnamed);
+        context.bind_portal_deallocation(&unnamed, &unnamed);
+        context.set_execute_for_portal(unnamed.clone());
+        context.sync_sent();
+        execution_finished(context);
+        context.complete_deallocation();
+        context.ready_for_query(b'I');
+    }
+
+    #[test]
+    pub fn extended_protocol_sql_deallocate_removes_the_statement() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        for i in 0..ITERATIONS {
+            let name = Name::from(format!("_pg3_{i}").as_str());
+            parse(&mut context, &name);
+            context.sync_sent();
+            context.ready_for_query(b'I');
+            extended_deallocation(&mut context, Deallocation::Statement(name));
+        }
+        // Only the unnamed statement that ran the last DEALLOCATE remains
+        let sizes = context.state_sizes();
+        assert_eq!(sizes.statements, 1);
+        assert_eq!(sizes.statement_sessions, 1);
+        assert_eq!(sizes.statement_deallocations, 1);
+        assert_eq!(sizes.portal_deallocations, 0);
+        assert_eq!(sizes.pending_deallocations, 0);
+    }
+
+    #[test]
+    pub fn extended_protocol_sql_deallocate_all_removes_every_statement() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        for i in 0..ITERATIONS {
+            parse(&mut context, &Name::from(format!("a{i}").as_str()));
+        }
+        context.sync_sent();
+        context.ready_for_query(b'I');
+        extended_deallocation(&mut context, Deallocation::AllStatements);
+        let sizes = context.state_sizes();
+        assert_eq!(sizes.statements, 1);
+        assert_eq!(sizes.statement_sessions, 1);
+        assert_eq!(sizes.pending_deallocations, 0);
     }
 
     #[test]

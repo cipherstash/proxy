@@ -757,6 +757,8 @@ where
         );
 
         let statement = SqlParser::parse_statement(&message.statement)?;
+        self.context
+            .set_statement_deallocation(message.name.to_owned(), to_deallocation(&statement));
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -991,6 +993,10 @@ where
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         if self.context.unsafe_disable_mapping() {
+            if let Ok(bind) = Bind::try_from(bytes) {
+                self.context
+                    .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
+            }
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -998,6 +1004,8 @@ where
         }
 
         let mut bind = Bind::try_from(bytes)?;
+        self.context
+            .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
 
         let session_id = self
             .context
@@ -1190,7 +1198,8 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
             } else if name.quote_style.is_none() {
                 // Unquoted identifiers are folded to lower case by PostgreSQL
                 Some(Deallocation::Statement(Name::from(
-                    name.value.to_lowercase().as_str(),
+                    // (ASCII letters only, as `downcase_identifier` does for UTF-8)
+                    name.value.to_ascii_lowercase().as_str(),
                 )))
             } else {
                 Some(Deallocation::Statement(Name::from(name.value.as_str())))
@@ -1290,6 +1299,11 @@ mod tests {
         assert_eq!(
             deallocation("DEALLOCATE PREPARE a1"),
             Some(Deallocation::Statement(Name::from("a1")))
+        );
+        // Only ASCII letters are folded, as PostgreSQL does
+        assert_eq!(
+            deallocation("DEALLOCATE ÄB1"),
+            Some(Deallocation::Statement(Name::from("Äb1")))
         );
         // Unquoted names are folded to lower case, quoted names are not
         assert_eq!(
