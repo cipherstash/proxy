@@ -175,9 +175,7 @@ where
         let code = Code::from(code);
 
         if self.context.mapping_disabled() {
-            if produces_ready_for_query(code) {
-                self.context.sync_sent();
-            }
+            self.record_forwarded(code);
             self.write_to_server(bytes).await?;
             return Ok(());
         }
@@ -303,11 +301,26 @@ where
             }
         }
 
+        self.record_forwarded(code);
+        self.write_to_server(bytes).await?;
+        Ok(())
+    }
+
+    /// Track a message about to be forwarded, so each `ReadyForQuery` is matched to its batch.
+    /// Must be called before the message is written.
+    fn record_forwarded(&self, code: Code) {
+        match code {
+            Code::Unknown('d') => self.context.copy_data_sent(false),
+            // CopyDone, CopyFail
+            Code::Unknown('c') | Code::Unknown('f') => self.context.copy_data_sent(true),
+            _ => {}
+        }
         if produces_ready_for_query(code) {
             self.context.sync_sent();
         }
-        self.write_to_server(bytes).await?;
-        Ok(())
+        if matches!(code, Code::Execute | Code::Query) {
+            self.context.execution_sent();
+        }
     }
 
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {

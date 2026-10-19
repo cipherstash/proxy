@@ -880,7 +880,9 @@ mod tests {
         ];
 
         for (label, encode) in cases {
-            let context = passthrough_context();
+            let mut context = passthrough_context();
+            // Startup has finished
+            context.ready_for_query(b'I');
             assert!(
                 context.is_passthrough(),
                 "test context must be in passthrough mode"
@@ -937,13 +939,15 @@ mod tests {
 
         let ready_for_query = backend_message(b'Z', b"I");
         let mut server_bytes = BytesMut::new();
-        for _ in 0..STATEMENTS {
+        // The first one answers the StartupMessage
+        for _ in 0..=STATEMENTS {
             server_bytes.extend_from_slice(&ready_for_query);
         }
 
         let (client_sender, _client_receiver) = mpsc::unbounded_channel();
         let reader = Cursor::new(server_bytes.to_vec());
         let mut backend = Backend::new(client_sender, reader, passthrough_context());
+        backend.rewrite().await.unwrap();
 
         for i in 0..STATEMENTS {
             // Frontend: Parse, Describe, Sync
@@ -959,6 +963,40 @@ mod tests {
                 "session_metrics queue not drained at statement {i}"
             );
         }
+    }
+
+    /// A client may pipeline a batch before PostgreSQL's startup `ReadyForQuery` arrives. That
+    /// `ReadyForQuery` answers the `StartupMessage`, so the batch must keep its state until its
+    /// own `ReadyForQuery`.
+    #[tokio::test]
+    async fn startup_ready_for_query_keeps_a_batch_pipelined_before_it() {
+        log::init(LogConfig::default());
+
+        let ready_for_query = backend_message(b'Z', b"I");
+        let mut server_bytes = BytesMut::new();
+        server_bytes.extend_from_slice(&ready_for_query);
+        server_bytes.extend_from_slice(&ready_for_query);
+
+        let (client_sender, _client_receiver) = mpsc::unbounded_channel();
+        let reader = Cursor::new(server_bytes.to_vec());
+        let mut backend = Backend::new(client_sender, reader, passthrough_context());
+
+        // Frontend: Parse, Bind, Execute, Sync before startup has finished
+        let session_id = backend.context.start_session();
+        backend
+            .context
+            .set_execute(Name::unnamed(), Some(session_id));
+        backend.context.sync_sent();
+
+        // Backend: the startup ReadyForQuery
+        backend.rewrite().await.unwrap();
+        assert_eq!(backend.context.execute_queue_len(), 1);
+        assert_eq!(backend.context.session_metrics_queue_len(), 1);
+
+        // Backend: the batch's ReadyForQuery
+        backend.rewrite().await.unwrap();
+        assert_eq!(backend.context.execute_queue_len(), 0);
+        assert_eq!(backend.context.session_metrics_queue_len(), 0);
     }
 
     #[test]

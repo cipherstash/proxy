@@ -28,7 +28,7 @@ pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
     },
     time::{Duration, Instant},
@@ -78,8 +78,15 @@ where
     session_id_counter: Arc<AtomicU64>,
     sync_generation: Arc<AtomicU64>,
     ready_generation: Arc<AtomicU64>,
-    statement_generations: Arc<RwLock<HashMap<Name, u64>>>,
-    pending_deallocations: Arc<RwLock<VecDeque<(u64, Deallocation)>>>,
+    /// `sync_generation` when the last `Execute` or `Query` was forwarded
+    execution_generation: Arc<AtomicU64>,
+    /// The client is sending `COPY ... FROM STDIN` data
+    copy_in: Arc<AtomicBool>,
+    /// Number of `Parse` messages seen, see [`Context::set_statement_session`]
+    parse_sequence: Arc<AtomicU64>,
+    /// The `parse_sequence` value assigned to each statement by its `Parse`
+    statement_sequences: Arc<RwLock<HashMap<Name, u64>>>,
+    pending_deallocations: Arc<RwLock<VecDeque<PendingDeallocation>>>,
     /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
     statement_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
     /// Portals bound from one of those statements
@@ -98,6 +105,16 @@ pub enum Deallocation {
     /// `DISCARD ALL` also closes portals, but it cannot run inside a transaction block, so any
     /// earlier portals are already gone and are discarded by [`Context::ready_for_query`].
     AllStatements,
+}
+
+/// A [`Deallocation`] forwarded to PostgreSQL and waiting for its `CommandComplete`.
+#[derive(Clone, Debug)]
+struct PendingDeallocation {
+    /// Generation of the batch it was sent in, see [`Context::sync_generation`]
+    generation: u64,
+    /// Only statements with a parse sequence up to this value existed when it was sent
+    parsed_before: u64,
+    deallocation: Deallocation,
 }
 
 /// Context for tracking an in-flight Execute operation.
@@ -187,7 +204,7 @@ impl SessionMetricsContext {
 pub(crate) struct StateSizes {
     pub statements: usize,
     pub statement_sessions: usize,
-    pub statement_generations: usize,
+    pub statement_sequences: usize,
     pub portals: usize,
     pub describe: usize,
     pub execute: usize,
@@ -236,9 +253,13 @@ where
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
             session_id_counter: Arc::new(AtomicU64::new(1)),
-            sync_generation: Arc::new(AtomicU64::new(0)),
+            // The StartupMessage is answered by the first ReadyForQuery
+            sync_generation: Arc::new(AtomicU64::new(1)),
             ready_generation: Arc::new(AtomicU64::new(0)),
-            statement_generations: Arc::new(RwLock::new(HashMap::new())),
+            execution_generation: Arc::new(AtomicU64::new(1)),
+            copy_in: Arc::new(AtomicBool::new(false)),
+            parse_sequence: Arc::new(AtomicU64::new(0)),
+            statement_sequences: Arc::new(RwLock::new(HashMap::new())),
             pending_deallocations: Arc::new(RwLock::new(VecDeque::new())),
             statement_deallocations: Arc::new(RwLock::new(HashMap::new())),
             portal_deallocations: Arc::new(RwLock::new(HashMap::new())),
@@ -400,7 +421,7 @@ where
         StateSizes {
             statements: self.statements.read().unwrap().len(),
             statement_sessions: self.statement_sessions.read().unwrap().len(),
-            statement_generations: self.statement_generations.read().unwrap().len(),
+            statement_sequences: self.statement_sequences.read().unwrap().len(),
             portals: self.portals.read().unwrap().len(),
             describe: self.describe.read().unwrap().queue.len(),
             execute: self.execute.read().unwrap().queue.len(),
@@ -428,8 +449,20 @@ where
     ///     An unnamed portal is destroyed at the end of the transaction, or as soon as the next Bind statement specifying the unnamed portal as destination is issued
     ///
     /// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+    ///
+    /// An Execute queued by a later, pipelined batch is left alone: an `ErrorResponse` for a
+    /// batch that never reached its Execute must not take the next batch's.
     pub fn complete_execution(&mut self) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
+
+        let answering = self.ready_generation();
+        let current = self
+            .execute
+            .read()
+            .is_ok_and(|queue| queue.next_generation().is_some_and(|g| g <= answering));
+        if !current {
+            return;
+        }
 
         if let Some(execute) = self.get_execute() {
             if let Some(session_id) = execute.session_id() {
@@ -502,7 +535,7 @@ where
             .map(|mut guarded| guarded.remove(name));
 
         let _ = self
-            .statement_generations
+            .statement_sequences
             .write()
             .map(|mut guarded| guarded.remove(name));
 
@@ -560,12 +593,16 @@ where
         statements.get(name).cloned()
     }
 
+    /// Record the session of the statement prepared by a `Parse` that is about to be forwarded.
+    ///
+    /// Also gives the statement the next parse sequence number, so a SQL deallocation removes
+    /// it only if the statement was parsed before the deallocation was sent.
     pub fn set_statement_session(&mut self, name: Name, session_id: SessionId) {
-        let generation = self.sync_generation();
+        let sequence = self.parse_sequence.fetch_add(1, Ordering::AcqRel) + 1;
         let _ = self
-            .statement_generations
+            .statement_sequences
             .write()
-            .map(|mut generations| generations.insert(name.clone(), generation));
+            .map(|mut sequences| sequences.insert(name.clone(), sequence));
         let _ = self
             .statement_sessions
             .write()
@@ -617,9 +654,9 @@ where
 
     /// The generation assigned to protocol state created now.
     ///
-    /// A generation is the number of `ReadyForQuery`-producing messages (`Sync`, `Query`,
-    /// `FunctionCall`) forwarded to PostgreSQL so far, so all state created for one batch
-    /// shares a generation and later batches have higher ones.
+    /// A generation is the number of `ReadyForQuery`-producing messages (the `StartupMessage`,
+    /// then `Sync`, `Query` and `FunctionCall`) forwarded to PostgreSQL so far, so all state
+    /// created for one batch shares a generation and later batches have higher ones.
     pub fn sync_generation(&self) -> u64 {
         self.sync_generation.load(Ordering::Acquire)
     }
@@ -629,7 +666,32 @@ where
     /// Must be called before the message is written, so the matching `ReadyForQuery` can never
     /// be read first.
     pub fn sync_sent(&self) {
+        if self.copy_in.load(Ordering::Acquire) {
+            return;
+        }
         self.sync_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Record that an `Execute` or `Query` is about to be forwarded, after any [`Self::sync_sent`]
+    /// for the same message.
+    ///
+    /// If it starts a `COPY ... FROM STDIN`, PostgreSQL ignores the `Sync` messages sent from now
+    /// until the copy ends, see [`Self::copy_data_sent`].
+    pub fn execution_sent(&self) {
+        self.execution_generation
+            .store(self.sync_generation(), Ordering::Release);
+    }
+
+    /// Record that a `CopyData`, or with `end` a `CopyDone` or `CopyFail`, is about to be
+    /// forwarded.
+    ///
+    /// PostgreSQL ignores `Sync` during copy-in, so the first copy message takes back the Syncs
+    /// counted since the `Execute` that started the copy, and no Sync counts until it ends.
+    pub fn copy_data_sent(&self, end: bool) {
+        if !self.copy_in.swap(!end, Ordering::AcqRel) {
+            let started = self.execution_generation.load(Ordering::Acquire);
+            self.sync_generation.store(started, Ordering::Release);
+        }
     }
 
     /// The generation of the batch PostgreSQL is currently responding to.
@@ -649,7 +711,9 @@ where
     /// Portals outlive a `Sync` while a transaction is open, so they are only discarded once
     /// the connection is idle (`transaction_status` `I`).
     ///
-    /// A `ReadyForQuery` with no outstanding request (the one sent after startup) is ignored.
+    /// The `ReadyForQuery` sent after startup answers the `StartupMessage`, so a batch the client
+    /// pipelined before it keeps its state. A `ReadyForQuery` with no outstanding request is
+    /// ignored.
     ///
     pub fn ready_for_query(&mut self, transaction_status: u8) {
         let sent = self.sync_generation();
@@ -681,7 +745,7 @@ where
             queue.retain_from(answered, |session| live_sessions.contains(&session.id()))
         });
         let _ = self.pending_deallocations.write().map(|mut pending| {
-            while pending.front().is_some_and(|(g, _)| *g < answered) {
+            while pending.front().is_some_and(|p| p.generation < answered) {
                 pending.pop_front();
             }
         });
@@ -710,8 +774,17 @@ where
             return;
         }
         let generation = self.sync_generation();
+        let parsed_before = self.parse_sequence.load(Ordering::Acquire);
         let _ = self.pending_deallocations.write().map(|mut pending| {
-            pending.extend(deallocations.into_iter().map(|d| (generation, d)));
+            pending.extend(
+                deallocations
+                    .into_iter()
+                    .map(|deallocation| PendingDeallocation {
+                        generation,
+                        parsed_before,
+                        deallocation,
+                    }),
+            );
         });
     }
 
@@ -719,24 +792,29 @@ where
     /// Handle a `CommandComplete` from PostgreSQL for a `DEALLOCATE` or `DISCARD ALL`.
     ///
     /// Applies the oldest queued deallocation for the batch being answered, removing the
-    /// statements PostgreSQL has just removed. Statements prepared by a later batch keep their
-    /// state even when they reuse a deallocated name.
+    /// statements PostgreSQL has just removed. Statements parsed after the deallocation was sent
+    /// keep their state even when they reuse a deallocated name.
     ///
     pub fn complete_deallocation(&mut self) {
         let answering = self.ready_generation();
-        let deallocation = self
+        let pending = self
             .pending_deallocations
             .write()
             .ok()
             .and_then(|mut pending| {
-                if pending.front().is_some_and(|(g, _)| *g == answering) {
-                    pending.pop_front().map(|(_, d)| d)
+                if pending.front().is_some_and(|p| p.generation == answering) {
+                    pending.pop_front()
                 } else {
                     None
                 }
             });
 
-        let Some(deallocation) = deallocation else {
+        let Some(PendingDeallocation {
+            parsed_before,
+            deallocation,
+            ..
+        }) = pending
+        else {
             return;
         };
 
@@ -746,9 +824,9 @@ where
             Deallocation::Statement(name) => vec![name.clone()],
             Deallocation::AllStatements => {
                 let mut names = self
-                    .statement_generations
+                    .statement_sequences
                     .read()
-                    .map(|g| g.keys().cloned().collect::<Vec<_>>())
+                    .map(|s| s.keys().cloned().collect::<Vec<_>>())
                     .unwrap_or_default();
                 if let Ok(statements) = self.statements.read() {
                     names.extend(statements.keys().cloned());
@@ -765,13 +843,15 @@ where
         };
 
         for name in names {
-            let generation = self
-                .statement_generations
+            // A statement with no recorded Parse is kept: leaking it is safe, while removing a
+            // statement PostgreSQL still has would let its next Bind through unencrypted.
+            let parsed_in_time = self
+                .statement_sequences
                 .read()
                 .ok()
-                .and_then(|g| g.get(&name).copied())
-                .unwrap_or(0);
-            if generation <= answering {
+                .and_then(|s| s.get(&name).copied())
+                .is_some_and(|sequence| sequence <= parsed_before);
+            if parsed_in_time {
                 self.close_statement(&name);
             }
         }
@@ -1357,6 +1437,11 @@ impl<T> Queue<T> {
         self.queue.front()
     }
 
+    /// Generation of the first item in the queue
+    pub fn next_generation(&self) -> Option<u64> {
+        self.generations.front().copied()
+    }
+
     pub fn add(&mut self, item: T, generation: u64) {
         self.queue.push_back(item);
         self.generations.push_back(generation);
@@ -1481,6 +1566,7 @@ mod tests {
         log::init(LogConfig::default());
 
         let mut context = create_context();
+        context.ready_for_query(b'I');
 
         let statement_name = Name::from("statement");
         let portal_name = Name::from("portal");
@@ -1532,6 +1618,7 @@ mod tests {
         log::init(LogConfig::default());
 
         let mut context = create_context();
+        context.ready_for_query(b'I');
 
         for _ in 0..1000 {
             // Frontend: a session + execute are enqueued for every statement.
@@ -1961,6 +2048,91 @@ mod tests {
     }
 
     #[test]
+    pub fn batch_pipelined_before_the_startup_ready_for_query_keeps_its_state() {
+        let mut context = create_context();
+
+        // The client sends a whole batch before PostgreSQL finishes starting up
+        let name = Name::unnamed();
+        parse(&mut context, &name);
+        bind(&mut context, &name, &name);
+        describe(&mut context, &name, Target::Portal);
+        context.set_execute_for_portal(name.clone());
+        context.sync_sent();
+
+        // The startup ReadyForQuery answers the StartupMessage, not the batch
+        context.ready_for_query(b'I');
+
+        let sizes = context.state_sizes();
+        assert_eq!(sizes.describe, 1);
+        assert_eq!(sizes.execute, 1);
+        assert_eq!(sizes.portals, 1);
+        assert!(context.get_portal_statement(&name).is_some());
+    }
+
+    #[test]
+    pub fn error_in_a_batch_without_execute_keeps_the_next_batch_execute() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+
+        // Batch 1: Parse(bad), Sync. PostgreSQL rejects the Parse.
+        let session_id = context.start_session();
+        context.set_statement_session(Name::from("bad"), session_id);
+        context.sync_sent();
+
+        // Batch 2, pipelined: Parse, Bind, Execute, Sync
+        let name = Name::unnamed();
+        parse(&mut context, &name);
+        bind(&mut context, &name, &name);
+        context.set_execute_for_portal(name.clone());
+        context.sync_sent();
+
+        // Backend: ErrorResponse and ReadyForQuery for batch 1
+        execution_finished(&mut context);
+        context.ready_for_query(b'I');
+
+        // Batch 2's rows still find their portal
+        assert_eq!(context.state_sizes().execute, 1);
+        assert!(context
+            .get_execute()
+            .is_some_and(|execute| execute.name == name));
+    }
+
+    #[test]
+    pub fn syncs_ignored_during_copy_in_keep_later_batches_in_step() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        let name = Name::from("s1");
+        parse(&mut context, &name);
+        context.sync_sent();
+        context.ready_for_query(b'I');
+
+        // Execute(COPY ... FROM STDIN), Sync, CopyData, CopyDone, Sync
+        let unnamed = Name::unnamed();
+        parse(&mut context, &unnamed);
+        bind(&mut context, &unnamed, &unnamed);
+        context.set_execute_for_portal(unnamed.clone());
+        context.execution_sent();
+        context.sync_sent();
+        context.copy_data_sent(false);
+        context.copy_data_sent(true);
+        context.sync_sent();
+
+        // PostgreSQL ignored the first Sync, so one CommandComplete and one ReadyForQuery
+        execution_finished(&mut context);
+        context.ready_for_query(b'I');
+
+        // DEALLOCATE s1 in the next batch still releases the statement
+        simple_query(&mut context, vec![Deallocation::Statement(name.clone())]);
+        context.execution_sent();
+        execution_finished(&mut context);
+        context.complete_deallocation();
+        assert_eq!(context.state_sizes().execute, 0);
+        context.ready_for_query(b'I');
+
+        assert!(context.get_statement(&name).is_none());
+    }
+
+    #[test]
     pub fn balanced_extended_protocol_retains_nothing() {
         let mut context = create_context();
         context.ready_for_query(b'I');
@@ -2280,6 +2452,55 @@ mod tests {
         assert_eq!(sizes.statements, 1);
         assert_eq!(sizes.statement_sessions, 1);
         assert_eq!(sizes.pending_deallocations, 0);
+    }
+
+    /// Parse, Bind and Execute `deallocation` as the unnamed statement, without the Sync
+    fn send_extended_deallocation(context: &mut Context<TestService>, deallocation: Deallocation) {
+        let unnamed = Name::unnamed();
+        parse(context, &unnamed);
+        context.set_statement_deallocation(unnamed.clone(), Some(deallocation));
+        bind(context, &unnamed, &unnamed);
+        context.bind_portal_deallocation(&unnamed, &unnamed);
+        context.set_execute_for_portal(unnamed.clone());
+    }
+
+    #[test]
+    pub fn extended_deallocate_all_keeps_a_statement_parsed_later_in_the_same_batch() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+
+        // Parse/Bind/Execute(DEALLOCATE ALL), Parse(s_new), Sync
+        send_extended_deallocation(&mut context, Deallocation::AllStatements);
+        let name = Name::from("s_new");
+        parse(&mut context, &name);
+        context.sync_sent();
+
+        execution_finished(&mut context);
+        context.complete_deallocation();
+        context.ready_for_query(b'I');
+
+        assert!(context.get_statement(&name).is_some());
+    }
+
+    #[test]
+    pub fn extended_deallocate_keeps_a_statement_reparsed_later_in_the_same_batch() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        let name = Name::from("s1");
+        parse(&mut context, &name);
+        context.sync_sent();
+        context.ready_for_query(b'I');
+
+        // Parse/Bind/Execute(DEALLOCATE s1), Parse(s1), Sync
+        send_extended_deallocation(&mut context, Deallocation::Statement(name.clone()));
+        parse(&mut context, &name);
+        context.sync_sent();
+
+        execution_finished(&mut context);
+        context.complete_deallocation();
+        context.ready_for_query(b'I');
+
+        assert!(context.get_statement(&name).is_some());
     }
 
     #[test]
