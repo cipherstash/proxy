@@ -146,6 +146,15 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<BackendMiddlewareOutput, Error> {
         let mut outbound_message = protocol_message.clone();
 
+        if let (BackendMessage::CommandComplete(tag), Some(operation)) =
+            (&protocol_message, operation)
+        {
+            if is_deallocation(tag) {
+                self.context
+                    .complete_deallocation(operation, removes_all_statements(tag))?;
+            }
+        }
+
         if matches!(
             protocol_message,
             BackendMessage::ParseComplete | BackendMessage::BindComplete
@@ -787,6 +796,18 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
+}
+
+/// Whether a `CommandComplete` tag confirms a `DEALLOCATE` or `DISCARD ALL`
+pub(super) fn is_deallocation(tag: &[u8]) -> bool {
+    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    matches!(tag, b"DEALLOCATE" | b"DEALLOCATE ALL" | b"DISCARD ALL")
+}
+
+/// Whether a deallocation command tag removes every prepared statement
+fn removes_all_statements(tag: &[u8]) -> bool {
+    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    matches!(tag, b"DEALLOCATE ALL" | b"DISCARD ALL")
 }
 
 #[cfg(test)]
