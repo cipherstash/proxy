@@ -21,7 +21,7 @@ impl MessageBuffer {
     }
 
     pub fn drain(&mut self) -> Vec<DataRow> {
-        self.buffer.drain(..).collect()
+        std::mem::take(&mut self.buffer)
     }
 
     pub fn clear(&mut self) {

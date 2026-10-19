@@ -378,8 +378,8 @@ mod tests {
 
         // Test cases that should potentially fail or be handled gracefully
         let invalid_cases = vec![
-            format!("SET CIPHERSTASH.KEYSET_NAME = test-1"), // unquoted string that is NOT a valid pg Identifier
-            format!("SET CIPHERSTASH.KEYSET_NAME = NULL"),   // null value
+            "SET CIPHERSTASH.KEYSET_NAME = test-1".to_string(), // unquoted string that is NOT a valid pg Identifier
+            "SET CIPHERSTASH.KEYSET_NAME = NULL".to_string(),   // null value
         ];
 
         for invalid_sql in invalid_cases {

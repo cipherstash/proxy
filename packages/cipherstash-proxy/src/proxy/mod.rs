@@ -148,6 +148,8 @@ impl Proxy {
     }
 }
 
+// The async-trait expansion trips this lint on newer toolchains.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait EncryptionService: Send + Sync {
     /// Encrypt plaintexts for storage in the database
