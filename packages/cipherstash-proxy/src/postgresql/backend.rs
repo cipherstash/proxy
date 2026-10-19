@@ -172,6 +172,11 @@ where
             );
         }
 
+        // Recorded before the client can see it, so it precedes the client's first copy message
+        if code == u8::from(BackendCode::CopyInResponse) {
+            self.context.copy_in_started();
+        }
+
         if self.context.is_passthrough() {
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,

@@ -82,6 +82,8 @@ where
     execution_generation: Arc<AtomicU64>,
     /// The client is sending `COPY ... FROM STDIN` data
     copy_in: Arc<AtomicBool>,
+    /// PostgreSQL sent a `CopyInResponse` that no copy message has answered yet
+    copy_in_response: Arc<AtomicBool>,
     /// Number of `Parse` messages seen, see [`Context::set_statement_session`]
     parse_sequence: Arc<AtomicU64>,
     /// The `parse_sequence` value assigned to each statement by its `Parse`
@@ -258,6 +260,7 @@ where
             ready_generation: Arc::new(AtomicU64::new(0)),
             execution_generation: Arc::new(AtomicU64::new(1)),
             copy_in: Arc::new(AtomicBool::new(false)),
+            copy_in_response: Arc::new(AtomicBool::new(false)),
             parse_sequence: Arc::new(AtomicU64::new(0)),
             statement_sequences: Arc::new(RwLock::new(HashMap::new())),
             pending_deallocations: Arc::new(RwLock::new(VecDeque::new())),
@@ -682,16 +685,30 @@ where
             .store(self.sync_generation(), Ordering::Release);
     }
 
+    /// Record that PostgreSQL started a `COPY ... FROM STDIN`, before its `CopyInResponse` is
+    /// forwarded to the client.
+    pub fn copy_in_started(&self) {
+        self.copy_in_response.store(true, Ordering::Release);
+    }
+
     /// Record that a `CopyData`, or with `end` a `CopyDone` or `CopyFail`, is about to be
     /// forwarded.
     ///
     /// PostgreSQL ignores `Sync` during copy-in, so the first copy message takes back the Syncs
     /// counted since the `Execute` that started the copy, and no Sync counts until it ends.
+    ///
+    /// PostgreSQL also ignores copy messages when no copy is running. A client only starts
+    /// sending copy data once it has the `CopyInResponse`, so a copy message without one is
+    /// not counted, and cannot stop later Syncs from counting.
     pub fn copy_data_sent(&self, end: bool) {
-        if !self.copy_in.swap(!end, Ordering::AcqRel) {
+        if !self.copy_in.load(Ordering::Acquire) {
+            if !self.copy_in_response.swap(false, Ordering::AcqRel) {
+                return;
+            }
             let started = self.execution_generation.load(Ordering::Acquire);
             self.sync_generation.store(started, Ordering::Release);
         }
+        self.copy_in.store(!end, Ordering::Release);
     }
 
     /// The generation of the batch PostgreSQL is currently responding to.
@@ -2106,13 +2123,15 @@ mod tests {
         context.sync_sent();
         context.ready_for_query(b'I');
 
-        // Execute(COPY ... FROM STDIN), Sync, CopyData, CopyDone, Sync
+        // Execute(COPY ... FROM STDIN), Sync, then CopyData and CopyDone once PostgreSQL sends
+        // CopyInResponse, then Sync
         let unnamed = Name::unnamed();
         parse(&mut context, &unnamed);
         bind(&mut context, &unnamed, &unnamed);
         context.set_execute_for_portal(unnamed.clone());
         context.execution_sent();
         context.sync_sent();
+        context.copy_in_started();
         context.copy_data_sent(false);
         context.copy_data_sent(true);
         context.sync_sent();
@@ -2130,6 +2149,37 @@ mod tests {
         context.ready_for_query(b'I');
 
         assert!(context.get_statement(&name).is_none());
+    }
+
+    #[test]
+    pub fn copy_data_outside_a_copy_keeps_batches_in_step() {
+        let mut context = create_context();
+        context.ready_for_query(b'I');
+        let (a1, a2) = (Name::from("a1"), Name::from("a2"));
+        parse(&mut context, &a1);
+        parse(&mut context, &a2);
+        context.sync_sent();
+        context.ready_for_query(b'I');
+
+        // A CopyData with no COPY running, which PostgreSQL ignores
+        context.copy_data_sent(false);
+
+        // "SELECT 1/0; DEALLOCATE a1" fails before PostgreSQL reaches the DEALLOCATE
+        simple_query(&mut context, vec![Deallocation::Statement(a1.clone())]);
+        context.execution_sent();
+        execution_finished(&mut context);
+        context.ready_for_query(b'I');
+
+        // "DEALLOCATE a2" succeeds
+        simple_query(&mut context, vec![Deallocation::Statement(a2.clone())]);
+        context.execution_sent();
+        execution_finished(&mut context);
+        context.complete_deallocation();
+        context.ready_for_query(b'I');
+
+        // PostgreSQL still has a1, so its next Bind must still be encrypted
+        assert!(context.get_statement(&a1).is_some());
+        assert!(context.get_statement(&a2).is_none());
     }
 
     #[test]
