@@ -785,19 +785,37 @@ where
     /// connection. Statements prepared by a later Parse keep their state even when they reuse
     /// a deallocated name.
     ///
-    pub fn complete_deallocation(&self, operation: OperationId) -> Result<(), Error> {
+    /// `all` is whether the tag removes every statement (`DEALLOCATE ALL`, `DISCARD ALL`). A
+    /// queued deallocation of the other kind means Proxy is out of step with PostgreSQL, so the
+    /// operation's queue is cleared and nothing is removed.
+    ///
+    pub fn complete_deallocation(&self, operation: OperationId, all: bool) -> Result<(), Error> {
         let finished_metrics = {
             let mut state = self
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let Some(deallocation) = state
+            let Some(deallocations) = state
                 .operations
                 .get_mut(&operation)
-                .and_then(|context| context.deallocations.pop_front())
+                .map(|context| &mut context.deallocations)
             else {
                 return Ok(());
             };
+            let Some(deallocation) = deallocations.pop_front() else {
+                return Ok(());
+            };
+            if matches!(deallocation, Deallocation::AllStatements) != all {
+                deallocations.clear();
+                warn!(
+                    target: CONTEXT,
+                    client_id = self.client_id,
+                    msg = "Deallocation does not match the command tag, keeping statements",
+                    ?deallocation,
+                    all,
+                );
+                return Ok(());
+            }
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
@@ -817,10 +835,12 @@ where
 
             let mut candidates = Vec::new();
             for name in names {
+                // A statement with no recorded Parse is kept: leaking it is safe, while removing a
+                // statement PostgreSQL still has would let its next Bind through unencrypted.
                 let prepared_earlier = state
                     .statement_operations
                     .get(&name)
-                    .is_none_or(|prepared| *prepared < operation);
+                    .is_some_and(|prepared| *prepared < operation);
                 if !prepared_earlier {
                     continue;
                 }
@@ -836,6 +856,17 @@ where
             self.record_finished_metrics_scope(Some(metrics));
         }
         Ok(())
+    }
+
+    /// Names of the statements with a recorded Parse.
+    #[cfg(test)]
+    pub(crate) fn statement_operation_names(&self) -> Vec<String> {
+        let state = self.protocol_state.read().unwrap();
+        state
+            .statement_operations
+            .keys()
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .collect()
     }
 
     /// Size of every per-connection protocol state collection.

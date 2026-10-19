@@ -204,13 +204,10 @@ impl<S: EncryptionService> Frontend<S> {
             FrontendMessage::Parse(parse) => {
                 let statement = parse.statement.clone();
                 let failed_parse = parse.clone();
-                match self.parse_handler(parse).await {
-                    Ok(Some(mapped)) => {
-                        self.context.set_statement_operation(operation, statement)?;
-                        outbound_message = mapped;
-                    }
+                match self.parse_handler(operation, parse).await {
+                    Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
-                    Ok(None) => self.context.set_statement_operation(operation, statement)?,
+                    Ok(None) => (),
                     Err(err) => {
                         self.context.close_statement(&statement)?;
                         warn!(
@@ -808,6 +805,7 @@ impl<S: EncryptionService> Frontend<S> {
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn parse_handler(
         &mut self,
+        operation: OperationId,
         mut message: Parse,
     ) -> Result<Option<FrontendMessage>, Error> {
         let original_query = message.query.clone();
@@ -847,6 +845,10 @@ impl<S: EncryptionService> Frontend<S> {
         // mapping that was just written and every Bind falls back to the
         // latest-scope guess.
         self.context.close_statement(&message.statement)?;
+        // Recorded before anything else about the statement, so a SQL deallocation never sees
+        // the statement without the Parse that prepared it.
+        self.context
+            .set_statement_operation(operation, message.statement.to_owned())?;
         self.context
             .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 

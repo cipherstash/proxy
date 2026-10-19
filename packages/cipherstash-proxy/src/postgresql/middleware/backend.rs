@@ -150,7 +150,8 @@ impl<S: EncryptionService> Backend<S> {
             (&protocol_message, operation)
         {
             if is_deallocation(tag) {
-                self.context.complete_deallocation(operation)?;
+                self.context
+                    .complete_deallocation(operation, removes_all_statements(tag))?;
             }
         }
 
@@ -801,6 +802,12 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
 pub(super) fn is_deallocation(tag: &[u8]) -> bool {
     let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
     matches!(tag, b"DEALLOCATE" | b"DEALLOCATE ALL" | b"DISCARD ALL")
+}
+
+/// Whether a deallocation command tag removes every prepared statement
+fn removes_all_statements(tag: &[u8]) -> bool {
+    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    matches!(tag, b"DEALLOCATE ALL" | b"DISCARD ALL")
 }
 
 #[cfg(test)]

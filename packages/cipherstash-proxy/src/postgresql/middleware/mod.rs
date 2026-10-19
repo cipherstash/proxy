@@ -85,8 +85,8 @@ mod tests {
         config::TandemConfig,
         error::Error,
         postgresql::{
-            context::ProtocolStateSizes, test_operation_id, Column, Context, KeysetIdentifier,
-            OperationId,
+            context::{ProtocolStateSizes, Statement},
+            test_operation_id, Column, Context, KeysetIdentifier, OperationId,
         },
         proxy::{EncryptConfig, EncryptionService},
     };
@@ -449,6 +449,149 @@ mod tests {
 
             assert_eq!(connection.sizes(), ProtocolStateSizes::default(), "{sql}");
         }
+    }
+
+    /// Parse and Sync each named statement, with PostgreSQL's responses
+    async fn prepare(connection: &mut Connection, names: &[&str]) {
+        for name in names {
+            let parse = connection.parse_named((*name).to_owned()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+        }
+    }
+
+    fn statement_names(connection: &Connection) -> Vec<String> {
+        let mut names = connection.context.statement_operation_names();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn multi_statement_query_deallocates_each_statement() {
+        let mut connection = Connection::new();
+        prepare(&mut connection, &["a1", "a2", "a3"]).await;
+
+        let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        assert_eq!(statement_names(&connection), vec!["a3"]);
+        assert_eq!(connection.sizes().operations, 0);
+    }
+
+    #[tokio::test]
+    async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate() {
+        let mut connection = Connection::new();
+        prepare(&mut connection, &["a1", "a2"]).await;
+
+        let query = connection
+            .query("DEALLOCATE a1; SELECT 1/0; DEALLOCATE a2")
+            .await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection.server(query, error()).await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        assert_eq!(statement_names(&connection), vec!["a2"]);
+        assert_eq!(connection.sizes().operations, 0);
+    }
+
+    #[tokio::test]
+    async fn deallocate_folds_unquoted_names_and_keeps_quoted_ones() {
+        let mut connection = Connection::new();
+        prepare(&mut connection, &["Mixed", "upper", "UPPER"]).await;
+
+        let query = connection
+            .query(r#"DEALLOCATE "Mixed"; DEALLOCATE UPPER"#)
+            .await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        assert_eq!(statement_names(&connection), vec!["UPPER"]);
+    }
+
+    #[tokio::test]
+    async fn deallocate_prepare_removes_the_statement() {
+        let mut connection = Connection::new();
+        prepare(&mut connection, &["a1", "a2"]).await;
+
+        let query = connection.query("DEALLOCATE PREPARE a1").await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        assert_eq!(statement_names(&connection), vec!["a2"]);
+    }
+
+    #[tokio::test]
+    async fn deallocation_that_does_not_match_the_command_tag_removes_nothing() {
+        let mut connection = Connection::new();
+        prepare(&mut connection, &["a1", "a2"]).await;
+
+        // Proxy queued DEALLOCATE a1 and DEALLOCATE a2, but PostgreSQL reports DEALLOCATE ALL
+        let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE ALL"))
+            .await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE"))
+            .await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        // Out of step with PostgreSQL, so nothing is applied: keeping statements is safe
+        assert_eq!(statement_names(&connection), vec!["a1", "a2"]);
+        assert_eq!(connection.sizes().operations, 0);
+    }
+
+    #[tokio::test]
+    async fn sql_deallocate_all_keeps_a_statement_with_no_recorded_parse() {
+        let mut connection = Connection::new();
+        // An encrypted statement whose Parse operation was never recorded
+        connection
+            .context
+            .add_statement(
+                Bytes::from_static(b"s1"),
+                Statement::new(vec![], vec![], vec![], vec![], vec![]),
+            )
+            .unwrap();
+
+        let query = connection.query("DEALLOCATE ALL").await;
+        connection
+            .server(query, command_complete(b"DEALLOCATE ALL"))
+            .await;
+        connection
+            .server(query, ready(TransactionStatus::Idle))
+            .await;
+
+        // Keeping it can only leak; removing it would let its next Bind through unencrypted
+        assert_eq!(connection.sizes().statements, 1);
     }
 
     #[tokio::test]
