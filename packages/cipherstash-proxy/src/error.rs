@@ -325,6 +325,13 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+    /// The encryption service returned a different number of values than it was given.
+    ///
+    /// Bind rewrites pair encrypted values with parameters by position, so a short result
+    /// would forward the remaining parameters unencrypted. The statement is refused instead.
+    #[error("Expected {expected} encrypted values but received {actual}. For help visit {}#encrypt-result-count-mismatch", ERROR_DOC_BASE_URL)]
+    EncryptionResultCountMismatch { expected: usize, actual: usize },
+
     /// `EqlTermVariant::JsonExtracted` types the RESULT of an encrypted JSON
     /// extraction, which is read back and decrypted — it is never a plaintext
     /// operand on its way to the database, so it should never reach the encrypt

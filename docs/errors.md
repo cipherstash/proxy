@@ -38,6 +38,7 @@
   - [Missing encrypt configuration](#encrypt-missing-encrypt-configuration)
   - [Unexpected SET keyset](#encrypt-unexpected-set-keyset)
   - [Encrypted jsonb column configured for ORE ordering](#encrypt-ste-vec-ore-mode-unsupported)
+  - [Encryption result count mismatch](#encrypt-result-count-mismatch)
 
 - Decrypt errors:
    - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
@@ -521,6 +522,30 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- TODO: Link to ZeroKMS Doc -->
 3. Check that the encrypted configuration `cast` matches the expected type.
 <!-- TODO: Link to config -->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Encryption result count mismatch <a id='encrypt-result-count-mismatch'></a>
+
+The encryption service returned a different number of encrypted values than the number of values it was asked to encrypt.
+
+### Error message
+
+```
+Expected 2 encrypted values but received 0.
+```
+
+### Notes
+
+Proxy matches encrypted values to statement parameters by position. If any value were missing, the parameters after it could be sent to the database unencrypted, so Proxy refuses the statement instead.
+
+### How to Fix
+
+This indicates an internal error in the encryption pipeline. Retry the statement, and if the error persists, contact CipherStash support with the Proxy logs.
 
 
 

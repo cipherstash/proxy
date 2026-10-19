@@ -12,7 +12,7 @@ pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{column_mapper::ColumnMapper, rewrite::Name, Column, OperationId};
 use crate::{
     config::TandemConfig,
-    error::{ConfigError, Error},
+    error::{ConfigError, EncryptError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -1696,10 +1696,22 @@ where
         }
 
         let keyset_id = self.keyset_identifier()?;
+        let expected = plaintexts.len();
 
-        self.encryption
+        let encrypted = self
+            .encryption
             .encrypt(keyset_id, plaintexts, columns)
-            .await
+            .await?;
+
+        // Values are paired with parameters by position, so a short result must never be used
+        if encrypted.len() != expected {
+            return Err(EncryptError::EncryptionResultCountMismatch {
+                expected,
+                actual: encrypted.len(),
+            }
+            .into());
+        }
+        Ok(encrypted)
     }
 
     pub async fn decrypt(
@@ -2705,6 +2717,26 @@ mod tests {
 
         assert_eq!(output.len(), 2);
         assert!(output.iter().all(Option::is_none));
+    }
+
+    #[tokio::test]
+    async fn encryption_service_returning_fewer_values_fails_closed() {
+        let context = create_context();
+        // TestService returns no outputs at all
+        let plaintext = cipherstash_client::encryption::Plaintext::new("secret".to_owned());
+        let result = context
+            .encrypt(vec![Some(plaintext), None], &[None, None])
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(
+                crate::error::EncryptError::EncryptionResultCountMismatch {
+                    expected: 2,
+                    actual: 0
+                }
+            ))
+        ));
     }
     fn statement() -> Statement {
         Statement {
