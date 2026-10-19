@@ -16,9 +16,10 @@ pub struct SqlParser;
 pub enum ResetStatement {
     /// `RESET ALL`
     All,
-    /// `RESET name`, with each word of the name in lower case. PostgreSQL matches setting
-    /// names without regard to case, quoted or not.
-    Parameter(Vec<String>),
+    /// `RESET name`, with the name in lower case and its parts joined with `.`, as in
+    /// `cipherstash.keyset_id`. PostgreSQL matches setting names without regard to case,
+    /// quoted or not, and `"cipherstash.keyset_id"` names the same setting.
+    Parameter(String),
 }
 
 impl SqlParser {
@@ -60,19 +61,30 @@ impl SqlParser {
                 Some(Token::Word(word)) if word.keyword == Keyword::RESET => (),
                 Some(_) => return None,
             }
-            let mut name = vec![];
+            let mut name = String::new();
+            let mut words = 0;
             let mut all = false;
+            let mut after_word = false;
             for token in tokens {
                 match token {
                     Token::Word(word) => {
+                        // Words not joined by a period, as in `RESET SESSION AUTHORIZATION`
+                        if after_word {
+                            name.push(' ');
+                        }
                         all = word.keyword == Keyword::ALL && word.quote_style.is_none();
-                        name.push(word.value.to_lowercase());
+                        name.push_str(&word.value.to_lowercase());
+                        words += 1;
+                        after_word = true;
                     }
-                    Token::Period => (),
+                    Token::Period => {
+                        name.push('.');
+                        after_word = false;
+                    }
                     _ => return None,
                 }
             }
-            resets.push(match name.len() {
+            resets.push(match words {
                 0 => return None,
                 1 if all => ResetStatement::All,
                 _ => ResetStatement::Parameter(name),
@@ -90,8 +102,8 @@ impl SqlParser {
 mod tests {
     use super::{ResetStatement, SqlParser};
 
-    fn parameter(name: &[&str]) -> ResetStatement {
-        ResetStatement::Parameter(name.iter().map(|part| part.to_string()).collect())
+    fn parameter(name: &str) -> ResetStatement {
+        ResetStatement::Parameter(name.to_owned())
     }
 
     #[test]
@@ -107,15 +119,20 @@ mod tests {
         // Setting names are matched without regard to case, as PostgreSQL does
         assert_eq!(
             SqlParser::parse_resets(r#"RESET "CipherStash".KEYSET_ID"#),
-            Some(vec![parameter(&["cipherstash", "keyset_id"])])
+            Some(vec![parameter("cipherstash.keyset_id")])
+        );
+        // A quoted name that includes the period names the same setting
+        assert_eq!(
+            SqlParser::parse_resets(r#"RESET "CIPHERSTASH.KEYSET_ID""#),
+            Some(vec![parameter("cipherstash.keyset_id")])
         );
         assert_eq!(
             SqlParser::parse_resets("RESET search_path; /* comment */ RESET ALL ;"),
-            Some(vec![parameter(&["search_path"]), ResetStatement::All])
+            Some(vec![parameter("search_path"), ResetStatement::All])
         );
         assert_eq!(
             SqlParser::parse_resets("RESET SESSION AUTHORIZATION"),
-            Some(vec![parameter(&["session", "authorization"])])
+            Some(vec![parameter("session authorization")])
         );
     }
 

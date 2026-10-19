@@ -106,6 +106,10 @@ that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
 `DISCARD ALL`, `RESET ALL`, `RESET CIPHERSTASH.<setting>` and
 `SET CIPHERSTASH.<setting> TO DEFAULT` return these settings to their startup values once
 PostgreSQL confirms the command, as connection pools rely on between clients.
+Proxy keeps these settings outside PostgreSQL's transactions: a `SET` or reset that is later
+rolled back still changes them. Proxy also keeps one keyset, set by either `KEYSET_ID` or
+`KEYSET_NAME`, so resetting the one that set it leaves no keyset even if PostgreSQL still
+holds a value for the other.
 
 **Reload**:
 Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces

@@ -904,6 +904,25 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn a_quoted_name_including_the_period_names_the_setting() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            connection
+                .simple(r#"RESET "cipherstash.keyset_id""#, b"RESET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            connection
+                .simple(
+                    r#"SET "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" TO DEFAULT"#,
+                    b"SET",
+                )
+                .await;
+            assert!(!connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
         async fn settings_are_kept_until_postgresql_confirms_the_reset() {
             let mut connection = connection();
             connection.set_keyset_and_disable_mapping().await;
