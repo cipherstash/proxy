@@ -153,6 +153,9 @@ impl<S: EncryptionService> Backend<S> {
                 self.context
                     .complete_deallocation(operation, removes_all_statements(tag))?;
             }
+            if is_settings_reset(tag) {
+                self.context.complete_settings_reset(operation)?;
+            }
         }
 
         if matches!(
@@ -808,6 +811,12 @@ pub(super) fn is_deallocation(tag: &[u8]) -> bool {
 fn removes_all_statements(tag: &[u8]) -> bool {
     let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
     matches!(tag, b"DEALLOCATE ALL" | b"DISCARD ALL")
+}
+
+/// Whether a `CommandComplete` tag confirms a `RESET`, `SET` or `DISCARD ALL`
+pub(super) fn is_settings_reset(tag: &[u8]) -> bool {
+    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    matches!(tag, b"RESET" | b"SET" | b"DISCARD ALL")
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
     },
     time::{Duration, Instant},
@@ -61,8 +61,9 @@ where
     schema_middleware: SchemaMiddleware,
     protocol_state: Arc<RwLock<ConnectionProtocolState>>,
     upstream_tls_roots: Arc<rustls::RootCertStore>,
-    unsafe_disable_mapping: bool,
+    unsafe_disable_mapping: Arc<AtomicBool>,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
+    settings_changes: Arc<SettingsChanges>,
     session_id_counter: Arc<AtomicU64>,
     transaction_status: Arc<RwLock<TransactionStatus>>,
 }
@@ -117,6 +118,45 @@ struct OperationContext {
     /// SQL deallocations in a simple Query or an executed portal, applied in order as
     /// PostgreSQL confirms each one
     deallocations: VecDeque<Deallocation>,
+    /// `RESET` and `DISCARD ALL` statements in a simple Query or an executed portal, applied
+    /// in order as PostgreSQL confirms each one
+    settings_resets: VecDeque<PendingSettingsReset>,
+}
+
+/// How many times each connection setting has been changed with `SET CIPHERSTASH.*`.
+///
+/// A reset is applied when PostgreSQL confirms it, after the client may have sent a later
+/// `SET`. Comparing these counts keeps the reset from undoing that `SET`.
+#[derive(Debug, Default)]
+struct SettingsChanges {
+    keyset: AtomicU64,
+    unsafe_disable_mapping: AtomicU64,
+}
+
+/// A settings reset sent to PostgreSQL, with the settings changes made before it was sent
+#[derive(Clone, Copy, Debug)]
+struct PendingSettingsReset {
+    reset: SettingsReset,
+    keyset_changes: u64,
+    unsafe_disable_mapping_changes: u64,
+}
+
+/// A connection setting returned to its startup value by SQL `RESET` or `DISCARD ALL`.
+///
+/// Applied only once PostgreSQL confirms the command with a `CommandComplete`, so that a
+/// reset that fails (for example inside a failed transaction) changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsReset {
+    /// `DISCARD ALL` or `RESET ALL`
+    All,
+    /// `RESET CIPHERSTASH.KEYSET_ID`
+    KeysetId,
+    /// `RESET CIPHERSTASH.KEYSET_NAME`
+    KeysetName,
+    /// `RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`
+    UnsafeDisableMapping,
+    /// `RESET` of a setting Proxy does not keep
+    Other,
 }
 
 /// A prepared-statement removal requested with SQL rather than a protocol `Close`.
@@ -145,6 +185,8 @@ pub(crate) struct ProtocolStateSizes {
     pub statement_metrics_scopes: usize,
     pub statement_operations: usize,
     pub statement_deallocations: usize,
+    pub statement_resets: usize,
+    pub statement_settings: usize,
     pub portals: usize,
     pub portal_operations: usize,
 }
@@ -160,15 +202,21 @@ struct ConnectionProtocolState<K = OperationId> {
     statement_operations: HashMap<Name, K>,
     /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
     statement_deallocations: HashMap<Name, Deallocation>,
+    /// Statements whose SQL is a `RESET` or `DISCARD ALL`
+    statement_resets: HashMap<Name, SettingsReset>,
+    /// Statements whose SQL is a `SET CIPHERSTASH.<setting>`, applied each time they run
+    statement_settings: HashMap<Name, sqltk::parser::ast::Statement>,
     portals: HashMap<Name, Arc<Portal>>,
     portal_operations: HashMap<Name, PortalOwner<K>>,
 }
 
-/// The Bind operation that created a portal, and the SQL deallocation it runs when executed
+/// The Bind operation that created a portal, and the SQL deallocation and settings reset it
+/// runs when executed
 #[derive(Debug)]
 struct PortalOwner<K> {
     operation: K,
     deallocation: Option<Deallocation>,
+    settings_reset: Option<SettingsReset>,
 }
 
 impl<K> Default for ConnectionProtocolState<K> {
@@ -181,6 +229,8 @@ impl<K> Default for ConnectionProtocolState<K> {
             statement_metrics_scopes: HashMap::new(),
             statement_operations: HashMap::new(),
             statement_deallocations: HashMap::new(),
+            statement_resets: HashMap::new(),
+            statement_settings: HashMap::new(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
         }
@@ -373,8 +423,9 @@ where
             schema_middleware,
             encryption,
             reload_sender,
-            unsafe_disable_mapping: false,
+            unsafe_disable_mapping: Arc::new(AtomicBool::new(false)),
             keyset_id: Arc::new(RwLock::new(None)),
+            settings_changes: Arc::new(SettingsChanges::default()),
             session_id_counter: Arc::new(AtomicU64::new(1)),
             transaction_status: Arc::new(RwLock::new(TransactionStatus::Idle)),
         }
@@ -603,13 +654,17 @@ where
                 state.statement_metrics.insert(execution_id, metrics);
                 ExecuteContext::new(name.clone(), portal, Some(execution_id))
             });
-        let deallocation = state
+        let (deallocation, settings_reset) = state
             .portal_operations
             .get(&name)
-            .and_then(|owner| owner.deallocation.clone());
+            .map(|owner| (owner.deallocation.clone(), owner.settings_reset))
+            .unwrap_or_default();
         let context = state.operations.entry(operation).or_default();
         context.execute = Some(execute);
         context.deallocations.extend(deallocation);
+        context
+            .settings_resets
+            .extend(settings_reset.map(|reset| self.pending_settings_reset(reset)));
         Ok(())
     }
 
@@ -700,6 +755,8 @@ where
             state.statements.remove(name);
             state.statement_operations.remove(name);
             state.statement_deallocations.remove(name);
+            state.statement_resets.remove(name);
+            state.statement_settings.remove(name);
             let metrics_scope_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
             if !metrics_scope_in_use {
                 session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
@@ -737,19 +794,58 @@ where
         Ok(())
     }
 
-    /// Carry the deallocation of `statement`, if any, onto the portal just bound from it.
-    pub fn bind_statement_deallocation(
+    /// Record that the SQL of statement `name` is a `RESET` or `DISCARD ALL`, so that
+    /// executing it through the extended protocol resets the settings it names.
+    pub fn set_statement_reset(&self, name: Name, reset: SettingsReset) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_resets
+            .insert(name, reset);
+        Ok(())
+    }
+
+    /// Record that the SQL of statement `name` is a `SET CIPHERSTASH.<setting>`, so that
+    /// executing it again applies the setting again.
+    pub fn set_statement_setting(
         &self,
-        portal: &Name,
-        statement: &Name,
+        name: Name,
+        statement: sqltk::parser::ast::Statement,
     ) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_settings
+            .insert(name, statement);
+        Ok(())
+    }
+
+    /// The `SET CIPHERSTASH.<setting>` that statement `name` runs, if any
+    pub fn statement_setting(
+        &self,
+        name: &Name,
+    ) -> Result<Option<sqltk::parser::ast::Statement>, Error> {
+        Ok(self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_settings
+            .get(name)
+            .cloned())
+    }
+
+    /// Carry the deallocation and settings reset of `statement`, if any, onto the portal just
+    /// bound from it.
+    pub fn bind_statement_effects(&self, portal: &Name, statement: &Name) -> Result<(), Error> {
         let mut state = self
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         let deallocation = state.statement_deallocations.get(statement).cloned();
+        let settings_reset = state.statement_resets.get(statement).copied();
         if let Some(owner) = state.portal_operations.get_mut(portal) {
             owner.deallocation = deallocation;
+            owner.settings_reset = settings_reset;
         }
         Ok(())
     }
@@ -827,6 +923,8 @@ where
                     .chain(state.statement_metrics_scopes.keys())
                     .chain(state.statement_operations.keys())
                     .chain(state.statement_deallocations.keys())
+                    .chain(state.statement_resets.keys())
+                    .chain(state.statement_settings.keys())
                     // The unnamed statement is not removed by DEALLOCATE ALL or DISCARD ALL
                     .filter(|name| !name.is_empty())
                     .cloned()
@@ -847,6 +945,8 @@ where
                 state.statements.remove(&name);
                 state.statement_operations.remove(&name);
                 state.statement_deallocations.remove(&name);
+                state.statement_resets.remove(&name);
+                state.statement_settings.remove(&name);
                 candidates.extend(state.statement_metrics_scopes.remove(&name));
             }
             state.take_unreferenced_metrics(candidates)
@@ -869,6 +969,108 @@ where
             .collect()
     }
 
+    /// Record the `RESET` and `DISCARD ALL` statements in a simple Query.
+    ///
+    /// They are discarded with the operation if PostgreSQL never confirms them.
+    pub fn set_settings_resets(
+        &self,
+        operation: OperationId,
+        resets: Vec<SettingsReset>,
+    ) -> Result<(), Error> {
+        if resets.is_empty() {
+            return Ok(());
+        }
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .operations
+            .entry(operation)
+            .or_default()
+            .settings_resets
+            .extend(
+                resets
+                    .into_iter()
+                    .map(|reset| self.pending_settings_reset(reset)),
+            );
+        Ok(())
+    }
+
+    /// A settings reset being sent to PostgreSQL now
+    fn pending_settings_reset(&self, reset: SettingsReset) -> PendingSettingsReset {
+        PendingSettingsReset {
+            reset,
+            keyset_changes: self.settings_changes.keyset.load(Ordering::Acquire),
+            unsafe_disable_mapping_changes: self
+                .settings_changes
+                .unsafe_disable_mapping
+                .load(Ordering::Acquire),
+        }
+    }
+
+    ///
+    /// Handle a `CommandComplete` from PostgreSQL for a `RESET` or `DISCARD ALL`.
+    ///
+    /// Applies the next settings reset in the operation, returning the settings PostgreSQL has
+    /// just reset to their startup values, unless the client has changed a setting since it
+    /// sent the reset. Without this, a connection pool that resets a
+    /// connection between clients hands the next client the previous client's keyset and
+    /// `UNSAFE_DISABLE_MAPPING` setting.
+    ///
+    pub fn complete_settings_reset(&self, operation: OperationId) -> Result<(), Error> {
+        let Some(pending) = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .operations
+            .get_mut(&operation)
+            .and_then(|context| context.settings_resets.pop_front())
+        else {
+            return Ok(());
+        };
+
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Reset settings", ?pending);
+        let reset = pending.reset;
+
+        let unsafe_disable_mapping_unchanged = self
+            .settings_changes
+            .unsafe_disable_mapping
+            .load(Ordering::Acquire)
+            == pending.unsafe_disable_mapping_changes;
+        if unsafe_disable_mapping_unchanged
+            && matches!(
+                reset,
+                SettingsReset::All | SettingsReset::UnsafeDisableMapping
+            )
+        {
+            self.unsafe_disable_mapping.store(false, Ordering::Release);
+        }
+
+        let mut keyset_id = self
+            .keyset_id
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let keyset_unchanged =
+            self.settings_changes.keyset.load(Ordering::Acquire) == pending.keyset_changes;
+        // The keyset is set by ID or by name, and each RESET clears only its own setting
+        if keyset_unchanged
+            && matches!(
+                (reset, &*keyset_id),
+                (SettingsReset::All, _)
+                    | (
+                        SettingsReset::KeysetId,
+                        Some(KeysetIdentifier(IdentifiedBy::Uuid(_)))
+                    )
+                    | (
+                        SettingsReset::KeysetName,
+                        Some(KeysetIdentifier(IdentifiedBy::Name(_)))
+                    )
+            )
+        {
+            *keyset_id = None;
+        }
+        Ok(())
+    }
+
     /// Size of every per-connection protocol state collection.
     ///
     /// Test-only accessor used to assert per-connection state stays bounded.
@@ -883,6 +1085,8 @@ where
             statement_metrics_scopes: state.statement_metrics_scopes.len(),
             statement_operations: state.statement_operations.len(),
             statement_deallocations: state.statement_deallocations.len(),
+            statement_resets: state.statement_resets.len(),
+            statement_settings: state.statement_settings.len(),
             portals: state.portals.len(),
             portal_operations: state.portal_operations.len(),
         }
@@ -1055,6 +1259,7 @@ where
                 PortalOwner {
                     operation,
                     deallocation: None,
+                    settings_reset: None,
                 },
             );
             state.portals.insert(name, Arc::new(portal));
@@ -1340,6 +1545,11 @@ where
         self.schema_middleware.prepare(name, statement);
     }
 
+    /// Forgets the schema intent of a prepared statement whose SQL Proxy cannot parse.
+    pub fn unprepare_schema_statement(&self, name: &Name) {
+        self.schema_middleware.unprepare(name);
+    }
+
     /// Associates a bound portal with its prepared statement's schema intent.
     pub fn bind_schema_statement(&self, portal: Name, prepared_statement: &Name) {
         self.schema_middleware.bind(portal, prepared_statement);
@@ -1448,7 +1658,10 @@ where
                     ..
                 })) = values.first()
                 {
-                    self.unsafe_disable_mapping = *value;
+                    self.unsafe_disable_mapping.store(*value, Ordering::Release);
+                    self.settings_changes
+                        .unsafe_disable_mapping
+                        .fetch_add(1, Ordering::AcqRel);
                     return Some(*value);
                 }
             }
@@ -1456,8 +1669,8 @@ where
         None
     }
 
-    pub fn unsafe_disable_mapping(&mut self) -> bool {
-        self.unsafe_disable_mapping
+    pub fn unsafe_disable_mapping(&self) -> bool {
+        self.unsafe_disable_mapping.load(Ordering::Acquire)
     }
 
     /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_ID = {keyset_id};`
@@ -1505,6 +1718,7 @@ where
                         .keyset_id
                         .write()
                         .map(|mut guard| *guard = Some(identifier.clone()));
+                    self.settings_changes.keyset.fetch_add(1, Ordering::AcqRel);
 
                     return Ok(Some(identifier));
                 } else {
@@ -1560,6 +1774,7 @@ where
                         .keyset_id
                         .write()
                         .map(|mut guard| *guard = Some(identifier.clone()));
+                    self.settings_changes.keyset.fetch_add(1, Ordering::AcqRel);
 
                     return Ok(Some(identifier));
                 } else {

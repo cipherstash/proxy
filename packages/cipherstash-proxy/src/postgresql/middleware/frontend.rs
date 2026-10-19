@@ -1,7 +1,7 @@
 use super::super::context::phase_timing::PhaseTimer;
-use super::super::context::{Context, Deallocation, SessionId, Statement};
+use super::super::context::{Context, Deallocation, SessionId, SettingsReset, Statement};
 use super::super::error_handler::PostgreSqlErrorHandler;
-use super::super::parser::SqlParser;
+use super::super::parser::{ResetStatement, SqlParser};
 use super::super::rewrite::bind::Bind;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{ENCRYPT, MAPPER, PROTOCOL};
@@ -228,14 +228,15 @@ impl<S: EncryptionService> Frontend<S> {
                 let (portal, statement) = (bind.portal.clone(), bind.statement.clone());
                 match self.bind_handler(operation, Bind::try_from(bind)?).await {
                     Ok(Some(mapped)) => {
-                        self.context
-                            .bind_statement_deallocation(&portal, &statement)?;
+                        self.context.bind_statement_effects(&portal, &statement)?;
+                        self.apply_statement_setting(&statement)?;
                         outbound_message = mapped;
                     }
                     // No mapping needed, don't change the bytes
-                    Ok(None) => self
-                        .context
-                        .bind_statement_deallocation(&portal, &statement)?,
+                    Ok(None) => {
+                        self.context.bind_statement_effects(&portal, &statement)?;
+                        self.apply_statement_setting(&statement)?;
+                    }
                     Err(err) => match err {
                         Error::Mapping(MappingError::InvalidParameter(_)) => {
                             warn!(target: PROTOCOL,
@@ -382,7 +383,37 @@ impl<S: EncryptionService> Frontend<S> {
 
         // Simple Query may contain many statements
         let query_text = String::from_utf8_lossy(&query).into_owned();
-        let parsed_statements = SqlParser::parse_statements(&query_text)?;
+
+        let parsed_statements = match SqlParser::parse_statements(&query_text) {
+            Ok(statements) => statements,
+            // The SQL parser does not support RESET, so a Query of only RESET statements is
+            // recognised separately and forwarded unchanged
+            Err(err) => {
+                let Some(resets) = SqlParser::parse_resets(&query_text) else {
+                    return Err(err);
+                };
+                self.context.set_settings_resets(
+                    operation,
+                    resets.iter().map(to_settings_reset).collect(),
+                )?;
+                self.context.prepare_schema_for_statement().await?;
+                self.context
+                    .record_parse_duration(session_id, parse_timer.elapsed())?;
+                self.context.update_statement_metadata(session_id, |m| {
+                    m.statement_type = Some(StatementType::Other);
+                    m.set_multi_statement(resets.len() > 1);
+                    m.set_query_fingerprint(&query_text);
+                })?;
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(resets.len() as u64);
+                self.record_simple_schema_execution(
+                    operation,
+                    session_id,
+                    Portal::passthrough(Some(session_id)),
+                    &[],
+                )?;
+                return Ok(None);
+            }
+        };
         self.context.set_deallocations(
             operation,
             parsed_statements
@@ -390,6 +421,8 @@ impl<S: EncryptionService> Frontend<S> {
                 .filter_map(to_deallocation)
                 .collect(),
         )?;
+        self.context
+            .set_settings_resets(operation, to_settings_resets(&parsed_statements))?;
         self.context.prepare_schema_for_statement().await?;
         if self
             .context
@@ -853,10 +886,39 @@ impl<S: EncryptionService> Frontend<S> {
             .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
-        let statement = SqlParser::parse_statement(&statement_text)?;
+
+        let statement = match SqlParser::parse_statement(&statement_text) {
+            Ok(statement) => statement,
+            // The SQL parser does not support RESET, so it is recognised separately and
+            // forwarded unchanged
+            Err(err) => {
+                let resets = SqlParser::parse_resets(&statement_text);
+                let Some([reset]) = resets.as_deref() else {
+                    return Err(err);
+                };
+                self.context
+                    .set_statement_reset(message.statement.to_owned(), to_settings_reset(reset))?;
+                self.context.prepare_schema_for_statement().await?;
+                self.context.unprepare_schema_statement(&message.statement);
+                self.context.update_statement_metadata(session_id, |m| {
+                    m.statement_type = Some(StatementType::Other);
+                    m.set_query_fingerprint(&statement_text);
+                })?;
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                return Ok(None);
+            }
+        };
         if let Some(deallocation) = to_deallocation(&statement) {
             self.context
                 .set_statement_deallocation(message.statement.to_owned(), deallocation)?;
+        }
+        if let Some(reset) = to_statement_reset(&statement).filter(|r| *r != SettingsReset::Other) {
+            self.context
+                .set_statement_reset(message.statement.to_owned(), reset)?;
+        }
+        if is_cipherstash_set(&statement) {
+            self.context
+                .set_statement_setting(message.statement.to_owned(), statement.clone())?;
         }
 
         self.context.prepare_schema_for_statement().await?;
@@ -988,6 +1050,21 @@ impl<S: EncryptionService> Frontend<S> {
         }
     }
 
+    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` again for this
+    /// execution, as PostgreSQL does. Parse applied it once, but a reset since then may have
+    /// cleared it.
+    fn apply_statement_setting(&mut self, name: &Name) -> Result<(), Error> {
+        let Some(statement) = self.context.statement_setting(name)? else {
+            return Ok(());
+        };
+        self.context.maybe_set_unsafe_disable_mapping(&statement);
+        // As on Parse, a keyset SET is ignored while mapping is disabled
+        if !self.context.unsafe_disable_mapping() {
+            self.handle_set_keyset(&statement)?;
+        }
+        Ok(())
+    }
+
     ///
     /// Handles `SET CIPHERSTASH KEYSET_*` statements
     ///
@@ -995,6 +1072,13 @@ impl<S: EncryptionService> Frontend<S> {
     /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
     ///
     fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
+        // `SET CIPHERSTASH.KEYSET_* TO DEFAULT` is a reset, applied once PostgreSQL confirms it
+        if matches!(
+            to_statement_reset(statement),
+            Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
+        ) {
+            return Ok(());
+        }
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
             debug!(client_id = self.context.client_id, ?keyset_identifier);
 
@@ -1431,6 +1515,88 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
         } => Some(Deallocation::AllStatements),
         _ => None,
     }
+}
+
+/// The Proxy setting a `RESET` statement returns to its startup value
+fn to_settings_reset(reset: &ResetStatement) -> SettingsReset {
+    match reset {
+        ResetStatement::All => SettingsReset::All,
+        ResetStatement::Parameter(name) => setting_reset(name),
+    }
+}
+
+/// The Proxy setting named `name`, in lower case with its parts joined with `.`, as a reset
+fn setting_reset(name: &str) -> SettingsReset {
+    match name {
+        "cipherstash.keyset_id" => SettingsReset::KeysetId,
+        "cipherstash.keyset_name" => SettingsReset::KeysetName,
+        "cipherstash.unsafe_disable_mapping" => SettingsReset::UnsafeDisableMapping,
+        _ => SettingsReset::Other,
+    }
+}
+
+/// The settings resets in a simple Query, one for each `DISCARD ALL` and `SET`, as PostgreSQL
+/// confirms each with its own `CommandComplete`. Empty if none of them resets a Proxy setting.
+fn to_settings_resets(statements: &[ast::Statement]) -> Vec<SettingsReset> {
+    let resets = statements
+        .iter()
+        .filter_map(to_statement_reset)
+        .collect::<Vec<_>>();
+    if resets.iter().all(|reset| *reset == SettingsReset::Other) {
+        return vec![];
+    }
+    resets
+}
+
+/// The settings reset by a `DISCARD ALL` or `SET` statement.
+///
+/// `DISCARD ALL` resets every setting, as `RESET ALL` does, and `SET <setting> TO DEFAULT`
+/// resets that setting, as `RESET <setting>` does. Any other `SET` is `Other`.
+fn to_statement_reset(statement: &ast::Statement) -> Option<SettingsReset> {
+    match statement {
+        ast::Statement::Discard {
+            object_type: ast::DiscardObject::ALL,
+        } => Some(SettingsReset::All),
+        ast::Statement::Set(set) => Some(to_set_default_reset(set).unwrap_or(SettingsReset::Other)),
+        _ => None,
+    }
+}
+
+/// Whether `statement` is a `SET CIPHERSTASH.<setting>`, spelled as the `maybe_set_*` handlers
+/// match it
+fn is_cipherstash_set(statement: &ast::Statement) -> bool {
+    let ast::Statement::Set(ast::Set::SingleAssignment { variable, .. }) = statement else {
+        return false;
+    };
+    variable
+        .0
+        .first()
+        .and_then(|part| part.as_ident())
+        .is_some_and(|ident| ident.value == "CIPHERSTASH")
+}
+
+/// The setting a `SET <setting> TO DEFAULT` returns to its startup value
+fn to_set_default_reset(set: &ast::Set) -> Option<SettingsReset> {
+    let ast::Set::SingleAssignment {
+        variable, values, ..
+    } = set
+    else {
+        return None;
+    };
+    let [ast::Expr::Identifier(value)] = values.as_slice() else {
+        return None;
+    };
+    if value.quote_style.is_some() || !value.value.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    let name = variable
+        .0
+        .iter()
+        .filter_map(|part| part.as_ident())
+        .map(|ident| ident.value.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(".");
+    Some(setting_reset(&name))
 }
 
 fn quote_literal(value: &str) -> String {

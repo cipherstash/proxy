@@ -140,10 +140,14 @@ mod tests {
 
     impl Connection {
         fn new() -> Self {
+            Self::with_config(TandemConfig::for_testing())
+        }
+
+        fn with_config(config: TandemConfig) -> Self {
             let (reload_sender, _) = mpsc::unbounded_channel();
             let context = Context::new(
                 1,
-                Arc::new(TandemConfig::for_testing()),
+                Arc::new(config),
                 Arc::new(EncryptConfig::default()),
                 Arc::new(Schema::new("public")),
                 Arc::new(rustls::RootCertStore::empty()),
@@ -768,5 +772,475 @@ mod tests {
         assert!(is_deallocation(b"DISCARD ALL"));
         assert!(!is_deallocation(b"DISCARD PLANS"));
         assert!(!is_deallocation(b"SELECT 1"));
+    }
+
+    /// `DISCARD ALL` and `RESET` return the connection's Proxy settings to their startup
+    /// values once PostgreSQL confirms them, so a pooled connection does not carry one
+    /// client's keyset or disabled mapping over to the next client.
+    mod settings_reset {
+        use super::*;
+
+        const KEYSET_ID: &str =
+            "SET CIPHERSTASH.KEYSET_ID = '7e5ea5a6-4e1c-4f4d-8a9c-9f0b4f6a0c11'";
+
+        /// A connection to a Proxy with no default keyset, so a keyset can be set per connection
+        fn connection() -> Connection {
+            let mut config = TandemConfig::for_testing();
+            config.encrypt.default_keyset_id = None;
+            Connection::with_config(config)
+        }
+
+        impl Connection {
+            /// Send a simple Query and reply with PostgreSQL's `CommandComplete` for it
+            async fn simple(&mut self, sql: &str, tag: &'static [u8]) {
+                let query = self.query(sql).await;
+                self.server(query, command_complete(tag)).await;
+                self.server(query, ready(TransactionStatus::Idle)).await;
+            }
+
+            /// Select a keyset, then disable mapping
+            async fn set_keyset_and_disable_mapping(&mut self) {
+                self.simple(KEYSET_ID, b"SET").await;
+                self.simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", b"SET")
+                    .await;
+                assert!(self.context.keyset_identifier().is_some());
+                assert!(self.context.unsafe_disable_mapping());
+            }
+
+            /// Bind and execute the named statement `name` through the unnamed portal
+            async fn execute_prepared(&mut self, name: &'static [u8], tag: &'static [u8]) {
+                let bind = self.bind(Bytes::from_static(name), Bytes::new()).await;
+                let execute = self.execute(Bytes::new()).await;
+                let sync = self.client(FrontendMessage::Sync).await;
+                self.server(bind, BackendMessage::BindComplete).await;
+                self.server(execute, command_complete(tag)).await;
+                self.server(sync, ready(TransactionStatus::Idle)).await;
+            }
+
+            /// Prepare `sql` as the named statement `name`
+            async fn prepare(&mut self, name: &'static [u8], sql: &str) {
+                let parse = self.parse_sql(name, sql.to_owned()).await;
+                let sync = self.client(FrontendMessage::Sync).await;
+                self.server(parse, BackendMessage::ParseComplete).await;
+                self.server(sync, ready(TransactionStatus::Idle)).await;
+            }
+
+            fn assert_startup_settings(&self) {
+                assert_eq!(self.context.keyset_identifier(), None);
+                assert!(!self.context.unsafe_disable_mapping());
+            }
+        }
+
+        #[tokio::test]
+        async fn a_prepared_keyset_set_applies_again_when_executed_after_a_reset() {
+            let mut connection = connection();
+            connection.prepare(b"set_keyset", KEYSET_ID).await;
+            connection.execute_prepared(b"set_keyset", b"SET").await;
+            connection.simple("RESET ALL", b"RESET").await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            connection.execute_prepared(b"set_keyset", b"SET").await;
+            assert!(connection.context.keyset_identifier().is_some());
+        }
+
+        #[tokio::test]
+        async fn a_prepared_mapping_set_applies_again_when_executed_after_a_reset() {
+            let mut connection = connection();
+            connection
+                .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection.execute_prepared(b"disable", b"SET").await;
+            connection.simple("DISCARD ALL", b"DISCARD ALL").await;
+            assert!(!connection.context.unsafe_disable_mapping());
+            assert_eq!(connection.sizes().statement_settings, 0);
+
+            connection
+                .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection.simple("RESET ALL", b"RESET").await;
+            connection.execute_prepared(b"disable", b"SET").await;
+            assert!(connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn a_prepared_keyset_set_executed_after_a_pending_reset_is_kept() {
+            let mut connection = connection();
+            connection.simple(KEYSET_ID, b"SET").await;
+            connection.prepare(b"set_keyset", KEYSET_ID).await;
+
+            // PostgreSQL runs the reset, then the prepared SET
+            let reset = connection.query("RESET ALL").await;
+            let bind = connection
+                .bind(Bytes::from_static(b"set_keyset"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(reset, command_complete(b"RESET")).await;
+            connection
+                .server(reset, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection.server(execute, command_complete(b"SET")).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+        }
+
+        #[tokio::test]
+        async fn discard_all_in_a_simple_query() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+            connection.simple("DISCARD ALL", b"DISCARD ALL").await;
+            connection.assert_startup_settings();
+        }
+
+        #[tokio::test]
+        async fn reset_all_in_a_simple_query() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+            connection.simple("RESET ALL", b"RESET").await;
+            connection.assert_startup_settings();
+        }
+
+        #[tokio::test]
+        async fn discard_all_in_the_extended_protocol() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+            connection
+                .extended("DISCARD ALL".to_owned(), b"DISCARD ALL")
+                .await;
+            connection.assert_startup_settings();
+        }
+
+        #[tokio::test]
+        async fn reset_all_in_the_extended_protocol() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+            connection.extended("RESET ALL".to_owned(), b"RESET").await;
+            connection.assert_startup_settings();
+        }
+
+        #[tokio::test]
+        async fn discard_all_falls_back_to_the_default_keyset() {
+            let mut connection = Connection::new();
+            connection
+                .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", b"SET")
+                .await;
+            connection.simple("DISCARD ALL", b"DISCARD ALL").await;
+            connection.assert_startup_settings();
+            assert!(connection.context.default_keyset_id().is_some());
+        }
+
+        #[tokio::test]
+        async fn reset_of_each_setting_resets_only_that_setting() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            // A PostgreSQL setting and the keyset name, which was never set
+            connection.simple("RESET search_path", b"RESET").await;
+            connection
+                .simple("RESET CIPHERSTASH.KEYSET_NAME", b"RESET")
+                .await;
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(connection.context.unsafe_disable_mapping());
+
+            connection
+                .simple("RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING", b"RESET")
+                .await;
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+
+            connection
+                .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", b"SET")
+                .await;
+            connection
+                .extended("RESET cipherstash.keyset_id".to_owned(), b"RESET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+            assert!(connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn reset_of_the_keyset_name() {
+            let mut connection = connection();
+            connection
+                .simple("SET CIPHERSTASH.KEYSET_NAME = 'tenant'", b"SET")
+                .await;
+            connection
+                .simple("RESET CIPHERSTASH.KEYSET_ID", b"RESET")
+                .await;
+            assert!(connection.context.keyset_identifier().is_some());
+            connection
+                .simple("RESET CIPHERSTASH.KEYSET_NAME", b"RESET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+        }
+
+        #[tokio::test]
+        async fn a_quoted_name_including_the_period_names_the_setting() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            connection
+                .simple(r#"RESET "cipherstash.keyset_id""#, b"RESET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            connection
+                .simple(
+                    r#"SET "CIPHERSTASH.UNSAFE_DISABLE_MAPPING" TO DEFAULT"#,
+                    b"SET",
+                )
+                .await;
+            assert!(!connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn settings_are_kept_until_postgresql_confirms_the_reset() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            let query = connection.query("DISCARD ALL").await;
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(connection.context.unsafe_disable_mapping());
+
+            connection
+                .server(query, command_complete(b"DISCARD ALL"))
+                .await;
+            connection.assert_startup_settings();
+        }
+
+        #[tokio::test]
+        async fn a_failed_reset_keeps_the_settings() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            // Inside an aborted transaction PostgreSQL rejects each statement
+            for sql in ["DISCARD ALL", "RESET ALL", "RESET ALL; RESET ALL"] {
+                let query = connection.query(sql).await;
+                connection.server(query, error()).await;
+                connection
+                    .server(query, ready(TransactionStatus::FailedTransaction))
+                    .await;
+            }
+
+            let parse = connection.parse_sql(b"", "RESET ALL".to_owned()).await;
+            let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection.server(execute, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::FailedTransaction))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(connection.context.unsafe_disable_mapping());
+            assert_eq!(connection.sizes().operations, 0);
+        }
+
+        #[tokio::test]
+        async fn a_set_sent_after_a_reset_is_kept() {
+            let mut connection = connection();
+            connection.simple(KEYSET_ID, b"SET").await;
+
+            // The next client's SET is sent before PostgreSQL confirms the reset
+            let reset = connection.query("DISCARD ALL").await;
+            let set = connection.query(KEYSET_ID).await;
+            connection
+                .server(reset, command_complete(b"DISCARD ALL"))
+                .await;
+            connection
+                .server(reset, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(set, command_complete(b"SET")).await;
+            connection.server(set, ready(TransactionStatus::Idle)).await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+        }
+
+        #[tokio::test]
+        async fn a_set_of_one_setting_after_a_reset_keeps_the_other_reset() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            let parse = connection.parse_sql(b"", "RESET ALL".to_owned()).await;
+            let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            let set = connection
+                .query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection.server(execute, command_complete(b"RESET")).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(set, command_complete(b"SET")).await;
+            connection.server(set, ready(TransactionStatus::Idle)).await;
+
+            assert_eq!(connection.context.keyset_identifier(), None);
+            assert!(connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn resets_in_one_query_apply_in_order() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            // The second RESET fails, so only the first is applied
+            let query = connection
+                .query("RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING; RESET ALL")
+                .await;
+            connection.server(query, command_complete(b"RESET")).await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn prepared_reset_runs_each_time_it_is_executed() {
+            let mut connection = connection();
+            let parse = connection.parse_sql(b"reset", "RESET ALL".to_owned()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            for _ in 0..2 {
+                connection.set_keyset_and_disable_mapping().await;
+                let bind = connection
+                    .bind(Bytes::from_static(b"reset"), Bytes::new())
+                    .await;
+                let execute = connection.execute(Bytes::new()).await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection.server(execute, command_complete(b"RESET")).await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+                connection.assert_startup_settings();
+            }
+        }
+
+        #[tokio::test]
+        async fn closing_a_prepared_reset_retains_nothing() {
+            let mut connection = connection();
+            for i in 0..ITERATIONS {
+                let name = Bytes::from(format!("reset_{i}"));
+                let parse = connection
+                    .client(FrontendMessage::Parse(Parse {
+                        statement: name.clone(),
+                        query: Bytes::from_static(b"RESET ALL"),
+                        parameter_types: vec![],
+                    }))
+                    .await;
+                let close = connection
+                    .client(FrontendMessage::Close(Close {
+                        target: DescribeTarget::Statement,
+                        name,
+                    }))
+                    .await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection
+                    .server(close, BackendMessage::CloseComplete)
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+            }
+            assert_eq!(connection.sizes().statement_resets, 0);
+        }
+
+        #[tokio::test]
+        async fn set_to_default_resets_that_setting() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            connection
+                .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT", b"SET")
+                .await;
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+
+            connection
+                .extended("SET CIPHERSTASH.KEYSET_ID = default".to_owned(), b"SET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+        }
+
+        #[tokio::test]
+        async fn set_keyset_name_to_default_is_not_a_keyset_named_default() {
+            let mut connection = connection();
+            connection
+                .simple("SET CIPHERSTASH.KEYSET_NAME = 'tenant'", b"SET")
+                .await;
+            connection
+                .simple("SET CIPHERSTASH.KEYSET_NAME TO DEFAULT", b"SET")
+                .await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            // Not a request for a keyset, so not refused when there is a default keyset
+            let mut connection = Connection::new();
+            let message = FrontendMessage::Query(Bytes::from_static(
+                b"SET CIPHERSTASH.KEYSET_NAME TO DEFAULT",
+            ));
+            let output = connection
+                .frontend
+                .intercept(test_operation_id(), message.clone())
+                .await
+                .unwrap();
+            assert!(
+                matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(forwarded) if forwarded == message)
+            );
+        }
+
+        #[tokio::test]
+        async fn set_to_default_after_other_sets_in_one_query() {
+            let mut connection = connection();
+            connection.set_keyset_and_disable_mapping().await;
+
+            // Each SET is confirmed with its own tag, so only the second SET is a reset
+            let query = connection
+                .query("SET search_path = public; SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT; SET CIPHERSTASH.KEYSET_ID TO DEFAULT")
+                .await;
+            connection.server(query, command_complete(b"SET")).await;
+            connection.server(query, command_complete(b"SET")).await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
+            assert!(!connection.context.unsafe_disable_mapping());
+        }
+
+        #[test]
+        fn settings_reset_command_tags() {
+            use super::super::backend::is_settings_reset;
+            assert!(is_settings_reset(b"RESET"));
+            assert!(is_settings_reset(b"DISCARD ALL\0"));
+            assert!(!is_settings_reset(b"DISCARD PLANS"));
+            assert!(is_settings_reset(b"SET"));
+            assert!(!is_settings_reset(b"SELECT 1"));
+        }
     }
 }
