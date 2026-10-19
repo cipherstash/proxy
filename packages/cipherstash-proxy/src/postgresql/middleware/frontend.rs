@@ -229,10 +229,14 @@ impl<S: EncryptionService> Frontend<S> {
                 match self.bind_handler(operation, Bind::try_from(bind)?).await {
                     Ok(Some(mapped)) => {
                         self.context.bind_statement_effects(&portal, &statement)?;
+                        self.apply_statement_setting(&statement)?;
                         outbound_message = mapped;
                     }
                     // No mapping needed, don't change the bytes
-                    Ok(None) => self.context.bind_statement_effects(&portal, &statement)?,
+                    Ok(None) => {
+                        self.context.bind_statement_effects(&portal, &statement)?;
+                        self.apply_statement_setting(&statement)?;
+                    }
                     Err(err) => match err {
                         Error::Mapping(MappingError::InvalidParameter(_)) => {
                             warn!(target: PROTOCOL,
@@ -912,6 +916,10 @@ impl<S: EncryptionService> Frontend<S> {
             self.context
                 .set_statement_reset(message.statement.to_owned(), reset)?;
         }
+        if is_cipherstash_set(&statement) {
+            self.context
+                .set_statement_setting(message.statement.to_owned(), statement.clone())?;
+        }
 
         self.context.prepare_schema_for_statement().await?;
         if eql_mapper::requires_type_check(&statement) {
@@ -1040,6 +1048,21 @@ impl<S: EncryptionService> Frontend<S> {
         } else {
             Ok(None)
         }
+    }
+
+    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` again for this
+    /// execution, as PostgreSQL does. Parse applied it once, but a reset since then may have
+    /// cleared it.
+    fn apply_statement_setting(&mut self, name: &Name) -> Result<(), Error> {
+        let Some(statement) = self.context.statement_setting(name)? else {
+            return Ok(());
+        };
+        self.context.maybe_set_unsafe_disable_mapping(&statement);
+        // As on Parse, a keyset SET is ignored while mapping is disabled
+        if !self.context.unsafe_disable_mapping() {
+            self.handle_set_keyset(&statement)?;
+        }
+        Ok(())
     }
 
     ///
@@ -1537,6 +1560,19 @@ fn to_statement_reset(statement: &ast::Statement) -> Option<SettingsReset> {
         ast::Statement::Set(set) => Some(to_set_default_reset(set).unwrap_or(SettingsReset::Other)),
         _ => None,
     }
+}
+
+/// Whether `statement` is a `SET CIPHERSTASH.<setting>`, spelled as the `maybe_set_*` handlers
+/// match it
+fn is_cipherstash_set(statement: &ast::Statement) -> bool {
+    let ast::Statement::Set(ast::Set::SingleAssignment { variable, .. }) = statement else {
+        return false;
+    };
+    variable
+        .0
+        .first()
+        .and_then(|part| part.as_ident())
+        .is_some_and(|ident| ident.value == "CIPHERSTASH")
 }
 
 /// The setting a `SET <setting> TO DEFAULT` returns to its startup value

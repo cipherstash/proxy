@@ -186,6 +186,7 @@ pub(crate) struct ProtocolStateSizes {
     pub statement_operations: usize,
     pub statement_deallocations: usize,
     pub statement_resets: usize,
+    pub statement_settings: usize,
     pub portals: usize,
     pub portal_operations: usize,
 }
@@ -203,6 +204,8 @@ struct ConnectionProtocolState<K = OperationId> {
     statement_deallocations: HashMap<Name, Deallocation>,
     /// Statements whose SQL is a `RESET` or `DISCARD ALL`
     statement_resets: HashMap<Name, SettingsReset>,
+    /// Statements whose SQL is a `SET CIPHERSTASH.<setting>`, applied each time they run
+    statement_settings: HashMap<Name, sqltk::parser::ast::Statement>,
     portals: HashMap<Name, Arc<Portal>>,
     portal_operations: HashMap<Name, PortalOwner<K>>,
 }
@@ -227,6 +230,7 @@ impl<K> Default for ConnectionProtocolState<K> {
             statement_operations: HashMap::new(),
             statement_deallocations: HashMap::new(),
             statement_resets: HashMap::new(),
+            statement_settings: HashMap::new(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
         }
@@ -752,6 +756,7 @@ where
             state.statement_operations.remove(name);
             state.statement_deallocations.remove(name);
             state.statement_resets.remove(name);
+            state.statement_settings.remove(name);
             let metrics_scope_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
             if !metrics_scope_in_use {
                 session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
@@ -798,6 +803,35 @@ where
             .statement_resets
             .insert(name, reset);
         Ok(())
+    }
+
+    /// Record that the SQL of statement `name` is a `SET CIPHERSTASH.<setting>`, so that
+    /// executing it again applies the setting again.
+    pub fn set_statement_setting(
+        &self,
+        name: Name,
+        statement: sqltk::parser::ast::Statement,
+    ) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_settings
+            .insert(name, statement);
+        Ok(())
+    }
+
+    /// The `SET CIPHERSTASH.<setting>` that statement `name` runs, if any
+    pub fn statement_setting(
+        &self,
+        name: &Name,
+    ) -> Result<Option<sqltk::parser::ast::Statement>, Error> {
+        Ok(self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_settings
+            .get(name)
+            .cloned())
     }
 
     /// Carry the deallocation and settings reset of `statement`, if any, onto the portal just
@@ -890,6 +924,7 @@ where
                     .chain(state.statement_operations.keys())
                     .chain(state.statement_deallocations.keys())
                     .chain(state.statement_resets.keys())
+                    .chain(state.statement_settings.keys())
                     // The unnamed statement is not removed by DEALLOCATE ALL or DISCARD ALL
                     .filter(|name| !name.is_empty())
                     .cloned()
@@ -911,6 +946,7 @@ where
                 state.statement_operations.remove(&name);
                 state.statement_deallocations.remove(&name);
                 state.statement_resets.remove(&name);
+                state.statement_settings.remove(&name);
                 candidates.extend(state.statement_metrics_scopes.remove(&name));
             }
             state.take_unreferenced_metrics(candidates)
@@ -1050,6 +1086,7 @@ where
             statement_operations: state.statement_operations.len(),
             statement_deallocations: state.statement_deallocations.len(),
             statement_resets: state.statement_resets.len(),
+            statement_settings: state.statement_settings.len(),
             portals: state.portals.len(),
             portal_operations: state.portal_operations.len(),
         }

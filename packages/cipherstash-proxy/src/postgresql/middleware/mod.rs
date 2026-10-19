@@ -807,10 +807,85 @@ mod tests {
                 assert!(self.context.unsafe_disable_mapping());
             }
 
+            /// Bind and execute the named statement `name` through the unnamed portal
+            async fn execute_prepared(&mut self, name: &'static [u8], tag: &'static [u8]) {
+                let bind = self.bind(Bytes::from_static(name), Bytes::new()).await;
+                let execute = self.execute(Bytes::new()).await;
+                let sync = self.client(FrontendMessage::Sync).await;
+                self.server(bind, BackendMessage::BindComplete).await;
+                self.server(execute, command_complete(tag)).await;
+                self.server(sync, ready(TransactionStatus::Idle)).await;
+            }
+
+            /// Prepare `sql` as the named statement `name`
+            async fn prepare(&mut self, name: &'static [u8], sql: &str) {
+                let parse = self.parse_sql(name, sql.to_owned()).await;
+                let sync = self.client(FrontendMessage::Sync).await;
+                self.server(parse, BackendMessage::ParseComplete).await;
+                self.server(sync, ready(TransactionStatus::Idle)).await;
+            }
+
             fn assert_startup_settings(&self) {
                 assert_eq!(self.context.keyset_identifier(), None);
                 assert!(!self.context.unsafe_disable_mapping());
             }
+        }
+
+        #[tokio::test]
+        async fn a_prepared_keyset_set_applies_again_when_executed_after_a_reset() {
+            let mut connection = connection();
+            connection.prepare(b"set_keyset", KEYSET_ID).await;
+            connection.execute_prepared(b"set_keyset", b"SET").await;
+            connection.simple("RESET ALL", b"RESET").await;
+            assert_eq!(connection.context.keyset_identifier(), None);
+
+            connection.execute_prepared(b"set_keyset", b"SET").await;
+            assert!(connection.context.keyset_identifier().is_some());
+        }
+
+        #[tokio::test]
+        async fn a_prepared_mapping_set_applies_again_when_executed_after_a_reset() {
+            let mut connection = connection();
+            connection
+                .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection.execute_prepared(b"disable", b"SET").await;
+            connection.simple("DISCARD ALL", b"DISCARD ALL").await;
+            assert!(!connection.context.unsafe_disable_mapping());
+            assert_eq!(connection.sizes().statement_settings, 0);
+
+            connection
+                .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await;
+            connection.simple("RESET ALL", b"RESET").await;
+            connection.execute_prepared(b"disable", b"SET").await;
+            assert!(connection.context.unsafe_disable_mapping());
+        }
+
+        #[tokio::test]
+        async fn a_prepared_keyset_set_executed_after_a_pending_reset_is_kept() {
+            let mut connection = connection();
+            connection.simple(KEYSET_ID, b"SET").await;
+            connection.prepare(b"set_keyset", KEYSET_ID).await;
+
+            // PostgreSQL runs the reset, then the prepared SET
+            let reset = connection.query("RESET ALL").await;
+            let bind = connection
+                .bind(Bytes::from_static(b"set_keyset"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(reset, command_complete(b"RESET")).await;
+            connection
+                .server(reset, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection.server(execute, command_complete(b"SET")).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.context.keyset_identifier().is_some());
         }
 
         #[tokio::test]
