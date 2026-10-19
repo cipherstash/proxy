@@ -163,4 +163,52 @@ mod tests {
             assert_eq!(expected, actual);
         }
     }
+
+    ///
+    /// Tests that a connection pool's reset turns mapping back on, so that a disabled mapping
+    /// is not carried over to the next client of a pooled connection.
+    /// Test both extended and simple query protocols
+    ///
+    #[tokio::test]
+    async fn pool_reset_turns_mapping_back_on() {
+        trace();
+
+        clear().await;
+
+        let id = random_id();
+        let encrypted_text = "hello".to_string();
+        let expected = vec![encrypted_text.to_owned()];
+
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        execute_query(sql, &[&id, &encrypted_text]).await;
+
+        let select_sql = "SELECT encrypted_text FROM encrypted";
+        let client = connect_with_tls(*PROXY).await;
+
+        for reset in [
+            "DISCARD ALL",
+            "RESET ALL",
+            "RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING",
+        ] {
+            // Simple query
+            client
+                .simple_query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+                .await
+                .unwrap();
+            client.simple_query(reset).await.unwrap();
+
+            let actual = query_with_client::<String>(select_sql, &client).await;
+            assert_eq!(expected, actual, "{reset}");
+
+            // Extended query
+            client
+                .execute("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", &[])
+                .await
+                .unwrap();
+            client.execute(reset, &[]).await.unwrap();
+
+            let actual = simple_query_with_client::<String>(select_sql, &client).await;
+            assert_eq!(expected, actual, "{reset}");
+        }
+    }
 }

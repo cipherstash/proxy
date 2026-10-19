@@ -1,7 +1,7 @@
 use super::super::context::phase_timing::PhaseTimer;
-use super::super::context::{Context, Deallocation, SessionId, Statement};
+use super::super::context::{Context, Deallocation, SessionId, SettingsReset, Statement};
 use super::super::error_handler::PostgreSqlErrorHandler;
-use super::super::parser::SqlParser;
+use super::super::parser::{ResetStatement, SqlParser};
 use super::super::rewrite::bind::Bind;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{ENCRYPT, MAPPER, PROTOCOL};
@@ -382,12 +382,43 @@ impl<S: EncryptionService> Frontend<S> {
 
         // Simple Query may contain many statements
         let query_text = String::from_utf8_lossy(&query).into_owned();
+
+        // The SQL parser does not support RESET, so a Query of only RESET statements is
+        // recognised separately and forwarded unchanged
+        if let Some(resets) = SqlParser::parse_resets(&query_text) {
+            self.context
+                .set_settings_resets(operation, resets.iter().map(to_settings_reset).collect())?;
+            self.context.prepare_schema_for_statement().await?;
+            self.context
+                .record_parse_duration(session_id, parse_timer.elapsed())?;
+            self.context.update_statement_metadata(session_id, |m| {
+                m.statement_type = Some(StatementType::Other);
+                m.set_multi_statement(resets.len() > 1);
+                m.set_query_fingerprint(&query_text);
+            })?;
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(resets.len() as u64);
+            self.record_simple_schema_execution(
+                operation,
+                session_id,
+                Portal::passthrough(Some(session_id)),
+                &[],
+            )?;
+            return Ok(None);
+        }
+
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
         self.context.set_deallocations(
             operation,
             parsed_statements
                 .iter()
                 .filter_map(to_deallocation)
+                .collect(),
+        )?;
+        self.context.set_settings_resets(
+            operation,
+            parsed_statements
+                .iter()
+                .filter_map(to_discard_all_reset)
                 .collect(),
         )?;
         self.context.prepare_schema_for_statement().await?;
@@ -853,10 +884,30 @@ impl<S: EncryptionService> Frontend<S> {
             .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
+
+        // The SQL parser does not support RESET, so it is recognised separately and
+        // forwarded unchanged
+        if let Some([reset]) = SqlParser::parse_resets(&statement_text).as_deref() {
+            self.context
+                .set_statement_reset(message.statement.to_owned(), to_settings_reset(reset))?;
+            self.context.prepare_schema_for_statement().await?;
+            self.context.unprepare_schema_statement(&message.statement);
+            self.context.update_statement_metadata(session_id, |m| {
+                m.statement_type = Some(StatementType::Other);
+                m.set_query_fingerprint(&statement_text);
+            })?;
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            return Ok(None);
+        }
+
         let statement = SqlParser::parse_statement(&statement_text)?;
         if let Some(deallocation) = to_deallocation(&statement) {
             self.context
                 .set_statement_deallocation(message.statement.to_owned(), deallocation)?;
+        }
+        if let Some(reset) = to_discard_all_reset(&statement) {
+            self.context
+                .set_statement_reset(message.statement.to_owned(), reset)?;
         }
 
         self.context.prepare_schema_for_statement().await?;
@@ -1431,6 +1482,33 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
         } => Some(Deallocation::AllStatements),
         _ => None,
     }
+}
+
+/// The Proxy setting a `RESET` statement returns to its startup value
+fn to_settings_reset(reset: &ResetStatement) -> SettingsReset {
+    match reset {
+        ResetStatement::All => SettingsReset::All,
+        ResetStatement::Parameter(name) => match name.as_slice() {
+            [namespace, setting] if namespace == "cipherstash" => match setting.as_str() {
+                "keyset_id" => SettingsReset::KeysetId,
+                "keyset_name" => SettingsReset::KeysetName,
+                "unsafe_disable_mapping" => SettingsReset::UnsafeDisableMapping,
+                _ => SettingsReset::Other,
+            },
+            _ => SettingsReset::Other,
+        },
+    }
+}
+
+/// `DISCARD ALL` resets every setting, as `RESET ALL` does
+fn to_discard_all_reset(statement: &ast::Statement) -> Option<SettingsReset> {
+    matches!(
+        statement,
+        ast::Statement::Discard {
+            object_type: ast::DiscardObject::ALL,
+        }
+    )
+    .then_some(SettingsReset::All)
 }
 
 fn quote_literal(value: &str) -> String {
