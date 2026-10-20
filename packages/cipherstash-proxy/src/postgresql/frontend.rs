@@ -842,23 +842,15 @@ where
             message.name.to_owned(),
             is_cipherstash_set(&statement).then(|| statement.clone()),
         );
-
-        if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
-            warn!(
-                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
-                mapping_disabled
-            );
-        }
+        // A `SET CIPHERSTASH.<setting>` takes effect when it is executed, see
+        // `apply_statement_setting`, as PostgreSQL only prepares it here
 
         if self.context.unsafe_disable_mapping() {
-            self.record_keyset_while_mapping_disabled(&statement)?;
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
-
-        self.handle_set_keyset(&statement)?;
 
         self.check_for_schema_change(&statement);
 
@@ -963,14 +955,19 @@ where
         }
     }
 
-    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` again for this
-    /// execution, as PostgreSQL does. Parse applied it once, but a reset since then may have
-    /// cleared it. Applying it counts as a change, so a reset sent before it does not undo it.
+    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` when a portal is bound
+    /// from it, as PostgreSQL applies it each time it runs and not when it is prepared. Applying
+    /// it counts as a change, so a reset sent before it does not undo it.
     fn apply_statement_setting(&mut self, name: &Name) -> Result<(), Error> {
         let Some(statement) = self.context.statement_setting(name) else {
             return Ok(());
         };
-        self.context.maybe_set_unsafe_disable_mapping(&statement);
+        if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
+            warn!(
+                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
+                mapping_disabled
+            );
+        }
         if self.context.unsafe_disable_mapping() {
             self.record_keyset_while_mapping_disabled(&statement)?;
         } else {

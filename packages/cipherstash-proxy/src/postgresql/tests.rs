@@ -758,4 +758,28 @@ mod settings_reset {
         assert!(connection.context.keyset_identifier().is_some());
         assert_ne!(connection.context.keyset_identifier(), before);
     }
+
+    #[tokio::test]
+    async fn a_prepared_set_that_is_never_executed_changes_nothing() {
+        let mut connection = connection().await;
+        connection.prepare("set_keyset", KEYSET_ID).await;
+        connection
+            .prepare("disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+            .await;
+        connection.assert_startup_settings();
+    }
+
+    #[tokio::test]
+    async fn a_prepared_keyset_set_that_is_never_executed_changes_nothing_while_mapping_is_disabled(
+    ) {
+        let mut connection = connection().await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection.prepare("set_keyset", KEYSET_ID).await;
+        assert_eq!(connection.context.keyset_identifier(), None);
+
+        connection.execute_prepared("set_keyset", "SET").await;
+        assert!(connection.context.keyset_identifier().is_some());
+    }
 }
