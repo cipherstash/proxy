@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   Compatibility note: on every encrypted column type, Proxy reserves three JSON object shapes for application-generated EQL: storage payloads with top-level `v` and `i` plus at least one of `c`, `h`, or `sv`; scalar query payloads with `v` and `i` plus at least one of `hm`, `bf`, `ob`, or `op`; and SteVec query payloads whose only top-level key is `sv`. An object matching one of these shapes is validated as EQL rather than encrypted as plaintext, and there is no opt-out. Query-only shapes are rejected in storage positions. Before upgrading, audit plaintext application writes for these key combinations; [Invalid encrypted value](docs/errors.md#encrypt-invalid-inbound-eql-payload) includes a `jsonb` scan predicate.
 
+- **Connection pooler guidance**: [Connection poolers](docs/reference/connection-poolers.md) documents which PgBouncer and PgCat versions, topologies and pool modes work with Proxy, and how to configure them safely.
+
 - **`SET LOCAL CIPHERSTASH.KEYSET_ID`, `KEYSET_NAME` and `UNSAFE_DISABLE_MAPPING`**: the setting lasts until the end of the current transaction, as `SET LOCAL` does in PostgreSQL. This is the safe way to select a tenant's keyset behind a connection pooler.
 
 ### Changed
@@ -56,6 +58,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
 
 ### Security
+
+- **Keyset and mapping settings no longer cross between clients of a session-mode pooler**: PgBouncer sends `DISCARD ALL` before giving a pooled connection to a new client in session mode, and Proxy now honours it, as described in "Connection settings after a pool reset" under Fixed. Previously the next client inherited the previous client's keyset or disabled mapping, so in multitenant deployments one tenant's keyset could be used for another tenant's queries. A session-level `SET CIPHERSTASH.KEYSET_*` remains unsafe behind a transaction-mode pooler and behind PgCat; use `SET LOCAL` there. See [Connection poolers](docs/reference/connection-poolers.md).
 
 - **`SET LOCAL CIPHERSTASH.*` is no longer promoted to the whole connection**: Proxy ignored the `LOCAL` modifier and kept the value for the rest of the connection. It now ends with the transaction. Applications that relied on a `SET LOCAL` keyset persisting after `COMMIT` must use `SET` instead.
 
