@@ -14,7 +14,7 @@ mod tests {
             "i32" => Box::new(rng.random_range(1..=i32::MAX) as i32),
             "i64" => Box::new(rng.random_range(1..=i64::MAX) as i64),
             "f64" => Box::new(rng.random_range(1.0..=f64::MAX) as f64),
-            "bool" => Box::new(rand::random_bool(0.5) as bool),
+            "bool" => Box::new(rand::random_bool(0.5)),
             "String" => {
                 let i = random_limited();
                 Box::new(((b'A' + (i - 1) as u8) as char).to_string())
