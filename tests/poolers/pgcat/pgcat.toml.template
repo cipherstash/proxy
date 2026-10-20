@@ -1,0 +1,283 @@
+# PgCat configuration for the connection pooler compatibility matrix.
+#
+# Pool names mirror the PgBouncer aliases in ../pgbouncer/pgbouncer.ini; see
+# that file for what each pool is for. The client picks the cell by database
+# name.
+#
+# `@PREPARED_STATEMENTS_CACHE_SIZE@` is replaced at container start (see the
+# pgcat services in tests/docker-compose.poolers.yml): 0 disables PgCat's
+# prepared statement support, a positive value enables it.
+#
+# `cleanup_server_connections` is left at its default (true): PgCat sends
+# `RESET ROLE; RESET ALL; DEALLOCATE ALL;` before reusing a server connection
+# on which the client changed session state.
+
+[general]
+host = "0.0.0.0"
+port = 6432
+enable_prometheus_exporter = false
+connect_timeout = 5000
+healthcheck_timeout = 1000
+healthcheck_delay = 30000
+shutdown_timeout = 5000
+ban_time = 1
+# Proxy closes a connection that has been idle for CS_DATABASE__CONNECTION_TIMEOUT
+# (120 s by default). PgCat bans a server whose pooled connection fails its
+# health check, so retire idle server connections before Proxy does.
+idle_timeout = 60000
+log_client_connections = true
+log_client_disconnections = true
+admin_username = "pgcat_admin"
+admin_password = "pgcat_admin"
+
+[pools.proxy_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 2
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_session.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 2
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_txn.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_one_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_one_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 1
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_one_session.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_one_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_one_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 1
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_one_txn.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_mt_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_mt_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 1
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_mt_session.shards.0]
+servers = [["proxy-mt", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_mt_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_mt_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 1
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_mt_txn.shards.0]
+servers = [["proxy-mt", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.proxy_mt_local_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.proxy_mt_local_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 1
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.proxy_mt_local_txn.shards.0]
+servers = [["proxy-mt", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.pg_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.pg_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 2
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.pg_session.shards.0]
+servers = [["postgres", 5532, "primary"]]
+database = "cipherstash"
+
+[pools.pg_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.pg_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 2
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.pg_txn.shards.0]
+servers = [["postgres", 5532, "primary"]]
+database = "cipherstash"
+
+[pools.pg_schema]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.pg_schema.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 4
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.pg_schema.shards.0]
+servers = [["postgres", 5532, "primary"]]
+database = "cipherstash"
+
+[pools.app_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.app_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 40
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.app_session.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.app_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.app_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 40
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.app_txn.shards.0]
+servers = [["proxy", 6432, "primary"]]
+database = "cipherstash"
+
+[pools.pg_app_session]
+pool_mode = "session"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.pg_app_session.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 40
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.pg_app_session.shards.0]
+servers = [["postgres", 5532, "primary"]]
+database = "cipherstash"
+
+[pools.pg_app_txn]
+pool_mode = "transaction"
+default_role = "primary"
+query_parser_enabled = false
+prepared_statements_cache_size = @PREPARED_STATEMENTS_CACHE_SIZE@
+idle_timeout = 60000
+
+[pools.pg_app_txn.users.0]
+username = "cipherstash"
+password = "p@ssword"
+pool_size = 40
+min_pool_size = 0
+statement_timeout = 0
+
+[pools.pg_app_txn.shards.0]
+servers = [["postgres", 5532, "primary"]]
+database = "cipherstash"
