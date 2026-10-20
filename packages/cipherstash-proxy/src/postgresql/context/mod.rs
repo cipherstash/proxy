@@ -92,15 +92,15 @@ where
     pending_deallocations: Arc<RwLock<VecDeque<PendingDeallocation>>>,
     /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
     statement_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
-    /// Portals bound from one of those statements
-    portal_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
+    /// Portals bound from one of those statements, with the generation they were bound in
+    portal_deallocations: Arc<RwLock<HashMap<Name, (u64, Deallocation)>>>,
     pending_settings_resets: Arc<RwLock<VecDeque<PendingSettingsReset>>>,
     /// Held while a setting is changed or reset, so a reset never undoes a concurrent `SET`
     settings_changes: Arc<Mutex<SettingsChanges>>,
     /// Statements whose SQL is a `RESET`, `DISCARD ALL` or `SET`
     statement_resets: Arc<RwLock<HashMap<Name, SettingsReset>>>,
-    /// Portals bound from one of those statements
-    portal_resets: Arc<RwLock<HashMap<Name, SettingsReset>>>,
+    /// Portals bound from one of those statements, with the generation they were bound in
+    portal_resets: Arc<RwLock<HashMap<Name, (u64, SettingsReset)>>>,
     /// Statements whose SQL is a `SET CIPHERSTASH.<setting>`, applied each time they run
     statement_settings: Arc<RwLock<HashMap<Name, sqltk::parser::ast::Statement>>>,
 }
@@ -452,7 +452,7 @@ where
             .portal_deallocations
             .read()
             .ok()
-            .and_then(|portals| portals.get(&name).cloned());
+            .and_then(|portals| portals.get(&name).map(|(_, d)| d.clone()));
         if let Some(deallocation) = deallocation {
             self.add_deallocations(vec![deallocation]);
         }
@@ -461,7 +461,7 @@ where
             .portal_resets
             .read()
             .ok()
-            .and_then(|portals| portals.get(&name).copied());
+            .and_then(|portals| portals.get(&name).map(|(_, reset)| *reset));
         self.add_settings_resets(reset.into_iter().collect());
         self.set_execute(name, session_id);
     }
@@ -531,13 +531,15 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
         let answering = self.ready_generation();
-        let current = self
+        let Some(generation) = self
             .execute
             .read()
-            .is_ok_and(|queue| queue.next_generation().is_some_and(|g| g <= answering));
-        if !current {
+            .ok()
+            .and_then(|queue| queue.next_generation())
+            .filter(|g| *g <= answering)
+        else {
             return;
-        }
+        };
 
         if let Some(execute) = self.get_execute() {
             if let Some(session_id) = execute.session_id() {
@@ -581,7 +583,7 @@ where
             .record(execute.duration());
 
             if execute.name.is_unnamed() {
-                self.close_portal(&execute.name);
+                self.close_portal_bound_by(&execute.name, generation);
             }
         }
 
@@ -647,9 +649,10 @@ where
             .read()
             .ok()
             .and_then(|statements| statements.get(statement).cloned());
+        let generation = self.sync_generation();
         let _ = self.portal_deallocations.write().map(|mut guarded| {
             match deallocation {
-                Some(deallocation) => guarded.insert(portal.clone(), deallocation),
+                Some(deallocation) => guarded.insert(portal.clone(), (generation, deallocation)),
                 None => guarded.remove(portal),
             };
         });
@@ -695,9 +698,10 @@ where
             .read()
             .ok()
             .and_then(|statements| statements.get(statement).copied());
+        let generation = self.sync_generation();
         let _ = self.portal_resets.write().map(|mut guarded| {
             match reset {
-                Some(reset) => guarded.insert(portal.clone(), reset),
+                Some(reset) => guarded.insert(portal.clone(), (generation, reset)),
                 None => guarded.remove(portal),
             };
         });
@@ -770,6 +774,15 @@ where
     /// Portal is removed from  queue
     ///
     pub fn close_portal(&mut self, name: &Name) {
+        self.close_portal_bound_by(name, u64::MAX);
+    }
+
+    /// Close the portal `name` for an execution of generation `generation`.
+    ///
+    /// The SQL deallocation and settings reset of a portal bound in a later batch are kept: a
+    /// client can bind the unnamed portal for its next batch before PostgreSQL has finished
+    /// executing the current one.
+    fn close_portal_bound_by(&mut self, name: &Name, generation: u64) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Portal", name = ?name);
         let _ = self.portals.write().map(|mut portals| {
             if let Some(queue) = portals.get_mut(name) {
@@ -779,14 +792,22 @@ where
                 }
             }
         });
-        let _ = self
-            .portal_deallocations
-            .write()
-            .map(|mut guarded| guarded.remove(name));
-        let _ = self
-            .portal_resets
-            .write()
-            .map(|mut guarded| guarded.remove(name));
+        let _ = self.portal_deallocations.write().map(|mut guarded| {
+            if guarded
+                .get(name)
+                .is_some_and(|(bound, _)| *bound <= generation)
+            {
+                guarded.remove(name);
+            }
+        });
+        let _ = self.portal_resets.write().map(|mut guarded| {
+            if guarded
+                .get(name)
+                .is_some_and(|(bound, _)| *bound <= generation)
+            {
+                guarded.remove(name);
+            }
+        });
     }
 
     /// The generation assigned to protocol state created now.
@@ -917,15 +938,17 @@ where
                 queue.discard_before(generation);
                 !queue.is_empty()
             });
-            let _ = self
-                .portal_deallocations
-                .write()
-                .map(|mut guarded| guarded.retain(|name, _| portals.contains_key(name)));
-            let _ = self
-                .portal_resets
-                .write()
-                .map(|mut guarded| guarded.retain(|name, _| portals.contains_key(name)));
         });
+        // By generation, not by `portals`: with mapping disabled a Bind adds no portal, and the
+        // portal it bound for the next batch must keep its effects
+        let _ = self
+            .portal_deallocations
+            .write()
+            .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
+        let _ = self
+            .portal_resets
+            .write()
+            .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
     }
 
     /// Queue SQL deallocations from a simple `Query` that is about to be forwarded to PostgreSQL.
@@ -1023,22 +1046,39 @@ where
         if resets.is_empty() {
             return;
         }
-        let generation = self.sync_generation();
-        let Ok((keyset_changes, unsafe_disable_mapping_changes)) = self
+        let changes = self.settings_change_counts();
+        self.add_settings_resets_at(resets.into_iter().map(|reset| (reset, changes)).collect());
+    }
+
+    /// How many times each setting has been changed so far, as `(keyset, unsafe_disable_mapping)`
+    pub fn settings_change_counts(&self) -> (u64, u64) {
+        let changes = self
             .settings_changes
             .lock()
-            .map(|changes| (changes.keyset, changes.unsafe_disable_mapping))
-        else {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (changes.keyset, changes.unsafe_disable_mapping)
+    }
+
+    /// Queue settings resets, each with the [`Context::settings_change_counts`] taken at its
+    /// position in the batch, so it does not undo a `SET` sent after it.
+    pub fn add_settings_resets_at(&mut self, resets: Vec<(SettingsReset, (u64, u64))>) {
+        if resets.is_empty() {
             return;
-        };
-        let _ = self.pending_settings_resets.write().map(|mut pending| {
-            pending.extend(resets.into_iter().map(|reset| PendingSettingsReset {
+        }
+        let generation = self.sync_generation();
+        // A poisoned lock still queues the entries, so the batch's tags stay in step
+        let mut pending = self
+            .pending_settings_resets
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.extend(resets.into_iter().map(
+            |(reset, (keyset_changes, unsafe_disable_mapping_changes))| PendingSettingsReset {
                 generation,
                 reset,
                 keyset_changes,
                 unsafe_disable_mapping_changes,
-            }));
-        });
+            },
+        ));
     }
 
     ///

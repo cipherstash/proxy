@@ -103,8 +103,9 @@ where
     error_state: Option<ErrorState>,
     /// SQL deallocations in the simple `Query` being handled, queued once it is forwarded
     deallocations: Vec<Deallocation>,
-    /// Settings resets in the simple `Query` being handled, queued once it is forwarded
-    settings_resets: Vec<SettingsReset>,
+    /// Settings resets in the simple `Query` being handled, each with the settings change
+    /// counts at its position, queued once it is forwarded
+    settings_resets: Vec<(SettingsReset, (u64, u64))>,
 }
 
 #[derive(Debug)]
@@ -203,7 +204,7 @@ where
                 let settings_resets = std::mem::take(&mut self.settings_resets);
                 if result.is_ok() {
                     self.context.add_deallocations(deallocations);
-                    self.context.add_settings_resets(settings_resets);
+                    self.context.add_settings_resets_at(settings_resets);
                 }
                 match result {
                     Ok(Some(mapped)) => bytes = mapped,
@@ -429,7 +430,11 @@ where
                 let Some(resets) = SqlParser::parse_resets(&query.statement) else {
                     return Err(err);
                 };
-                self.settings_resets = resets.iter().map(to_settings_reset).collect();
+                let changes = self.context.settings_change_counts();
+                self.settings_resets = resets
+                    .iter()
+                    .map(|reset| (to_settings_reset(reset), changes))
+                    .collect();
                 self.context
                     .record_parse_duration(session_id, parse_timer.elapsed());
                 self.context.update_statement_metadata(session_id, |m| {
@@ -448,7 +453,10 @@ where
             .iter()
             .filter_map(to_deallocation)
             .collect();
-        self.settings_resets = to_settings_resets(&parsed_statements);
+        // Each reset is queued with the change counts at its position, so it undoes the SETs
+        // before it in the Query but not those after it
+        let statement_resets = to_statement_resets(&parsed_statements);
+        self.settings_resets.clear();
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -460,7 +468,8 @@ where
         let mut encrypted = false;
         let mut parse_duration_recorded = false;
 
-        for statement in &parsed_statements {
+        for (index, statement) in parsed_statements.iter().enumerate() {
+            self.push_settings_resets(&statement_resets[index..=index]);
             if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(statement)
             {
                 warn!(
@@ -470,6 +479,7 @@ where
             }
 
             if self.context.unsafe_disable_mapping() {
+                self.record_keyset_while_mapping_disabled(statement);
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -491,6 +501,8 @@ where
                     if self.context.mapping_errors_enabled() {
                         return Err(err);
                     } else {
+                        // The Query is forwarded unchanged, so the rest of its resets still run
+                        self.push_settings_resets(&statement_resets[index + 1..]);
                         return Ok(None);
                     };
                 }
@@ -839,6 +851,7 @@ where
         }
 
         if self.context.unsafe_disable_mapping() {
+            self.record_keyset_while_mapping_disabled(&statement);
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -958,11 +971,42 @@ where
             return Ok(());
         };
         self.context.maybe_set_unsafe_disable_mapping(&statement);
-        // As on Parse, a keyset SET is ignored while mapping is disabled
-        if !self.context.unsafe_disable_mapping() {
+        if self.context.unsafe_disable_mapping() {
+            self.record_keyset_while_mapping_disabled(&statement);
+        } else {
             self.handle_set_keyset(&statement)?;
         }
         Ok(())
+    }
+
+    /// Queue `resets` with the settings change counts as they are now
+    fn push_settings_resets(&mut self, resets: &[Option<SettingsReset>]) {
+        let changes = self.context.settings_change_counts();
+        self.settings_resets
+            .extend(resets.iter().flatten().map(|reset| (*reset, changes)));
+    }
+
+    /// Record a `SET CIPHERSTASH.KEYSET_*` sent while mapping is disabled.
+    ///
+    /// Mapping is turned back on only once PostgreSQL confirms the reset, so a keyset chosen
+    /// before then must still be kept. With a `default_keyset_id` a keyset cannot be chosen, and
+    /// the statement is passed through as before. Errors are left for PostgreSQL to report.
+    fn record_keyset_while_mapping_disabled(&mut self, statement: &ast::Statement) {
+        if self.context.default_keyset_id().is_some()
+            || matches!(
+                to_statement_reset(statement),
+                Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
+            )
+        {
+            return;
+        }
+        if let Err(err) = self.context.maybe_set_keyset(statement) {
+            warn!(
+                client_id = self.context.client_id,
+                msg = "SET CIPHERSTASH.KEYSET while mapping is disabled",
+                error = err.to_string()
+            );
+        }
     }
 
     ///
@@ -1331,13 +1375,17 @@ fn setting_reset(name: &str) -> SettingsReset {
 
 /// The settings resets in a simple `Query`, one for each `DISCARD ALL` and `SET`, as PostgreSQL
 /// confirms each with its own `CommandComplete`. Empty if none of them resets a Proxy setting.
-fn to_settings_resets(statements: &[ast::Statement]) -> Vec<SettingsReset> {
+fn to_statement_resets(statements: &[ast::Statement]) -> Vec<Option<SettingsReset>> {
     let resets = statements
         .iter()
-        .filter_map(to_statement_reset)
+        .map(to_statement_reset)
         .collect::<Vec<_>>();
-    if resets.iter().all(|reset| *reset == SettingsReset::Other) {
-        return vec![];
+    if resets
+        .iter()
+        .flatten()
+        .all(|reset| *reset == SettingsReset::Other)
+    {
+        return vec![None; statements.len()];
     }
     resets
 }

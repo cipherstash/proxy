@@ -662,4 +662,100 @@ mod settings_reset {
 
         assert!(connection.context.keyset_identifier().is_some());
     }
+
+    const OTHER_KEYSET_ID: &str =
+        "SET CIPHERSTASH.KEYSET_ID = '0b9f3e2c-1d4a-4c6e-9f8a-2b7d5e1c3a90'";
+
+    #[tokio::test]
+    async fn a_reset_bound_before_the_previous_batch_is_ready_still_runs() {
+        let mut connection = connection().await;
+        connection.prepare("r", "RESET ALL").await;
+        connection.set_keyset_and_disable_mapping().await;
+
+        // The reset is bound before PostgreSQL answers the previous Query
+        connection.client(query("SELECT 1")).await;
+        connection.client(bind("", "r")).await;
+        connection.server(command_complete("SELECT 1")).await;
+        connection.server(ready(b'I')).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.server(command_complete("RESET")).await;
+        connection.server(ready(b'I')).await;
+
+        connection.assert_startup_settings();
+    }
+
+    #[tokio::test]
+    async fn a_reset_bound_while_a_query_runs_still_runs_with_mapping_enabled() {
+        let mut connection = connection().await;
+        connection.prepare("r", "RESET ALL").await;
+        connection.simple(KEYSET_ID, "SET").await;
+
+        connection.client(query("SELECT 1")).await;
+        connection.client(bind("", "r")).await;
+        connection.server(command_complete("SELECT 1")).await;
+        connection.server(ready(b'I')).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.server(command_complete("RESET")).await;
+        connection.server(ready(b'I')).await;
+
+        connection.assert_startup_settings();
+    }
+
+    #[tokio::test]
+    async fn a_set_after_set_to_default_in_one_query_is_kept() {
+        let mut connection = connection().await;
+        connection.simple(KEYSET_ID, "SET").await;
+
+        connection
+            .client(query(&format!(
+                "SET CIPHERSTASH.KEYSET_ID TO DEFAULT; {OTHER_KEYSET_ID}"
+            )))
+            .await;
+        connection.server(command_complete("SET")).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'I')).await;
+
+        assert!(connection.context.keyset_identifier().is_some());
+    }
+
+    #[tokio::test]
+    async fn set_to_default_after_a_set_in_one_query_resets_it() {
+        let mut connection = connection().await;
+
+        connection
+            .client(query(
+                "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; \
+                 SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING TO DEFAULT",
+            ))
+            .await;
+        connection.server(command_complete("SET")).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'I')).await;
+
+        assert!(!connection.context.unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
+    async fn a_keyset_set_sent_before_mapping_is_turned_back_on_is_kept() {
+        let mut connection = connection().await;
+        connection.set_keyset_and_disable_mapping().await;
+        let before = connection.context.keyset_identifier();
+
+        connection
+            .client(query("RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING"))
+            .await;
+        connection.client(query(OTHER_KEYSET_ID)).await;
+        connection.server(command_complete("RESET")).await;
+        connection.server(ready(b'I')).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'I')).await;
+
+        assert!(!connection.context.unsafe_disable_mapping());
+        assert!(connection.context.keyset_identifier().is_some());
+        assert_ne!(connection.context.keyset_identifier(), before);
+    }
 }
