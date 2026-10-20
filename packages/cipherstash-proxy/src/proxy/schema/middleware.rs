@@ -282,11 +282,6 @@ impl SchemaMiddleware {
         );
     }
 
-    /// Forgets the schema intent of a named prepared statement that Proxy does not model.
-    pub fn unprepare(&self, name: &Name) {
-        self.prepared.write().unwrap().remove(name);
-    }
-
     /// Associates a portal with the schema intent of its prepared statement.
     pub fn bind(&self, portal: Name, prepared_statement: &Name) {
         let intent = self
@@ -682,7 +677,7 @@ fn column_kind(column: &ColumnDef) -> ColumnKind {
 }
 
 /// Returns an identifier exactly as PostgreSQL stores it in the catalog.
-fn postgres_identifier(identifier: &Ident) -> String {
+pub(crate) fn postgres_identifier(identifier: &Ident) -> String {
     if identifier.quote_style.is_some() {
         identifier.value.clone()
     } else {

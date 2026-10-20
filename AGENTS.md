@@ -30,6 +30,11 @@ before completion.
 - In tests, prefer `unwrap()` over `expect()` unless the expectation adds
   meaningful context. Prefer `assert_eq!` for equality checks.
 
+### Documentation conventions
+
+- Write Markdown prose one sentence per line, with no hard wrapping, so diffs
+  stay readable.
+
 ### Release documentation
 
 For user-facing or notable changes, update the `CHANGELOG.md` `[Unreleased]`

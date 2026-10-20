@@ -450,6 +450,28 @@ The integration tests have several runtime dependencies:
 The `Multitenant` Integration tests require different configuration from the baseline.
 The `CS_DEFAULT_KEYSET_ID` value must not be set for the multitenant `SET KEYSET_*` commands to work.
 
+##### Connection pooler compatibility matrix
+
+`mise run test:poolers` builds Proxy from source, checks the Rust compatibility matrix, and requires the complete Go pgx suite to pass on eight supported direct/session-mode configurations.
+It needs Docker and the integration credentials, and uses the containers defined in `tests/docker-compose.yml` and `tests/docker-compose.poolers.yml`.
+A dedicated PostgreSQL 17 CI job runs the same gate.
+
+The task changes your local containers:
+
+- It starts the `postgres` container with `mise run postgres:up` and leaves it running.
+- It rebuilds the `cipherstash/proxy:latest` image from the current source.
+- It replaces the dev `proxy` container from `tests/docker-compose.yml` with one configured for the matrix, and starts `proxy-mt`, the PgBouncer and PgCat containers, and one `proxy-via-<pooler>` container per pooler.
+- On exit it removes all of those containers, including the dev `proxy` container, unless `POOLERS_KEEP_RUNNING=1` is set.
+
+Stop `proxy-tls` (and anything else listening on port 6432) before running the task, and run `mise run proxy:up` again afterwards if you need the dev Proxy.
+
+The default `POOLERS_GOLANG=supported` rejects `POOLERS_TEST_FILTER` and `POOLERS_SKIP_BUILD`.
+For local diagnosis, use `POOLERS_GOLANG=off` for the Rust matrix only, or `POOLERS_GOLANG=informational` to collect Go results across unsupported configurations too.
+Only those diagnostic modes permit filters or `POOLERS_SKIP_BUILD=1`; CI requires supported mode.
+Logs and Go test evidence remain in `target/pooler-results`, configurable with `POOLERS_RESULTS_DIR`.
+Run `python3 tests/tasks/test/pooler_gate_test.py` to check the gate's failure handling without Docker.
+See [Connection poolers](docs/reference/connection-poolers.md) for the support boundaries.
+
 ##### Language-specific integration tests
 
 To run language-specific integration tests, call:
