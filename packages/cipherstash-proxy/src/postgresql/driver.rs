@@ -181,7 +181,23 @@ where
                                     )) => {
                                         break 'session;
                                     }
-                                    Ok(_) => break,
+                                    Ok(FrontendForwarding::Forwarded(message)) => {
+                                        break ForwardedMessage::Frontend(message);
+                                    }
+                                    Ok(FrontendForwarding::Expanded { source, messages }) => {
+                                        // A retained settings/DDL operation still
+                                        // needs the shared outcome drain below.
+                                        break ForwardedMessage::FrontendExpanded {
+                                            source,
+                                            messages,
+                                        };
+                                    }
+                                    Ok(FrontendForwarding::Suppressed(message)) => {
+                                        break ForwardedMessage::FrontendSuppressed(message);
+                                    }
+                                    Ok(FrontendForwarding::LocallyHandled(message)) => {
+                                        break ForwardedMessage::FrontendLocallyHandled(message);
+                                    }
                                     Err(pg_proto::ForwardError::Frontend(
                                         pg_proto::FrontendProjectionError::Capacity(_),
                                     )) => {}
@@ -191,21 +207,30 @@ where
                                     Err(error) => return Err(invalid_data(error)),
                                 }
                             }
-                            continue;
                         }
                         Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
                         Err(error) => return Err(invalid_data(error)),
                     };
-                    if matches!(&forwarded, ForwardedMessage::FrontendExpanded { .. }) {
-                        // A DDL Execute is expanded to Execute + Flush so PostgreSQL can
-                        // report its outcome before later schema-dependent frontend work.
+                    if matches!(
+                        &forwarded,
+                        ForwardedMessage::FrontendExpanded { .. }
+                            | ForwardedMessage::Frontend(
+                                FrontendMessage::Query(_) | FrontendMessage::Sync
+                            )
+                    ) && (context.schema_ddl_in_flight() || context.settings_in_flight()?)
+                    {
+                        // Extended execution requests Flush; Query and Sync already
+                        // flush themselves. Drain their settings/schema outcomes
+                        // before accepting dependent frontend work. Adding a protocol
+                        // Flush after Query is illegal in the pg-proto pipeline.
                         // Keep the single-task intermediary progressing on the backend
-                        // leg until that DDL resolves; otherwise a later frontend mapping
+                        // leg until those effects resolve; otherwise frontend mapping
                         // call can wait for an outcome this task has not read yet.
                         // Box the whole secondary forwarding state machine so it
-                        // does not enlarge the normal frontend driver's stack frame.
+                        // does not enlarge the normal frontend driver's stack frame;
+                        // it is only built when an outcome is actually in flight.
                         Box::pin(async {
-                            while context.schema_ddl_in_flight() {
+                            loop {
                                 let backend = session.forward_backend();
                                 let drained = match connection_timeout {
                                     Some(duration) => tokio::time::timeout(duration, backend)
@@ -213,6 +238,11 @@ where
                                         .map_err(|_| Error::ConnectionTimeout { duration })?,
                                     None => backend.await,
                                 };
+                                if drained.as_ref().is_ok_and(backend_needs_frontend) {
+                                    // COPY IN/BOTH cannot finish until the client sends
+                                    // CopyData/CopyDone. Resume bidirectional forwarding.
+                                    break;
+                                }
                                 match drained {
                                     Ok(
                                         BackendForwarding::Forwarded(_)
@@ -224,6 +254,11 @@ where
                                         return Err(error)
                                     }
                                     Err(error) => return Err(invalid_data(error)),
+                                }
+                                if !context.schema_ddl_in_flight()
+                                    && !context.settings_in_flight()?
+                                {
+                                    break;
                                 }
                             }
                             Ok(())
@@ -327,11 +362,49 @@ fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
     }
 }
 
+fn backend_needs_frontend(forwarded: &BackendForwarding) -> bool {
+    let message = match forwarded {
+        BackendForwarding::Forwarded(message) | BackendForwarding::Suppressed(message) => message,
+        BackendForwarding::Expanded { source, .. } => source,
+        BackendForwarding::Held => return false,
+    };
+    matches!(
+        message,
+        pg_proto::BackendMessage::CopyInResponse(_) | pg_proto::BackendMessage::CopyBothResponse(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bytes::Bytes;
     use pg_proto::{CancellationRoute, InMemoryCancellationRegistryError};
+
+    #[test]
+    fn copy_input_resumes_frontend_while_outcomes_are_pending() {
+        let response = pg_proto::CopyResponse {
+            overall_format: 0,
+            column_formats: vec![0],
+        };
+        for message in [
+            pg_proto::BackendMessage::CopyInResponse(response.clone()),
+            pg_proto::BackendMessage::CopyBothResponse(response.clone()),
+        ] {
+            assert!(super::backend_needs_frontend(
+                &pg_proto::BackendForwarding::Forwarded(message)
+            ));
+        }
+        assert!(!super::backend_needs_frontend(
+            &pg_proto::BackendForwarding::Forwarded(pg_proto::BackendMessage::CopyOutResponse(
+                response
+            ))
+        ));
+        assert!(!super::backend_needs_frontend(
+            &pg_proto::BackendForwarding::Forwarded(pg_proto::BackendMessage::CommandComplete(
+                bytes::Bytes::from_static(b"BEGIN")
+            ))
+        ));
+    }
 
     #[test]
     fn dropping_a_connection_guard_releases_its_cancellation_key() {

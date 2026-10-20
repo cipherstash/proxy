@@ -13,6 +13,8 @@
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
   - [Dependent statement after DDL](#mapping-dependent-statement-after-ddl)
+  - [Dependent statement after settings](#mapping-dependent-statement-after-settings)
+  - [Prepared settings changed](#mapping-prepared-settings-changed)
   - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Internal Error](#mapping-internal-error)
@@ -21,6 +23,9 @@
   - [Invalid encrypted value](#encrypt-invalid-inbound-eql-payload)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
+  - [Invalid keyset setting value](#encrypt-invalid-keyset-setting-value)
+  - [Invalid mapping setting value](#encrypt-invalid-mapping-setting-value)
+  - [Unknown CipherStash setting](#encrypt-unknown-cipherstash-setting)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
@@ -286,6 +291,42 @@ pipeline them; Proxy defers dependent mapping until PostgreSQL reports the DDL o
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Dependent statement after settings <a id='mapping-dependent-statement-after-settings'></a>
+
+A simple-query batch changes CipherStash settings before a statement whose mapping depends on those settings.
+Proxy must know that the settings command succeeded before it encrypts the dependent statement.
+It refuses the batch rather than use an unconfirmed keyset or mapping mode.
+Transaction-control commands are relevant only when they can change the effective keyset or mapping mode.
+Ordinary transaction and reset batches that preserve these settings are allowed.
+
+### How to fix
+
+Send the settings or transaction-control command and the dependent statement as separate queries.
+Wait for the command to succeed before preparing or binding encrypted values under the new settings.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Prepared settings changed <a id='mapping-prepared-settings-changed'></a>
+
+The prepared statement or bound values no longer match confirmed connection settings.
+This can happen after a keyset or mapping-mode change, including one caused by transaction rollback.
+Proxy refuses reuse to avoid forwarding plaintext or values encrypted under stale settings.
+
+### How to fix
+
+The error uses SQLSTATE `26000`, allowing drivers such as PostgreSQL JDBC to invalidate cached preparations.
+Driver retry behavior still depends on transaction state and configuration.
+
+Select the intended keyset and mapping mode, close the old statement, then prepare and bind it again.
+Close, prepare, and bind may be pipelined.
+Prefer bound parameters over embedded encrypted literals when a prepared statement must be reused across keysets.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
 ## Unmodelled DDL <a id='mapping-unmodelled-ddl'></a>
 
 PostgreSQL successfully executed a schema change whose connection-local effect Proxy cannot model
@@ -482,6 +523,91 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- TODO: Link to config -->
 
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Invalid keyset setting value <a id='encrypt-invalid-keyset-setting-value'></a>
+
+`SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` was given a value Proxy does not accept.
+Unsupported values are rejected instead of silently retaining the previous keyset.
+
+### Error message
+
+```
+Setting '{setting}' requires exactly one value. Use a quoted UUID for KEYSET_ID, a keyset name (quoted, unquoted, or numeric) for KEYSET_NAME, or DEFAULT to reset.
+```
+
+### How to fix
+
+Provide exactly one value of a supported form:
+
+- `CIPHERSTASH.KEYSET_ID` accepts a UUID, normally quoted.
+  A value that is not a valid UUID returns [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed).
+- `CIPHERSTASH.KEYSET_NAME` accepts a keyset name as a quoted string, an unquoted identifier, or a number.
+- Either setting accepts `DEFAULT` (or `RESET`) to clear the selected keyset.
+
+```
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_ID { TO | = } '{KeysetId}'
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_NAME { TO | = } '{KeysetName}'
+SET [ SESSION | LOCAL ] CIPHERSTASH.KEYSET_ID { TO | = } DEFAULT
+```
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Invalid mapping setting value <a id='encrypt-invalid-mapping-setting-value'></a>
+
+`SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` was given a value Proxy cannot interpret as a boolean.
+Unsupported values are rejected instead of silently retaining the previous mapping mode.
+
+### Error message
+
+```
+Setting 'CIPHERSTASH.UNSAFE_DISABLE_MAPPING' requires exactly one boolean value, such as true, false, on, off, yes, no, 1 or 0, or DEFAULT to reset.
+```
+
+### How to fix
+
+Provide exactly one boolean value, quoted or unquoted.
+Proxy accepts the spellings PostgreSQL accepts for a boolean, ignoring case:
+
+- `true`, `yes`, `on` or `1` disables mapping.
+- `false`, `no`, `off` or `0` enables mapping.
+- A unique prefix such as `t`, `f`, `y`, `n` or `of` is also accepted.
+- `DEFAULT` (or `RESET`) restores the default, with mapping enabled.
+
+```
+SET [ SESSION | LOCAL ] CIPHERSTASH.UNSAFE_DISABLE_MAPPING { TO | = } { true | false }
+SET [ SESSION | LOCAL ] CIPHERSTASH.UNSAFE_DISABLE_MAPPING { TO | = } DEFAULT
+```
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unknown CipherStash setting <a id='encrypt-unknown-cipherstash-setting'></a>
+
+A `SET` or `RESET` command named a `CIPHERSTASH.*` setting that Proxy does not recognise.
+Proxy handles every setting in the `CIPHERSTASH` namespace itself, so it rejects an unknown name instead of ignoring it.
+Setting names are case-insensitive, and quoting does not change the name: `"cipherstash.keyset_name"` and `cipherstash."KEYSET_NAME"` both name `CIPHERSTASH.KEYSET_NAME`.
+
+### Error message
+
+```
+Setting '{setting}' is not a CipherStash setting. Use CIPHERSTASH.KEYSET_ID, CIPHERSTASH.KEYSET_NAME or CIPHERSTASH.UNSAFE_DISABLE_MAPPING.
+```
+
+### How to fix
+
+Check the spelling of the setting name.
+Proxy supports these settings:
+
+- `CIPHERSTASH.KEYSET_ID`
+- `CIPHERSTASH.KEYSET_NAME`
+- `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

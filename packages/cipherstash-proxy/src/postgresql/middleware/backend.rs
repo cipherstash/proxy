@@ -1,4 +1,4 @@
-use super::super::context::{Context, ExecutionOutcome};
+use super::super::context::{Context, ExecutionEnd, ExecutionOutcome};
 use super::super::data::to_sql;
 use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::rewrite::UNSPECIFIED_TYPE_OID;
@@ -86,15 +86,29 @@ fn execution_outcome(message: &BackendMessage) -> Option<ExecutionOutcome> {
 }
 
 impl<S: EncryptionService> Backend<S> {
-    fn finish_execution(
-        &self,
+    fn report_outcome(
+        &mut self,
         operation: Option<OperationId>,
-        outcome: ExecutionOutcome,
+        message: &BackendMessage,
+        discarded: bool,
     ) -> Result<Option<DiagnosticResponse>, Error> {
-        let Some(operation) = operation else {
-            return Ok(None);
-        };
-        self.context.finish_execution(operation, outcome)
+        match message {
+            BackendMessage::CommandComplete(tag) => self.context.execution_completed(
+                operation,
+                ExecutionEnd::Command(&String::from_utf8_lossy(tag)),
+                discarded,
+            ),
+            BackendMessage::EmptyQueryResponse => {
+                self.context
+                    .execution_completed(operation, ExecutionEnd::Empty, discarded)
+            }
+            BackendMessage::PortalSuspended => {
+                self.context
+                    .execution_completed(operation, ExecutionEnd::Suspended, discarded)
+            }
+            BackendMessage::ErrorResponse(_) => self.context.postgres_failed(operation, discarded),
+            _ => Ok(None),
+        }
     }
 
     fn error_response(&self, err: Error) -> BackendMessage {
@@ -153,9 +167,6 @@ impl<S: EncryptionService> Backend<S> {
                 self.context
                     .complete_deallocation(operation, removes_all_statements(tag))?;
             }
-            if is_settings_reset(tag) {
-                self.context.complete_settings_reset(operation)?;
-            }
         }
 
         if matches!(
@@ -163,22 +174,18 @@ impl<S: EncryptionService> Backend<S> {
             BackendMessage::ParseComplete | BackendMessage::BindComplete
         ) {
             if let Some(operation) = operation {
-                self.context.complete_non_execution(operation)?;
+                self.context.preparation_acknowledged(operation)?;
+            }
+        }
+
+        if matches!(protocol_message, BackendMessage::CloseComplete) {
+            if let Some(operation) = operation {
+                self.context.close_acknowledged(operation)?;
             }
         }
 
         if self.context.is_passthrough() {
-            match &protocol_message {
-                BackendMessage::CommandComplete(_)
-                | BackendMessage::EmptyQueryResponse
-                | BackendMessage::PortalSuspended => {
-                    self.context.report_schema_execution_succeeded();
-                }
-                BackendMessage::ErrorResponse(_) => {
-                    self.context.report_schema_execution_failed();
-                }
-                _ => {}
-            }
+            let replacement = self.report_outcome(operation, &protocol_message, false)?;
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
@@ -190,32 +197,18 @@ impl<S: EncryptionService> Backend<S> {
             // client opening its next connection after ReadyForQuery observes
             // the newly loaded schema and encrypt configuration.
             if let BackendMessage::ReadyForQuery(status) = &protocol_message {
-                self.handle_ready_for_query(operation, *status).await?;
+                self.context.became_ready(operation, *status).await?;
             }
 
-            // CipherStash metadata is operation-keyed even in passthrough mode,
-            // and must be released when pg-proto identifies its terminal response.
-            if let Some(outcome) = execution_outcome(&protocol_message) {
-                if let Some(response) = self.finish_execution(operation, outcome)? {
-                    outbound_message = BackendMessage::ErrorResponse(response);
-                }
-            } else if matches!(protocol_message, BackendMessage::ErrorResponse(_))
-                && operation.is_some()
-            {
-                if let Some(response) =
-                    self.finish_execution(operation, ExecutionOutcome::Failed)?
-                {
-                    outbound_message = BackendMessage::ErrorResponse(response);
-                }
-            } else {
-                match protocol_message {
-                    BackendMessage::RowDescription(_) | BackendMessage::NoData => {
-                        if let Some(operation) = operation {
-                            self.complete_describe(operation)?;
-                        }
-                    }
-                    BackendMessage::ReadyForQuery(_) => {}
-                    _ => {}
+            if let Some(response) = replacement {
+                outbound_message = BackendMessage::ErrorResponse(response);
+            }
+            if matches!(
+                protocol_message,
+                BackendMessage::RowDescription(_) | BackendMessage::NoData
+            ) {
+                if let Some(operation) = operation {
+                    self.complete_describe(operation)?;
                 }
             }
 
@@ -223,29 +216,13 @@ impl<S: EncryptionService> Backend<S> {
         }
 
         if self.discard_execution {
-            match protocol_message {
-                BackendMessage::CommandComplete(_)
-                | BackendMessage::EmptyQueryResponse
-                | BackendMessage::PortalSuspended => {
-                    self.context.report_schema_execution_succeeded();
-                    if let Some(operation) = operation {
-                        self.context.discard_operation(operation)?;
-                    }
-                }
-                BackendMessage::ErrorResponse(_) => {
-                    self.context.report_schema_execution_failed();
-                    if let Some(operation) = operation {
-                        self.context.discard_operation(operation)?;
-                    }
-                }
-                BackendMessage::ReadyForQuery(status) => {
-                    self.discard_execution = false;
-                    self.handle_ready_for_query(operation, status).await?;
-                    return Ok(BackendMiddlewareOutput::Forward(
-                        BackendMessage::ReadyForQuery(status),
-                    ));
-                }
-                _ => {}
+            self.report_outcome(operation, &protocol_message, true)?;
+            if let BackendMessage::ReadyForQuery(status) = protocol_message {
+                self.discard_execution = false;
+                self.context.became_ready(operation, status).await?;
+                return Ok(BackendMiddlewareOutput::Forward(
+                    BackendMessage::ReadyForQuery(status),
+                ));
             }
             return Ok(BackendMiddlewareOutput::Suppress(protocol_message));
         }
@@ -258,7 +235,15 @@ impl<S: EncryptionService> Backend<S> {
                 Ok(messages) => messages,
                 Err(err) => {
                     self.discard_execution = true;
-                    self.finish_execution(encrypted_rows_operation, ExecutionOutcome::Failed)?;
+                    self.context
+                        .local_execution_failed(encrypted_rows_operation)?;
+                    // The message that triggered the flush is discarded with the rest of the
+                    // execution, but its outcome still counts, so the outcomes of the
+                    // statements PostgreSQL runs after it stay in step. An uncorrelated
+                    // message has no outcome to attribute.
+                    if operation.is_some() {
+                        self.report_outcome(operation, &protocol_message, true)?;
+                    }
                     return Ok(self.decryption_failure(err));
                 }
             }
@@ -266,20 +251,12 @@ impl<S: EncryptionService> Backend<S> {
             Vec::new()
         };
 
-        match &protocol_message {
-            BackendMessage::CommandComplete(_)
-            | BackendMessage::EmptyQueryResponse
-            | BackendMessage::PortalSuspended => {
-                self.context.report_schema_execution_succeeded();
-            }
-            BackendMessage::ErrorResponse(_) => {
-                self.context.report_schema_execution_failed();
-            }
-            _ => {}
-        }
+        let replacement = self.report_outcome(operation, &protocol_message, false)?;
 
-        let keyset_id = self.context.keyset_identifier();
-        debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
+        if tracing::enabled!(target: CONTEXT, tracing::Level::DEBUG) {
+            let keyset_id = self.context.keyset_identifier()?;
+            debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
+        }
 
         match protocol_message {
             BackendMessage::DataRow(row) => {
@@ -317,7 +294,7 @@ impl<S: EncryptionService> Backend<S> {
                     return match self.flush_encrypted_rows().await {
                         Ok(messages) => Ok(BackendMiddlewareOutput::Expand(messages)),
                         Err(err) => {
-                            self.finish_execution(Some(operation), ExecutionOutcome::Failed)?;
+                            self.context.local_execution_failed(Some(operation))?;
                             Ok(self.decryption_failure(err))
                         }
                     };
@@ -331,16 +308,14 @@ impl<S: EncryptionService> Backend<S> {
             | BackendMessage::PortalSuspended) => {
                 let outcome = execution_outcome(&terminal).unwrap();
                 debug!(target: PROTOCOL, client_id = self.context.client_id, ?outcome, msg = "Execute outcome");
-                if let Some(response) = self.finish_execution(operation, outcome)? {
+                if let Some(response) = replacement {
                     outbound_message = BackendMessage::ErrorResponse(response);
                 }
             }
             BackendMessage::ErrorResponse(response) => {
                 self.error_response_handler(&response);
                 if operation.is_some() {
-                    if let Some(response) =
-                        self.finish_execution(operation, ExecutionOutcome::Failed)?
-                    {
+                    if let Some(response) = replacement {
                         outbound_message = BackendMessage::ErrorResponse(response);
                     }
                 }
@@ -381,7 +356,7 @@ impl<S: EncryptionService> Backend<S> {
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
                 );
-                self.handle_ready_for_query(operation, status).await?;
+                self.context.became_ready(operation, status).await?;
             }
 
             _ => {
@@ -399,30 +374,6 @@ impl<S: EncryptionService> Backend<S> {
             prefix.push(outbound_message);
             Ok(BackendMiddlewareOutput::Expand(prefix))
         }
-    }
-
-    /// Publishes committed DDL before exposing idle readiness, then updates
-    /// connection-local transaction state from the same authoritative boundary.
-    async fn handle_ready_for_query(
-        &mut self,
-        operation: Option<OperationId>,
-        status: pg_proto::TransactionStatus,
-    ) -> Result<(), Error> {
-        self.context.ready_for_query(status, operation)?;
-        if status == pg_proto::TransactionStatus::Idle {
-            self.context.publish_schema_if_changed().await?;
-        }
-        let schema_status = match status {
-            pg_proto::TransactionStatus::Idle => crate::proxy::schema::TransactionStatus::Idle,
-            pg_proto::TransactionStatus::InTransaction => {
-                crate::proxy::schema::TransactionStatus::InTransaction
-            }
-            pg_proto::TransactionStatus::FailedTransaction => {
-                crate::proxy::schema::TransactionStatus::FailedTransaction
-            }
-        };
-        self.context.schema_ready_for_query(schema_status);
-        Ok(())
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
@@ -553,7 +504,7 @@ impl<S: EncryptionService> Backend<S> {
 
         self.check_column_config(projection_columns, &ciphertexts)?;
 
-        let keyset_id = self.context.keyset_identifier();
+        let keyset_id = self.context.keyset_identifier()?;
 
         debug!(target: CONTEXT,
             client_id = self.context.client_id,
@@ -813,12 +764,6 @@ fn removes_all_statements(tag: &[u8]) -> bool {
     matches!(tag, b"DEALLOCATE ALL" | b"DISCARD ALL")
 }
 
-/// Whether a `CommandComplete` tag confirms a `RESET`, `SET` or `DISCARD ALL`
-pub(super) fn is_settings_reset(tag: &[u8]) -> bool {
-    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
-    matches!(tag, b"RESET" | b"SET" | b"DISCARD ALL")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -921,8 +866,8 @@ mod tests {
             reload_sender,
         );
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
-        context.report_schema_execution_succeeded();
+        context.test_execute_simple_schema_statements(&[ddl]);
+        context.test_report_schema_execution_succeeded();
 
         let mut backend = Backend::new(context);
         let expected =
@@ -950,7 +895,7 @@ mod tests {
     async fn terminal_message_without_an_operation_is_forwarded() {
         let (mut backend, context) = create_backend_with_context();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
+        context.test_execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
 
@@ -979,7 +924,7 @@ mod tests {
     async fn terminal_message_for_a_non_execution_operation_fails_closed() {
         let (mut backend, context) = create_backend_with_context();
         let operation = operation_id();
-        context.set_non_execution(operation).unwrap();
+        context.test_non_execution(operation).unwrap();
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
 
         let result = backend.intercept(Some(operation), message.clone()).await;
@@ -1053,7 +998,7 @@ mod tests {
     async fn database_error_for_a_non_execution_operation_is_forwarded() {
         let (mut backend, context) = create_backend_with_context();
         let operation = operation_id();
-        context.set_non_execution(operation).unwrap();
+        context.test_non_execution(operation).unwrap();
         let response = crate::postgresql::diagnostics::invalid_sql_statement(
             "syntax error at or near SELECT".to_owned(),
         );
@@ -1071,7 +1016,7 @@ mod tests {
     async fn database_error_for_an_unregistered_operation_fails_closed() {
         let (mut backend, context) = create_backend_with_context();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
+        context.test_execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
         let message = BackendMessage::ErrorResponse(
             crate::postgresql::diagnostics::invalid_sql_statement("database error".to_owned()),
@@ -1092,7 +1037,7 @@ mod tests {
     async fn parse_completion_releases_non_execution_error_correlation() {
         let (mut backend, context) = create_backend_with_context();
         let operation = operation_id();
-        context.set_non_execution(operation).unwrap();
+        context.test_non_execution(operation).unwrap();
 
         let output = backend
             .intercept(Some(operation), BackendMessage::ParseComplete)
@@ -1104,7 +1049,7 @@ mod tests {
             BackendMiddlewareOutput::Forward(BackendMessage::ParseComplete)
         );
         assert!(matches!(
-            context.finish_execution(operation, ExecutionOutcome::Failed),
+            context.test_finish_execution(operation, ExecutionOutcome::Failed),
             Err(Error::Context(crate::error::ContextError::UnknownOperation))
         ));
     }
@@ -1130,7 +1075,7 @@ mod tests {
         let replacement =
             crate::postgresql::diagnostics::invalid_sql_statement("proxy parse error".to_owned());
         context
-            .set_operation_error(operation, replacement.clone())
+            .test_set_operation_error(operation, replacement.clone())
             .unwrap();
         let database_error =
             BackendMessage::ErrorResponse(crate::postgresql::diagnostics::invalid_sql_statement(
@@ -1154,10 +1099,10 @@ mod tests {
         let operation = operation_id();
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_execute(operation, Name::new(), Some(scope))
+            .test_set_execute(operation, Name::new(), Some(scope))
             .unwrap();
         context
-            .set_operation_error(
+            .test_set_operation_error(
                 operation,
                 crate::postgresql::diagnostics::invalid_sql_statement("proxy error".to_owned()),
             )
@@ -1183,7 +1128,7 @@ mod tests {
         let operation = operation_id();
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_execute(operation, Name::new(), Some(scope))
+            .test_set_execute(operation, Name::new(), Some(scope))
             .unwrap();
         backend.discard_execution = true;
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
@@ -1212,10 +1157,10 @@ mod tests {
         let operation = operation_id();
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_execute(operation, Name::new(), Some(scope))
+            .test_set_execute(operation, Name::new(), Some(scope))
             .unwrap();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
+        context.test_execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
         backend.discard_execution = true;
 
@@ -1240,10 +1185,10 @@ mod tests {
         let operation = operation_id();
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_execute(operation, Name::new(), Some(scope))
+            .test_set_execute(operation, Name::new(), Some(scope))
             .unwrap();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
+        context.test_execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
         backend.encrypted_rows_operation = Some(operation);
         backend.encrypted_rows.push(DataRow {
@@ -1276,7 +1221,7 @@ mod tests {
     async fn suspended_portal_resolves_one_schema_execution() {
         let (mut backend, context) = create_backend_with_context();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
+        context.test_execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
 
         let output = backend
@@ -1289,6 +1234,47 @@ mod tests {
             BackendMiddlewareOutput::Forward(BackendMessage::PortalSuspended)
         );
         assert!(!context.schema_ddl_in_flight());
+    }
+
+    #[tokio::test]
+    async fn close_complete_releases_the_closed_statement_rollback_snapshot() {
+        let (mut backend, mut context) = create_backend_with_context();
+        let name = Name::from_static(b"closed");
+        let metrics = context.start_metrics_scope().unwrap();
+        context
+            .test_set_statement_metrics_scope(name.clone(), metrics)
+            .unwrap();
+        let close = operation_id();
+        context
+            .close(
+                close,
+                &pg_proto::Close {
+                    name,
+                    target: pg_proto::DescribeTarget::Statement,
+                },
+            )
+            .unwrap();
+        let retained = |context: &mut Context<TestService>| {
+            let mut found = false;
+            context
+                .update_statement_metadata(metrics, |_| found = true)
+                .unwrap();
+            found
+        };
+        // Until PostgreSQL confirms the Close, its rollback snapshot keeps the
+        // statement's metrics scope alive.
+        assert!(retained(&mut context));
+
+        let output = backend
+            .intercept(Some(close), BackendMessage::CloseComplete)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            output,
+            BackendMiddlewareOutput::Forward(BackendMessage::CloseComplete)
+        );
+        assert!(!retained(&mut context));
     }
 
     #[tokio::test]
@@ -1307,8 +1293,8 @@ mod tests {
             reload_sender,
         );
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[ddl]);
-        context.report_schema_execution_succeeded();
+        context.test_execute_simple_schema_statements(&[ddl]);
+        context.test_report_schema_execution_succeeded();
 
         let reload_task = tokio::spawn(async move {
             let Some(crate::proxy::ReloadCommand::DatabaseSchema(responder)) =
