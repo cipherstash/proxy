@@ -501,8 +501,19 @@ where
                     if self.context.mapping_errors_enabled() {
                         return Err(err);
                     } else {
-                        // The Query is forwarded unchanged, so the rest of its resets still run
-                        self.push_settings_resets(&statement_resets[index + 1..]);
+                        // The Query is forwarded unchanged, so the SETs and resets after this
+                        // statement still run, in order
+                        for (later, statement) in
+                            parsed_statements.iter().enumerate().skip(index + 1)
+                        {
+                            self.push_settings_resets(&statement_resets[later..=later]);
+                            self.context.maybe_set_unsafe_disable_mapping(statement);
+                            if self.context.unsafe_disable_mapping() {
+                                self.record_keyset_while_mapping_disabled(statement)?;
+                            } else {
+                                self.handle_set_keyset(statement)?;
+                            }
+                        }
                         return Ok(None);
                     };
                 }

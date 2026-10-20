@@ -782,4 +782,36 @@ mod settings_reset {
         connection.execute_prepared("set_keyset", "SET").await;
         assert!(connection.context.keyset_identifier().is_some());
     }
+
+    #[tokio::test]
+    async fn sets_after_a_statement_that_fails_type_checking_still_apply() {
+        let mut connection = connection().await;
+        connection
+            .client(query(&format!(
+                "SELECT missing_column FROM missing_table; {KEYSET_ID}; \
+                 SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"
+            )))
+            .await;
+        connection.server(command_complete("SELECT 0")).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'I')).await;
+
+        assert!(connection.context.keyset_identifier().is_some());
+        assert!(connection.context.unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
+    async fn an_invalid_keyset_id_is_refused_while_mapping_is_disabled() {
+        let mut connection = connection().await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection.errors_sent_to_client();
+        connection
+            .client(query("SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'"))
+            .await;
+        assert_eq!(connection.context.keyset_identifier(), None);
+        assert_eq!(connection.errors_sent_to_client(), 1);
+    }
 }
