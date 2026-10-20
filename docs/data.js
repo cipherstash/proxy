@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792468657286,
+  "lastUpdate": 1792468795307,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27699,6 +27699,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 33.712517,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "4da797ae9a59987841bc67a4f5a5f3e6e5cf1965",
+          "message": "fix(proxy): keep reset order and keyset SETs consistent with PostgreSQL (CIP-5021)",
+          "timestamp": "2026-10-19T08:54:27Z",
+          "url": "https://github.com/cipherstash/proxy/pull/480/commits/4da797ae9a59987841bc67a4f5a5f3e6e5cf1965"
+        },
+        "date": 1792468793647,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.473564,
             "unit": "Number"
           }
         ]
