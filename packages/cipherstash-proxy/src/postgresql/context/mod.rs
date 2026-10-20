@@ -1296,6 +1296,18 @@ where
         &mut self,
         statement: &sqltk::parser::ast::Statement,
     ) -> Result<Option<KeysetIdentifier>, Error> {
+        let identifier = self.keyset_id_in(statement)?;
+        if let Some(identifier) = &identifier {
+            self.set_keyset_identifier(identifier.clone());
+        }
+        Ok(identifier)
+    }
+
+    /// The keyset a `SET CIPHERSTASH.KEYSET_ID = {keyset_id}` selects, without selecting it
+    fn keyset_id_in(
+        &self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<KeysetIdentifier>, Error> {
         // The CIPHERSTASH. namespace prevents errors KEYSET_ID
         // The constants avoid the need to allocate Vecs every time we examine the statement.
         static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
@@ -1328,10 +1340,7 @@ where
 
                     debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetId", ?keyset_id);
 
-                    let identifier = KeysetIdentifier(IdentifiedBy::Uuid(keyset_id));
-                    self.set_keyset_identifier(identifier.clone());
-
-                    return Ok(Some(identifier));
+                    return Ok(Some(KeysetIdentifier(IdentifiedBy::Uuid(keyset_id))));
                 } else {
                     let err = EncryptError::KeysetIdCouldNotBeSet;
                     warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
@@ -1350,6 +1359,18 @@ where
         &mut self,
         statement: &sqltk::parser::ast::Statement,
     ) -> Result<Option<KeysetIdentifier>, Error> {
+        let identifier = self.keyset_name_in(statement);
+        if let Some(identifier) = &identifier {
+            self.set_keyset_identifier(identifier.clone());
+        }
+        Ok(identifier)
+    }
+
+    /// The keyset a `SET CIPHERSTASH.KEYSET_NAME = {keyset_name}` selects, without selecting it
+    fn keyset_name_in(
+        &self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Option<KeysetIdentifier> {
         // The CIPHERSTASH. namespace prevents errors KEYSET_NAME
         // The constants avoid the need to allocate Vecs every time we examine the statement.
         static SQL_SETTING_NAME_KEYSET_NAME: LazyLock<ObjectName> = LazyLock::new(|| {
@@ -1380,10 +1401,7 @@ where
                 if let Some(keyset_name) = keyset_name {
                     debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetName", ?keyset_name);
 
-                    let identifier = KeysetIdentifier(IdentifiedBy::Name(keyset_name.into()));
-                    self.set_keyset_identifier(identifier.clone());
-
-                    return Ok(Some(identifier));
+                    return Some(KeysetIdentifier(IdentifiedBy::Name(keyset_name.into())));
                 } else {
                     let err = EncryptError::KeysetNameCouldNotBeSet;
                     warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
@@ -1391,7 +1409,20 @@ where
                 }
             }
         }
-        Ok(None)
+        None
+    }
+
+    /// The keyset a `SET CIPHERSTASH.KEYSET_ID` or `KEYSET_NAME` selects, without selecting it.
+    ///
+    /// Returns an error for a `KEYSET_ID` that is not a UUID.
+    pub fn keyset_in(
+        &self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<KeysetIdentifier>, Error> {
+        match self.keyset_id_in(statement)? {
+            Some(identifier) => Ok(Some(identifier)),
+            None => Ok(self.keyset_name_in(statement)),
+        }
     }
 
     /// Single entry point for setting keyset identifiers by either ID or name.

@@ -854,7 +854,9 @@ where
             is_cipherstash_set(&statement).then(|| statement.clone()),
         );
         // A `SET CIPHERSTASH.<setting>` takes effect when it is executed, see
-        // `apply_statement_setting`, as PostgreSQL only prepares it here
+        // `apply_statement_setting`, as PostgreSQL only prepares it here. A keyset SET Proxy would
+        // refuse then is refused now, as before.
+        self.check_set_keyset(&statement)?;
 
         if self.context.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
@@ -983,6 +985,24 @@ where
             self.record_keyset_while_mapping_disabled(&statement)?;
         } else {
             self.handle_set_keyset(&statement)?;
+        }
+        Ok(())
+    }
+
+    /// Refuse a `SET CIPHERSTASH.KEYSET_*` that [`Self::handle_set_keyset`] or
+    /// [`Self::record_keyset_while_mapping_disabled`] would refuse, without applying it
+    fn check_set_keyset(&self, statement: &ast::Statement) -> Result<(), Error> {
+        let default_keyset = self.context.default_keyset_id().is_some();
+        if (self.context.unsafe_disable_mapping() && default_keyset)
+            || matches!(
+                to_statement_reset(statement),
+                Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
+            )
+        {
+            return Ok(());
+        }
+        if self.context.keyset_in(statement)?.is_some() && default_keyset {
+            return Err(EncryptError::UnexpectedSetKeyset.into());
         }
         Ok(())
     }

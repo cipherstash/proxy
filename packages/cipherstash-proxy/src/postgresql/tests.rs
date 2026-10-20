@@ -814,4 +814,12 @@ mod settings_reset {
         assert_eq!(connection.context.keyset_identifier(), None);
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
+
+    #[tokio::test]
+    async fn a_keyset_set_with_a_default_keyset_is_refused_when_prepared() {
+        let mut connection = Connection::started().await;
+        connection.client(parse("set_keyset", KEYSET_ID)).await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+        assert_eq!(connection.context.keyset_identifier(), None);
+    }
 }
