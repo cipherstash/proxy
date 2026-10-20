@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792471100857,
+  "lastUpdate": 1792534698714,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27799,6 +27799,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.168514,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb7627b9b6019198049bc2d2e1006c3f58e630c6",
+          "message": "Merge pull request #479 from cipherstash/claude/project-thread-oxocla\n\nci: fire the Claude code-review routine when a pull request is ready (CIP-5060)",
+          "timestamp": "2026-10-21T08:13:14+10:00",
+          "tree_id": "6847e8ffe9b6a2cc44a10423998e65796d556e69",
+          "url": "https://github.com/cipherstash/proxy/commit/bb7627b9b6019198049bc2d2e1006c3f58e630c6"
+        },
+        "date": 1792534696937,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.790713,
             "unit": "Number"
           }
         ]
