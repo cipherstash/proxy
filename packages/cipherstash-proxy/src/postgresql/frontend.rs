@@ -479,7 +479,7 @@ where
             }
 
             if self.context.unsafe_disable_mapping() {
-                self.record_keyset_while_mapping_disabled(statement);
+                self.record_keyset_while_mapping_disabled(statement)?;
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -851,7 +851,7 @@ where
         }
 
         if self.context.unsafe_disable_mapping() {
-            self.record_keyset_while_mapping_disabled(&statement);
+            self.record_keyset_while_mapping_disabled(&statement)?;
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -972,7 +972,7 @@ where
         };
         self.context.maybe_set_unsafe_disable_mapping(&statement);
         if self.context.unsafe_disable_mapping() {
-            self.record_keyset_while_mapping_disabled(&statement);
+            self.record_keyset_while_mapping_disabled(&statement)?;
         } else {
             self.handle_set_keyset(&statement)?;
         }
@@ -990,23 +990,16 @@ where
     ///
     /// Mapping is turned back on only once PostgreSQL confirms the reset, so a keyset chosen
     /// before then must still be kept. With a `default_keyset_id` a keyset cannot be chosen, and
-    /// the statement is passed through as before. Errors are left for PostgreSQL to report.
-    fn record_keyset_while_mapping_disabled(&mut self, statement: &ast::Statement) {
-        if self.context.default_keyset_id().is_some()
-            || matches!(
-                to_statement_reset(statement),
-                Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
-            )
-        {
-            return;
+    /// the statement is passed through as before. A `KEYSET_ID` that is not a UUID is an error,
+    /// as it is with mapping enabled.
+    fn record_keyset_while_mapping_disabled(
+        &mut self,
+        statement: &ast::Statement,
+    ) -> Result<(), Error> {
+        if self.context.default_keyset_id().is_some() {
+            return Ok(());
         }
-        if let Err(err) = self.context.maybe_set_keyset(statement) {
-            warn!(
-                client_id = self.context.client_id,
-                msg = "SET CIPHERSTASH.KEYSET while mapping is disabled",
-                error = err.to_string()
-            );
-        }
+        self.handle_set_keyset(statement)
     }
 
     ///
