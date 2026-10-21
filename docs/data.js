@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792555735352,
+  "lastUpdate": 1792560372680,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27882,6 +27882,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.965019,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6004eef25d507afa7ec855682d35ead0a4497630",
+          "message": "fix(proxy): keep CIPHERSTASH settings in step with PostgreSQL transactions (CIP-5058)",
+          "timestamp": "2026-10-20T23:57:39Z",
+          "url": "https://github.com/cipherstash/proxy/pull/478/commits/6004eef25d507afa7ec855682d35ead0a4497630"
+        },
+        "date": 1792560371106,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 33.919544,
             "unit": "Number"
           }
         ]
