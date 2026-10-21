@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792561283094,
+  "lastUpdate": 1792563882206,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27932,6 +27932,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 42.097734,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67dc407f302cbeec42384e01494b129ba3f1cbe",
+          "message": "Merge pull request #480 from cipherstash/claude/project-thread-gvoja6\n\ntest(proxy): cover settings resets and SET ordering cases (CIP-5021)",
+          "timestamp": "2026-10-21T16:18:38+10:00",
+          "tree_id": "6211a0d07a9e421da8b5b0d43f2e47acf3c054d9",
+          "url": "https://github.com/cipherstash/proxy/commit/a67dc407f302cbeec42384e01494b129ba3f1cbe"
+        },
+        "date": 1792563880717,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.408728,
             "unit": "Number"
           }
         ]
