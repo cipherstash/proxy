@@ -182,7 +182,7 @@ where
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
-            let deallocation = is_deallocation(&bytes);
+            let completed = CompletedCommand::from(&bytes);
             if code == u8::from(BackendCode::ReadyForQuery) {
                 self.context.ready_for_query(transaction_status(&bytes));
             }
@@ -204,9 +204,7 @@ where
                 | BackendCode::ErrorResponse => {
                     self.context.complete_execution();
                     self.context.finish_session();
-                    if deallocation {
-                        self.context.complete_deallocation();
-                    }
+                    self.command_completed(completed);
                 }
                 _ => {}
             }
@@ -243,9 +241,7 @@ where
 
                 self.context.complete_execution();
                 self.context.finish_session();
-                if is_deallocation(&bytes) {
-                    self.context.complete_deallocation();
-                }
+                self.command_completed(CompletedCommand::from(&bytes));
             }
             BackendCode::ErrorResponse => {
                 if let Some(b) = self.error_response_handler(&bytes)? {
@@ -372,6 +368,16 @@ where
             self.flush().await?;
         }
         Ok(())
+    }
+
+    /// Apply the SQL deallocation or settings reset that a `CommandComplete` confirms
+    fn command_completed(&mut self, completed: CompletedCommand) {
+        if completed.deallocation {
+            self.context.complete_deallocation();
+        }
+        if completed.settings_reset {
+            self.context.complete_settings_reset();
+        }
     }
 
     ///
@@ -761,6 +767,30 @@ fn is_deallocation(bytes: &BytesMut) -> bool {
     )
 }
 
+/// What a `CommandComplete` confirms, read before the message is forwarded
+#[derive(Clone, Copy, Debug)]
+struct CompletedCommand {
+    deallocation: bool,
+    settings_reset: bool,
+}
+
+impl From<&BytesMut> for CompletedCommand {
+    fn from(bytes: &BytesMut) -> Self {
+        CompletedCommand {
+            deallocation: is_deallocation(bytes),
+            settings_reset: is_settings_reset(bytes),
+        }
+    }
+}
+
+/// Whether a `CommandComplete` confirms a `RESET`, `SET` or `DISCARD ALL`
+fn is_settings_reset(bytes: &BytesMut) -> bool {
+    if bytes.first() != Some(&b'C') {
+        return false;
+    }
+    matches!(command_tag(bytes), b"RESET" | b"SET" | b"DISCARD ALL")
+}
+
 /// The transaction status (`I`, `T` or `E`) of a `ReadyForQuery` message
 fn transaction_status(bytes: &BytesMut) -> u8 {
     bytes.get(5).copied().unwrap_or(b'I')
@@ -1012,6 +1042,18 @@ mod tests {
         assert!(!super::is_deallocation(&command_complete("DISCARD PLANS")));
         assert!(!super::is_deallocation(&command_complete("SELECT 1")));
         assert!(!super::is_deallocation(&error_response_bytes()));
+    }
+
+    #[test]
+    fn settings_reset_command_tags() {
+        assert!(super::is_settings_reset(&command_complete("RESET")));
+        assert!(super::is_settings_reset(&command_complete("SET")));
+        assert!(super::is_settings_reset(&command_complete("DISCARD ALL")));
+        assert!(!super::is_settings_reset(&command_complete(
+            "DISCARD PLANS"
+        )));
+        assert!(!super::is_settings_reset(&command_complete("SELECT 1")));
+        assert!(!super::is_settings_reset(&error_response_bytes()));
     }
 
     #[test]

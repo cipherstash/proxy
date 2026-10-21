@@ -11,6 +11,8 @@ mod messages;
 mod parser;
 mod protocol;
 mod startup;
+#[cfg(test)]
+mod tests;
 
 pub use context::column::Column;
 pub use context::Context;
