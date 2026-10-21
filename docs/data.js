@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792625543166,
+  "lastUpdate": 1792626659332,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -27986,6 +27986,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.08874,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "72d38f9b7a5a8fdaf3129208a371b62cb8954b30",
+          "message": "test(proxy): cover CIPHERSTASH settings in rolled-back transactions (CIP-5058)",
+          "timestamp": "2026-10-21T06:18:43Z",
+          "url": "https://github.com/cipherstash/proxy/pull/478/commits/72d38f9b7a5a8fdaf3129208a371b62cb8954b30"
+        },
+        "date": 1792626657830,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.747514,
             "unit": "Number"
           }
         ]
