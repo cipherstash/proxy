@@ -4,10 +4,10 @@ on:
   # just `main`. Stacked/queued PRs target intermediate branches (e.g.
   # `queue/<name>/...`), so a `branches: [main]` filter skipped CI on every PR
   # in a stack except the front one.
+  #
+  # No `paths-ignore` on pull_request either: "Build (Rust MSRV)" is a required
+  # check, and a skipped workflow never reports it, which blocks the merge.
   pull_request:
-    paths-ignore:
-     - '.github/workflows/release.yml' # ignore unrelated workflow
-     - '.github/workflows/benchmark.yml' # ignore unrelated workflow
   push:
     branches:
       - main
