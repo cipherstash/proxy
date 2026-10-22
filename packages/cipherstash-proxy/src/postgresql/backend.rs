@@ -188,7 +188,7 @@ where
             }
             // PostgreSQL rejected the message Proxy forwarded in place of one it refused
             if code == u8::from(BackendCode::ErrorResponse) {
-                if let Some(refusal) = self.context.take_refusal() {
+                if let Some(refusal) = self.context.take_refusal(&bytes) {
                     bytes = refusal;
                 }
             }
@@ -258,7 +258,7 @@ where
                     bytes = b
                 }
                 // PostgreSQL rejected the message Proxy forwarded in place of one it refused
-                if let Some(refusal) = self.context.take_refusal() {
+                if let Some(refusal) = self.context.take_refusal(&bytes) {
                     bytes = refusal;
                 }
 

@@ -227,7 +227,7 @@ where
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        bytes = self.refuse(err, refused_query())?;
+                        bytes = self.refuse(err, refused_query)?;
                     }
                 }
             }
@@ -241,7 +241,7 @@ where
                         msg = "Execute Handler Error",
                         error = ?err.to_string(),
                     );
-                    bytes = self.refuse(err, refused_execute())?;
+                    bytes = self.refuse(err, refused_execute)?;
                     self.error_state = Some(ErrorState);
                 }
             }
@@ -259,7 +259,7 @@ where
                         let name = Parse::try_from(&bytes)
                             .map(|parse| parse.name)
                             .unwrap_or_else(|_| Name::unnamed());
-                        bytes = self.refuse(err, refused_parse(&name))?;
+                        bytes = self.refuse(err, |refusal| refused_parse(&name, refusal))?;
                         self.error_state = Some(ErrorState);
                     }
                 }
@@ -294,7 +294,7 @@ where
                         let portal = Bind::try_from(&bytes)
                             .map(|bind| bind.portal)
                             .unwrap_or_else(|_| Name::unnamed());
-                        bytes = self.refuse(err, refused_bind(&portal))?;
+                        bytes = self.refuse(err, |refusal| refused_bind(&portal, refusal))?;
                         self.error_state = Some(ErrorState);
                     }
                 }
@@ -328,10 +328,15 @@ where
     ///
     /// PostgreSQL rejects the replacement, so it fails the batch, or the transaction, as if it
     /// had refused the message itself, and the client gets `err` in place of PostgreSQL's error.
-    fn refuse(&mut self, err: Error, replacement: BytesMut) -> Result<BytesMut, Error> {
+    fn refuse(
+        &mut self,
+        err: Error,
+        replacement: impl FnOnce(&str) -> BytesMut,
+    ) -> Result<BytesMut, Error> {
         let response = BytesMut::try_from(self.error_to_response(err))?;
-        self.context.refuse(response);
-        Ok(replacement)
+        let name = refusal_name();
+        self.context.refuse(name.clone(), response);
+        Ok(replacement(&name))
     }
 
     /// Track a message about to be forwarded, so each `ReadyForQuery` is matched to its batch.
@@ -1448,43 +1453,44 @@ fn message(code: u8, body: &[u8]) -> BytesMut {
     bytes
 }
 
-/// SQL that PostgreSQL fails to parse, as it casts to a type that does not exist
-fn refused_sql() -> String {
-    format!("SELECT NULL::\"{}\"", refusal_name())
+/// SQL that PostgreSQL fails to parse, as it casts to the type `refusal`, which does not exist
+fn refused_sql(refusal: &str) -> String {
+    format!("SELECT NULL::\"{refusal}\"")
 }
 
-/// A `Query` PostgreSQL rejects
-fn refused_query() -> BytesMut {
-    let mut body = refused_sql().into_bytes();
+/// A `Query` PostgreSQL rejects, naming `refusal` in its error
+fn refused_query(refusal: &str) -> BytesMut {
+    let mut body = refused_sql(refusal).into_bytes();
     body.push(0);
     message(b'Q', &body)
 }
 
-/// A `Parse` of statement `name` that PostgreSQL rejects
-fn refused_parse(name: &str) -> BytesMut {
+/// A `Parse` of statement `name` that PostgreSQL rejects, naming `refusal` in its error
+fn refused_parse(name: &str, refusal: &str) -> BytesMut {
     let mut body = name.as_bytes().to_vec();
     body.push(0);
-    body.extend_from_slice(refused_sql().as_bytes());
+    body.extend_from_slice(refused_sql(refusal).as_bytes());
     body.push(0);
     // No parameter types
     body.extend_from_slice(&0i16.to_be_bytes());
     message(b'P', &body)
 }
 
-/// A `Bind` of portal `portal` that PostgreSQL rejects, as its statement does not exist
-fn refused_bind(portal: &str) -> BytesMut {
+/// A `Bind` of portal `portal` that PostgreSQL rejects, as its statement `refusal` does not
+/// exist
+fn refused_bind(portal: &str, refusal: &str) -> BytesMut {
     let mut body = portal.as_bytes().to_vec();
     body.push(0);
-    body.extend_from_slice(refusal_name().as_bytes());
+    body.extend_from_slice(refusal.as_bytes());
     body.push(0);
     // No parameter formats, parameters or result formats
     body.extend_from_slice(&[0; 6]);
     message(b'B', &body)
 }
 
-/// An `Execute` PostgreSQL rejects, as its portal does not exist
-fn refused_execute() -> BytesMut {
-    let mut body = refusal_name().into_bytes();
+/// An `Execute` PostgreSQL rejects, as its portal `refusal` does not exist
+fn refused_execute(refusal: &str) -> BytesMut {
+    let mut body = refusal.as_bytes().to_vec();
     body.push(0);
     body.extend_from_slice(&0i32.to_be_bytes());
     message(b'E', &body)

@@ -254,7 +254,8 @@ impl Connection {
     /// PostgreSQL rejects the message Proxy forwarded in place of a refused one, then sends
     /// `ReadyForQuery` with `transaction_status`
     async fn rejected(&mut self, transaction_status: u8) {
-        self.server(error()).await;
+        let forwarded = self.forwarded().await;
+        self.server(rejection(&forwarded)).await;
         self.server(ready(transaction_status)).await;
     }
 
@@ -393,6 +394,31 @@ fn ready(transaction_status: u8) -> BytesMut {
 
 fn error() -> BytesMut {
     message(b'E', b"SERROR\0C25P02\0Mcurrent transaction is aborted\0\0")
+}
+
+/// PostgreSQL's error for the message Proxy forwarded in place of a refused one, among
+/// `forwarded`, which names an object that does not exist
+fn rejection(forwarded: &[(u8, Vec<u8>)]) -> BytesMut {
+    const PREFIX: &[u8] = b"__cipherstash_";
+    let name = forwarded
+        .iter()
+        .find_map(|(_, body)| {
+            let start = body.windows(PREFIX.len()).position(|w| w == PREFIX)?;
+            Some(String::from_utf8_lossy(&body[start..start + PREFIX.len() + 32]).into_owned())
+        })
+        .expect("no refused message was forwarded");
+    let mut body = b"SERROR\0C26000\0M".to_vec();
+    body.extend_from_slice(format!("\"{name}\" does not exist").as_bytes());
+    body.extend_from_slice(b"\0\0");
+    message(b'E', &body)
+}
+
+/// PostgreSQL's error for a statement on a table that does not exist
+fn undefined_table() -> BytesMut {
+    message(
+        b'E',
+        b"SERROR\0C42P01\0Mrelation \"missing\" does not exist\0\0",
+    )
 }
 
 /// `DISCARD ALL` and `RESET` return the connection's Proxy settings to their startup values
@@ -1870,9 +1896,12 @@ mod encrypted {
         connection.client(bind_text("", "s", "a@example.com")).await;
         connection.client(execute("")).await;
         connection.client(sync()).await;
-        assert_eq!(connection.forwarded_codes().await, vec![b'B', b'S']);
+        let forwarded = connection.forwarded().await;
+        let codes = forwarded.iter().map(|(code, _)| *code).collect::<Vec<_>>();
+        assert_eq!(codes, vec![b'B', b'S']);
 
-        connection.rejected(b'I').await;
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
         let codes = connection.error_codes_sent_to_client();
         assert_eq!(codes.len(), 1);
         assert_ne!(codes[0], "25P02");
@@ -1930,7 +1959,7 @@ mod refusals {
             Vec::<String>::new()
         );
 
-        connection.server(error()).await;
+        connection.server(rejection(&forwarded)).await;
         connection.server(ready(b'I')).await;
         assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
@@ -1964,7 +1993,7 @@ mod refusals {
         assert!(target(&forwarded[0].1, false).starts_with("__cipherstash_"));
 
         // PostgreSQL fails the transaction, so the client's COMMIT rolls back
-        connection.server(error()).await;
+        connection.server(rejection(&forwarded)).await;
         connection.server(ready(b'E')).await;
         assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
     }
@@ -1978,8 +2007,10 @@ mod refusals {
             .await;
         connection.client(sync()).await;
 
-        assert_eq!(connection.forwarded_codes().await, vec![b'P', b'S']);
-        connection.server(error()).await;
+        let forwarded = connection.forwarded().await;
+        let codes = forwarded.iter().map(|(code, _)| *code).collect::<Vec<_>>();
+        assert_eq!(codes, vec![b'P', b'S']);
+        connection.server(rejection(&forwarded)).await;
         connection.server(ready(b'I')).await;
         let codes = connection.error_codes_sent_to_client();
         assert_eq!(codes.len(), 1);
@@ -2000,15 +2031,33 @@ mod refusals {
             .await;
 
         // PostgreSQL answers, and fails the transaction, rather than Proxy answering for it
-        assert_eq!(connection.forwarded_codes().await, vec![b'Q']);
+        let forwarded = connection.forwarded().await;
+        let codes = forwarded.iter().map(|(code, _)| *code).collect::<Vec<_>>();
+        assert_eq!(codes, vec![b'Q']);
         assert_eq!(
             connection.error_codes_sent_to_client(),
             Vec::<String>::new()
         );
-        connection.server(error()).await;
+        connection.server(rejection(&forwarded)).await;
         connection.server(ready(b'E')).await;
         let codes = connection.error_codes_sent_to_client();
         assert_eq!(codes.len(), 1);
         assert!(!UNDEFINED_OBJECT_OR_NAME.contains(&codes[0].as_str()));
+    }
+
+    #[tokio::test]
+    async fn an_earlier_error_in_the_batch_reaches_the_client_in_place_of_the_refusal() {
+        let mut connection = connection_with_stale_statement().await;
+        connection.client(parse("q", "SELECT * FROM missing")).await;
+        connection.client(bind("", "s")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        assert_eq!(connection.forwarded_codes().await, vec![b'P', b'B', b'S']);
+
+        // PostgreSQL fails the Parse, and skips the rest of the batch
+        connection.server(undefined_table()).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["42P01"]);
+        assert_eq!(connection.context.state_sizes().refusals, 0);
     }
 }

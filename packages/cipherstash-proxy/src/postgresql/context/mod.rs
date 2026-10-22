@@ -110,9 +110,19 @@ where
     prepared_settings: Arc<RwLock<HashMap<Name, PreparedSettings>>>,
     /// Portals bound from one of those statements, with the generation they were bound in
     bound_settings: Arc<RwLock<HashMap<Name, (u64, BoundSettings)>>>,
-    /// The errors of messages Proxy refused, sent to the client in place of the error
-    /// PostgreSQL answers the batch with, with the generation of the batch
-    refusals: Arc<RwLock<VecDeque<(u64, BytesMut)>>>,
+    /// The errors of messages Proxy refused, see [`Context::refuse`]
+    refusals: Arc<RwLock<VecDeque<Refusal>>>,
+}
+
+/// A message Proxy refused, forwarded as a message that names an object that does not exist.
+#[derive(Debug)]
+struct Refusal {
+    /// Generation of the batch it was sent in, see [`Context::sync_generation`]
+    generation: u64,
+    /// The name of the object that does not exist, which PostgreSQL's error names
+    name: String,
+    /// Proxy's error, sent to the client in place of PostgreSQL's
+    response: BytesMut,
 }
 
 /// The settings a statement Proxy maps was prepared under.
@@ -827,35 +837,46 @@ where
         Ok(())
     }
 
-    /// Record the error of a message Proxy refused, which is forwarded as a message PostgreSQL
-    /// rejects, so the client gets `response` in place of PostgreSQL's error.
-    pub fn refuse(&mut self, response: BytesMut) {
+    /// Record the error of a message Proxy refused, which is forwarded as a message that names
+    /// `name`, an object that does not exist, so the client gets `response` in place of
+    /// PostgreSQL's error.
+    pub fn refuse(&mut self, name: String, response: BytesMut) {
         let generation = self.sync_generation();
-        let _ = self
-            .refusals
-            .write()
-            .map(|mut refusals| refusals.push_back((generation, response)));
+        let _ = self.refusals.write().map(|mut refusals| {
+            refusals.push_back(Refusal {
+                generation,
+                name,
+                response,
+            })
+        });
     }
 
-    /// The error to send the client in place of the `ErrorResponse` PostgreSQL is answering the
-    /// current batch with, if Proxy refused a message in it.
-    pub fn take_refusal(&mut self) -> Option<BytesMut> {
+    /// The error to send the client in place of `error`, the `ErrorResponse` PostgreSQL is
+    /// answering the current batch with, if it rejects a message Proxy refused.
+    ///
+    /// PostgreSQL skips the rest of a batch after an error, so an error that does not name the
+    /// refused message's object is from an earlier message, and reaches the client as it is.
+    pub fn take_refusal(&mut self, error: &[u8]) -> Option<BytesMut> {
         let answering = self.ready_generation();
         let mut refusals = self.refusals.write().ok()?;
         while refusals
             .front()
-            .is_some_and(|(generation, _)| *generation < answering)
+            .is_some_and(|refusal| refusal.generation < answering)
         {
             refusals.pop_front();
         }
-        if refusals
+        if !refusals
             .front()
-            .is_some_and(|(generation, _)| *generation == answering)
+            .is_some_and(|refusal| refusal.generation == answering)
         {
-            refusals.pop_front().map(|(_, response)| response)
-        } else {
-            None
+            return None;
         }
+        let refusal = refusals.pop_front()?;
+        let name = refusal.name.as_bytes();
+        error
+            .windows(name.len())
+            .any(|window| window == name)
+            .then_some(refusal.response)
     }
 
     /// Check that `portal` can be executed under `settings`.
@@ -1118,7 +1139,7 @@ where
         let _ = self.refusals.write().map(|mut refusals| {
             while refusals
                 .front()
-                .is_some_and(|(generation, _)| *generation < answered)
+                .is_some_and(|refusal| refusal.generation < answered)
             {
                 refusals.pop_front();
             }
