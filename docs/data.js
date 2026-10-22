@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792713078526,
+  "lastUpdate": 1792713237990,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28194,6 +28194,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.037355,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "235f796b300429d81794e61b34cee2d969de8c88",
+          "message": "Propagate settings parse errors from SettingsCommand::from_statement",
+          "timestamp": "2026-10-22T01:09:31Z",
+          "url": "https://github.com/cipherstash/proxy/pull/482/commits/235f796b300429d81794e61b34cee2d969de8c88"
+        },
+        "date": 1792713236408,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.408969,
             "unit": "Number"
           }
         ]
