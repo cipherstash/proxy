@@ -130,16 +130,50 @@ struct BoundSettings {
 struct SettingsState {
     confirmed: ConnectionSettings,
     pending: VecDeque<PendingSettings>,
+    /// [`SettingsState::projected`], kept while it stays valid, so a long pipeline does not
+    /// replay every pending command for each message
+    projected: Option<ConnectionSettings>,
 }
 
 impl SettingsState {
     /// The confirmed settings, with every pending command assumed to succeed
-    fn projected(&self) -> ConnectionSettings {
-        let mut settings = self.confirmed.clone();
-        for pending in &self.pending {
-            settings.project(&pending.command);
+    fn projected(&mut self) -> ConnectionSettings {
+        let confirmed = &self.confirmed;
+        let pending = &self.pending;
+        self.projected
+            .get_or_insert_with(|| {
+                let mut settings = confirmed.clone();
+                for pending in pending {
+                    settings.project(&pending.command);
+                }
+                settings
+            })
+            .clone()
+    }
+
+    fn push(&mut self, pending: PendingSettings) {
+        if let Some(projected) = &mut self.projected {
+            projected.project(&pending.command);
         }
-        settings
+        self.pending.push_back(pending);
+    }
+
+    /// The pending entry at the front, applied to the confirmed settings.
+    ///
+    /// The projection stays valid when that entry changes no setting, as it was projected as
+    /// succeeding.
+    fn pop_front(&mut self) -> Option<PendingSettings> {
+        let pending = self.pending.pop_front()?;
+        if !matches!(pending.command, SettingsCommand::Other) {
+            self.projected = None;
+        }
+        Some(pending)
+    }
+
+    /// Change the confirmed settings in a way the projection did not assume
+    fn confirmed_mut(&mut self) -> &mut ConnectionSettings {
+        self.projected = None;
+        &mut self.confirmed
     }
 }
 
@@ -453,6 +487,21 @@ where
 
     /// Set execute state for portal, looking up session ID internally.
     pub fn set_execute_for_portal(&mut self, name: Name) {
+        let command = self.portal_settings_command(&name);
+        self.execute_portal(name, command);
+    }
+
+    /// The settings command the portal `name` runs.
+    pub fn portal_settings_command(&self, name: &Name) -> SettingsCommand {
+        self.portal_settings
+            .read()
+            .ok()
+            .and_then(|portals| portals.get(name).map(|(_, command)| command.clone()))
+            .unwrap_or(SettingsCommand::Other)
+    }
+
+    /// Set execute state for the portal `name`, which runs the settings command `command`.
+    pub fn execute_portal(&mut self, name: Name, command: SettingsCommand) {
         let session_id = self.get_portal_session_id(&name);
         // A portal running `DEALLOCATE` or `DISCARD ALL` through the extended protocol
         let deallocation = self
@@ -464,12 +513,6 @@ where
             self.add_deallocations(vec![deallocation]);
         }
         // Every Execute is queued, so each settings command waits for its own response
-        let command = self
-            .portal_settings
-            .read()
-            .ok()
-            .and_then(|portals| portals.get(&name).map(|(_, command)| command.clone()))
-            .unwrap_or(SettingsCommand::Other);
         self.queue_settings_commands(vec![command]);
         self.set_execute(name, session_id);
     }
@@ -1031,7 +1074,7 @@ where
             {
                 settings.pending.pop_front();
             }
-            settings.confirmed.ready_for_query(transaction_status);
+            settings.confirmed_mut().ready_for_query(transaction_status);
         }
 
         if transaction_status == b'I' {
@@ -1173,12 +1216,12 @@ where
             .settings
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        settings
-            .pending
-            .extend(commands.into_iter().map(|command| PendingSettings {
+        for command in commands {
+            settings.push(PendingSettings {
                 generation,
                 command,
-            }));
+            });
+        }
     }
 
     ///
@@ -1201,7 +1244,7 @@ where
         {
             return;
         }
-        let Some(PendingSettings { command, .. }) = settings.pending.pop_front() else {
+        let Some(PendingSettings { command, .. }) = settings.pop_front() else {
             return;
         };
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Settings command", ?command, tag);
@@ -1227,7 +1270,7 @@ where
         {
             settings.pending.pop_front();
         }
-        settings.confirmed.execution_failed();
+        settings.confirmed_mut().execution_failed();
     }
 
     /// The settings statements sent now run with: the confirmed settings, with every command
@@ -1237,7 +1280,7 @@ where
     pub fn projected_settings(&self) -> ConnectionSettings {
         self.settings
             .lock()
-            .map(|settings| settings.projected())
+            .map(|mut settings| settings.projected())
             .unwrap_or_default()
     }
 
@@ -1338,7 +1381,8 @@ where
     }
 
     /// Whether `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true` is in effect, as PostgreSQL has
-    /// confirmed it
+    /// confirmed it. Statements are mapped with [`Context::projected_settings`] instead.
+    #[cfg(test)]
     pub fn unsafe_disable_mapping(&self) -> bool {
         self.settings
             .lock()

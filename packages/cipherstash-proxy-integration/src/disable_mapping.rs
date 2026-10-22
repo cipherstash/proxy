@@ -262,9 +262,9 @@ mod tests {
             client.simple_query("ROLLBACK").await.unwrap();
 
             // Undecrypted, so the raw EQL payload still carries the column identifier
-            let rows = query_with_client::<Value>(select_sql, &client).await;
+            let rows = query_with_client::<EqlEncrypted>(select_sql, &client).await;
             assert_eq!(rows.len(), 1, "{reset}");
-            assert_eq!(rows[0]["i"]["c"], "encrypted_text", "{reset}");
+            assert_eq!(rows[0].data["i"]["c"], "encrypted_text", "{reset}");
 
             // Extended query
             client.execute("BEGIN", &[]).await.unwrap();

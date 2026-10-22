@@ -207,8 +207,11 @@ pub enum SettingsCommand {
 }
 
 impl SettingsCommand {
-    pub fn from_statement(statement: &Statement) -> Self {
-        match statement {
+    /// The settings command `statement` runs.
+    ///
+    /// Refuses a `SET CIPHERSTASH.*` with an unknown setting or a value Proxy cannot interpret.
+    pub fn parse(statement: &Statement) -> Result<Self, Error> {
+        let command = match statement {
             Statement::StartTransaction { .. } => Self::Begin,
             Statement::Commit { .. } => Self::Commit,
             Statement::Rollback {
@@ -220,12 +223,11 @@ impl SettingsCommand {
             } => Self::RollbackTo(postgres_identifier(name)),
             Statement::Savepoint { name } => Self::Savepoint(postgres_identifier(name)),
             Statement::ReleaseSavepoint { name } => Self::Release(postgres_identifier(name)),
-            _ => SettingChange::parse(statement)
-                .ok()
-                .flatten()
+            _ => SettingChange::parse(statement)?
                 .map(Self::Change)
                 .unwrap_or(Self::Other),
-        }
+        };
+        Ok(command)
     }
 
     /// The command tag PostgreSQL confirms the command with when it succeeds
@@ -504,7 +506,7 @@ mod tests {
     /// recognised separately, as the frontend does.
     fn command(sql: &str) -> SettingsCommand {
         match SqlParser::parse_statements(sql) {
-            Ok(statements) => SettingsCommand::from_statement(&statements[0]),
+            Ok(statements) => SettingsCommand::parse(&statements[0]).unwrap(),
             Err(_) => SettingChange::from_reset(&SqlParser::parse_resets(sql).unwrap()[0])
                 .unwrap()
                 .map(SettingsCommand::Change)

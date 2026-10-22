@@ -844,6 +844,29 @@ mod settings_reset {
         assert_eq!(connection.errors_sent_to_client(), 1);
         assert_eq!(connection.context.keyset_identifier(), None);
     }
+
+    #[tokio::test]
+    async fn a_keyset_set_prepared_with_a_default_keyset_is_ignored_only_while_mapping_is_disabled()
+    {
+        let mut connection = Connection::started().await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection.prepare("set_keyset", KEYSET_ID).await;
+        connection.execute_prepared("set_keyset", "SET").await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+        assert_eq!(connection.context.keyset_identifier(), None);
+
+        // Once mapping is enabled, PostgreSQL would accept the SET while Proxy kept encrypting
+        // with the default keyset
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET")
+            .await;
+        connection.client(bind("", "set_keyset")).await;
+        connection.client(execute("")).await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+        assert_eq!(connection.context.state_sizes().pending_settings, 0);
+    }
 }
 
 /// `SET CIPHERSTASH.*` settings follow PostgreSQL's transaction rules: a change is kept on
@@ -1312,5 +1335,34 @@ mod settings_transactions {
         let sizes = connection.context.state_sizes();
         assert_eq!(sizes.prepared_settings, 0);
         assert_eq!(sizes.bound_settings, 0);
+    }
+
+    #[tokio::test]
+    async fn the_projection_follows_responses_to_a_pipeline() {
+        let mut connection = connection().await;
+        connection.client(parse("", "SELECT 1")).await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection
+            .client(parse("", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"))
+            .await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        assert!(connection.context.projected_settings().unsafe_disable_mapping());
+
+        connection.server(parse_complete()).await;
+        connection.server(bind_complete()).await;
+        connection.server(command_complete("SELECT 1")).await;
+        assert!(connection.context.projected_settings().unsafe_disable_mapping());
+
+        // PostgreSQL skips the SET
+        connection.server(parse_complete()).await;
+        connection.server(bind_complete()).await;
+        connection.server(error()).await;
+        assert!(!connection.context.projected_settings().unsafe_disable_mapping());
+        connection.server(ready(b'I')).await;
+        assert!(!connection.context.projected_settings().unsafe_disable_mapping());
+        assert_eq!(connection.context.state_sizes().pending_settings, 0);
     }
 }

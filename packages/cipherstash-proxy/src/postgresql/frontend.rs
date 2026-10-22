@@ -385,8 +385,12 @@ where
         let settings = self.context.projected_settings();
         self.context
             .check_bound_settings(&execute.portal, &settings)?;
+        let command = self.effective_settings_command(
+            self.context.portal_settings_command(&execute.portal),
+            &settings,
+        )?;
         self.context
-            .set_execute_for_portal(execute.portal.to_owned());
+            .execute_portal(execute.portal.to_owned(), command);
         Ok(())
     }
 
@@ -476,7 +480,8 @@ where
         let mut statement_settings = Vec::with_capacity(parsed_statements.len());
         self.settings_commands = Vec::with_capacity(parsed_statements.len());
         for statement in &parsed_statements {
-            let command = self.settings_command(statement, &settings)?;
+            let command =
+                self.effective_settings_command(self.settings_command(statement)?, &settings)?;
             settings.project(&command);
             statement_settings.push((settings.unsafe_disable_mapping(), settings.keyset()));
             self.settings_commands.push(command);
@@ -526,12 +531,13 @@ where
             };
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
-                Some(statement) => {
+                Some(encryptable) => {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
                         msg = "Encryptable Statement",
                     );
 
+                    let mut transformed = None;
                     if typed_statement.requires_transform() {
                         // Record parse duration before encryption work starts
                         if !parse_duration_recorded {
@@ -545,14 +551,16 @@ where
                                 session_id,
                                 keyset.clone(),
                                 &typed_statement,
-                                &statement.literal_columns,
+                                &encryptable.literal_columns,
                             )
                             .await?;
 
-                        if let Some(transformed_statement) = self
+                        transformed = self
                             .transform_statement(&typed_statement, &encrypted_literals)
-                            .await?
-                        {
+                            .await?;
+                    }
+                    match transformed {
+                        Some(transformed_statement) => {
                             debug!(target: MAPPER,
                                 client_id = self.context.client_id,
                                 transformed_statement = ?transformed_statement,
@@ -561,12 +569,13 @@ where
                             transformed_statements.push(transformed_statement);
                             encrypted = true;
                         }
+                        None => transformed_statements.push(statement.clone()),
                     }
 
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal and mark as mapped
-                    portal = Portal::encrypted(Arc::new(statement), Some(session_id));
+                    portal = Portal::encrypted(Arc::new(encryptable), Some(session_id));
                     self.context.update_statement_metadata(session_id, |m| {
                         m.encrypted = true;
                     });
@@ -860,7 +869,9 @@ where
         // confirms it, as PostgreSQL only prepares it here. A SET Proxy would refuse is refused
         // now.
         let settings = self.context.projected_settings();
-        let command = self.settings_command(&statement, &settings)?;
+        // A keyset SET Proxy ignores while mapping is disabled is checked again each time it runs
+        let command = self.settings_command(&statement)?;
+        self.effective_settings_command(command.clone(), &settings)?;
         self.context
             .set_statement_settings(message.name.to_owned(), command);
         // A statement Proxy maps runs only under the settings it was prepared under
@@ -987,45 +998,53 @@ where
         }
     }
 
-    /// The settings command `statement` runs, given the `settings` in effect before it.
+    /// The settings command `statement` runs.
     ///
-    /// Refuses a `SET CIPHERSTASH.*` Proxy cannot honour: an unknown setting, a value it cannot
-    /// interpret, or a keyset when Proxy is configured with a `default_keyset_id`. While mapping
-    /// is disabled, a keyset SET with a `default_keyset_id` is passed through and ignored, as
-    /// before.
-    fn settings_command(
-        &self,
-        statement: &ast::Statement,
-        settings: &ConnectionSettings,
-    ) -> Result<SettingsCommand, Error> {
-        let Some(change) = SettingChange::parse(statement)? else {
-            return Ok(SettingsCommand::from_statement(statement));
-        };
-        match &change {
-            SettingChange::Keyset(..) if self.context.default_keyset_id().is_some() => {
-                if settings.unsafe_disable_mapping() {
-                    return Ok(SettingsCommand::Other);
-                }
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    default_keyset_id = ?self.context.default_keyset_id(),
-                    ?change
-                );
-                return Err(EncryptError::UnexpectedSetKeyset.into());
-            }
-            SettingChange::Keyset(scope, keyset_identifier) => info!(
+    /// Refuses a `SET CIPHERSTASH.*` Proxy cannot honour: an unknown setting or a value it cannot
+    /// interpret.
+    fn settings_command(&self, statement: &ast::Statement) -> Result<SettingsCommand, Error> {
+        let command = SettingsCommand::parse(statement)?;
+        match &command {
+            SettingsCommand::Change(SettingChange::Keyset(scope, keyset_identifier)) => info!(
                 msg = "SET CIPHERSTASH.KEYSET",
                 ?scope,
                 keyset_identifier = keyset_identifier.to_string()
             ),
-            SettingChange::Mapping(scope, mapping_disabled) => warn!(
+            SettingsCommand::Change(SettingChange::Mapping(scope, mapping_disabled)) => warn!(
                 msg = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING",
                 ?scope,
                 mapping_disabled
             ),
             _ => (),
         }
-        Ok(SettingsCommand::Change(change))
+        Ok(command)
+    }
+
+    /// The settings command `command` runs as when it runs under `settings`.
+    ///
+    /// With a `default_keyset_id` configured, a keyset `SET` is refused while mapping is enabled.
+    /// While mapping is disabled it is passed through and ignored, as before.
+    fn effective_settings_command(
+        &self,
+        command: SettingsCommand,
+        settings: &ConnectionSettings,
+    ) -> Result<SettingsCommand, Error> {
+        match command {
+            SettingsCommand::Change(SettingChange::Keyset(..))
+                if self.context.default_keyset_id().is_some() =>
+            {
+                if settings.unsafe_disable_mapping() {
+                    return Ok(SettingsCommand::Other);
+                }
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    default_keyset_id = ?self.context.default_keyset_id(),
+                    ?command
+                );
+                Err(EncryptError::UnexpectedSetKeyset.into())
+            }
+            command => Ok(command),
+        }
     }
 
     ///
