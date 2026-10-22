@@ -486,4 +486,65 @@ mod tests {
             assert!(result.is_err(), "{reset}");
         }
     }
+
+    ///
+    /// Tests that the keyset follows PostgreSQL's transactions: a reset in a rolled-back
+    /// transaction keeps the keyset, and a rolled-back `SET` is undone.
+    /// Test both extended and simple query protocols
+    ///
+    #[tokio::test]
+    async fn rolled_back_keyset_changes_are_undone() {
+        trace();
+        clear().await;
+
+        let tenant_keyset_id_1 = std::env::var("CS_TENANT_KEYSET_ID_1")
+            .map(|s| Uuid::parse_str(&s).unwrap())
+            .unwrap();
+
+        let insert_sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
+        let set_sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
+
+        let client = connect_with_tls(*PROXY).await;
+        client.simple_query(&set_sql).await.unwrap();
+
+        for reset in [
+            "RESET ALL",
+            "RESET CIPHERSTASH.KEYSET_ID",
+            "SET CIPHERSTASH.KEYSET_ID TO DEFAULT",
+        ] {
+            // Simple query
+            client.simple_query("BEGIN").await.unwrap();
+            client.simple_query(reset).await.unwrap();
+            client.simple_query("ROLLBACK").await.unwrap();
+
+            // The keyset is still selected
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_ok(), "{reset}");
+
+            // Extended query
+            client.execute("BEGIN", &[]).await.unwrap();
+            client.execute(reset, &[]).await.unwrap();
+            client.execute("ROLLBACK", &[]).await.unwrap();
+
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_ok(), "{reset}");
+        }
+
+        client.simple_query("RESET ALL").await.unwrap();
+
+        // DEFAULT_KEYSET_ID IS DISABLED FOR THIS TEST, SO A ROLLED-BACK SET LEAVES NO KEYSET
+        client.simple_query("BEGIN").await.unwrap();
+        client.simple_query(&set_sql).await.unwrap();
+        client.simple_query("ROLLBACK").await.unwrap();
+
+        let result = client.query(insert_sql, &[&random_id(), &1]).await;
+        assert!(result.is_err());
+
+        client.execute("BEGIN", &[]).await.unwrap();
+        client.execute(&set_sql, &[]).await.unwrap();
+        client.execute("ROLLBACK", &[]).await.unwrap();
+
+        let result = client.query(insert_sql, &[&random_id(), &1]).await;
+        assert!(result.is_err());
+    }
 }
