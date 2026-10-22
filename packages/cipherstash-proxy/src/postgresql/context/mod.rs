@@ -1449,8 +1449,7 @@ where
         let settings = settings_protocol::EffectiveSettings::new(&state.settings);
         state
             .settings_protocol
-            .prepare(operation, name, statement, settings);
-        Ok(())
+            .prepare(operation, name, statement, settings)
     }
 
     fn bind_settings_statement(
@@ -1525,26 +1524,26 @@ where
             settings_protocol,
             ..
         } = &mut *state;
-        Ok(settings_protocol.simple_query(operation, statements, settings))
+        settings_protocol.simple_query(operation, statements, settings)
     }
 
     pub fn settings_simple_query_requires_fail_closed(
         &self,
         statements: &[sqltk::parser::ast::Statement],
-    ) -> bool {
+    ) -> Result<bool, Error> {
         let Ok(state) = self.protocol_state.read() else {
-            return true;
+            return Ok(true);
         };
         let mut changed = false;
         for (statement, _, changes) in
-            settings_protocol::project_settings_effects(&state.settings, statements)
+            settings_protocol::project_settings_effects(&state.settings, statements)?
         {
             if changed && eql_mapper::requires_type_check(statement) {
-                return true;
+                return Ok(true);
             }
             changed |= changes;
         }
-        false
+        Ok(false)
     }
 
     pub fn discarding_extended_messages(&self) -> Result<bool, Error> {
@@ -2559,9 +2558,11 @@ mod tests {
             "RESET ALL; SELECT 1",
         ] {
             assert!(
-                context.settings_simple_query_requires_fail_closed(
-                    &crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap()
-                ),
+                context
+                    .settings_simple_query_requires_fail_closed(
+                        &crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap()
+                    )
+                    .unwrap(),
                 "{sql}"
             );
         }
@@ -2629,9 +2630,11 @@ mod tests {
         })
         .join();
 
-        assert!(context.settings_simple_query_requires_fail_closed(
-            &crate::postgresql::parser::SqlParser::parse_statements("SELECT 1").unwrap()
-        ));
+        assert!(context
+            .settings_simple_query_requires_fail_closed(
+                &crate::postgresql::parser::SqlParser::parse_statements("SELECT 1").unwrap()
+            )
+            .unwrap());
     }
 
     #[test]
@@ -2662,7 +2665,9 @@ mod tests {
         ] {
             let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
             assert!(
-                !context.settings_simple_query_requires_fail_closed(&statements),
+                !context
+                    .settings_simple_query_requires_fail_closed(&statements)
+                    .unwrap(),
                 "{sql}"
             );
         }
