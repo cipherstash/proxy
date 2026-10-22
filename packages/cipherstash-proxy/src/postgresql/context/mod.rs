@@ -7,7 +7,7 @@ pub mod statement_metadata;
 pub use self::{
     phase_timing::PhaseTiming,
     portal::Portal,
-    settings::{ConnectionSettings, SettingChange, SettingsCommand},
+    settings::{ConnectionSettings, EffectiveSettings, SettingChange, SettingsCommand},
     statement::Statement,
 };
 use super::{
@@ -103,6 +103,26 @@ where
     statement_settings: Arc<RwLock<HashMap<Name, SettingsCommand>>>,
     /// Portals bound from one of those statements, with the generation they were bound in
     portal_settings: Arc<RwLock<HashMap<Name, (u64, SettingsCommand)>>>,
+    /// Statements Proxy maps, with the settings they were prepared under
+    prepared_settings: Arc<RwLock<HashMap<Name, PreparedSettings>>>,
+    /// Portals bound from one of those statements, with the generation they were bound in
+    bound_settings: Arc<RwLock<HashMap<Name, (u64, BoundSettings)>>>,
+}
+
+/// The settings a statement Proxy maps was prepared under.
+#[derive(Clone, Debug)]
+struct PreparedSettings {
+    settings: EffectiveSettings,
+    /// The statement holds literals encrypted under the keyset it was prepared with
+    encrypted_literals: bool,
+}
+
+/// The settings a portal of a statement Proxy maps was bound under.
+#[derive(Clone, Debug)]
+struct BoundSettings {
+    settings: EffectiveSettings,
+    /// The portal holds values encrypted under the keyset it was bound with
+    encrypted_values: bool,
 }
 
 /// The connection's settings, and the settings commands waiting for PostgreSQL's answer.
@@ -257,6 +277,8 @@ pub(crate) struct StateSizes {
     pub pending_settings: usize,
     pub statement_settings: usize,
     pub portal_settings: usize,
+    pub prepared_settings: usize,
+    pub bound_settings: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +332,8 @@ where
             portal_deallocations: Arc::new(RwLock::new(HashMap::new())),
             statement_settings: Arc::new(RwLock::new(HashMap::new())),
             portal_settings: Arc::new(RwLock::new(HashMap::new())),
+            prepared_settings: Arc::new(RwLock::new(HashMap::new())),
+            bound_settings: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -487,6 +511,8 @@ where
             pending_settings: self.settings.lock().unwrap().pending.len(),
             statement_settings: self.statement_settings.read().unwrap().len(),
             portal_settings: self.portal_settings.read().unwrap().len(),
+            prepared_settings: self.prepared_settings.read().unwrap().len(),
+            bound_settings: self.bound_settings.read().unwrap().len(),
         }
     }
 
@@ -608,6 +634,11 @@ where
             .statement_settings
             .write()
             .map(|mut guarded| guarded.remove(name));
+
+        let _ = self
+            .prepared_settings
+            .write()
+            .map(|mut guarded| guarded.remove(name));
     }
 
     /// Record whether the SQL parsed as statement `name` is a `DEALLOCATE` or `DISCARD ALL`.
@@ -661,6 +692,113 @@ where
                 None => guarded.remove(portal),
             };
         });
+    }
+
+    /// Record the settings statement `name` is prepared under, if it is a statement Proxy maps.
+    ///
+    /// A statement prepared under other settings than it is bound under is refused, see
+    /// [`Context::bind_prepared_settings`].
+    pub fn set_prepared_settings(&mut self, name: Name, settings: Option<EffectiveSettings>) {
+        let _ = self.prepared_settings.write().map(|mut guarded| {
+            match settings {
+                Some(settings) => guarded.insert(
+                    name,
+                    PreparedSettings {
+                        settings,
+                        encrypted_literals: false,
+                    },
+                ),
+                None => guarded.remove(&name),
+            };
+        });
+    }
+
+    /// Record that statement `name` holds literals encrypted under the keyset it was prepared
+    /// with.
+    pub fn set_prepared_encrypted_literals(&mut self, name: &Name) {
+        let _ = self.prepared_settings.write().map(|mut guarded| {
+            if let Some(prepared) = guarded.get_mut(name) {
+                prepared.encrypted_literals = true;
+            }
+        });
+    }
+
+    /// Check that `statement` can be bound to `portal` under `settings`, and record the settings
+    /// the portal is bound under.
+    ///
+    /// Refuses a statement Proxy maps if mapping has changed since it was prepared, or if the
+    /// keyset has changed and it holds encrypted literals.
+    pub fn bind_prepared_settings(
+        &mut self,
+        portal: &Name,
+        statement: &Name,
+        settings: &ConnectionSettings,
+        encrypted_values: bool,
+    ) -> Result<(), Error> {
+        let prepared = self
+            .prepared_settings
+            .read()
+            .ok()
+            .and_then(|statements| statements.get(statement).cloned());
+        let current = EffectiveSettings::new(settings);
+        let bound = match prepared {
+            Some(prepared) => {
+                if let Some(refusal) = prepared
+                    .settings
+                    .refusal(&current, prepared.encrypted_literals)
+                {
+                    return Err(self.prepared_settings_changed(refusal));
+                }
+                Some(BoundSettings {
+                    settings: current,
+                    encrypted_values: encrypted_values || prepared.encrypted_literals,
+                })
+            }
+            None => None,
+        };
+        let generation = self.sync_generation();
+        let _ = self.bound_settings.write().map(|mut guarded| {
+            match bound {
+                Some(bound) => guarded.insert(portal.clone(), (generation, bound)),
+                None => guarded.remove(portal),
+            };
+        });
+        Ok(())
+    }
+
+    /// Check that `portal` can be executed under `settings`.
+    ///
+    /// Refuses a portal of a statement Proxy maps if mapping has changed since it was bound, or
+    /// if the keyset has changed and it holds encrypted values.
+    pub fn check_bound_settings(
+        &self,
+        portal: &Name,
+        settings: &ConnectionSettings,
+    ) -> Result<(), Error> {
+        let bound = self
+            .bound_settings
+            .read()
+            .ok()
+            .and_then(|portals| portals.get(portal).map(|(_, bound)| bound.clone()));
+        let refusal = bound.and_then(|bound| {
+            bound
+                .settings
+                .refusal(&EffectiveSettings::new(settings), bound.encrypted_values)
+        });
+        match refusal {
+            Some(refusal) => Err(self.prepared_settings_changed(refusal)),
+            None => Ok(()),
+        }
+    }
+
+    fn prepared_settings_changed(&self, refusal: settings::SettingsRefusal) -> Error {
+        warn!(
+            target: CONTEXT,
+            client_id = self.client_id,
+            ?refusal,
+            msg = "Prepared statement refused after the connection settings changed"
+        );
+        crate::error::MappingError::PreparedSettingsChanged.into()
     }
 
     /// Close both statement and its associated portal.
@@ -757,6 +895,14 @@ where
             }
         });
         let _ = self.portal_settings.write().map(|mut guarded| {
+            if guarded
+                .get(name)
+                .is_some_and(|(bound, _)| *bound <= generation)
+            {
+                guarded.remove(name);
+            }
+        });
+        let _ = self.bound_settings.write().map(|mut guarded| {
             if guarded
                 .get(name)
                 .is_some_and(|(bound, _)| *bound <= generation)
@@ -908,6 +1054,10 @@ where
             .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
         let _ = self
             .portal_settings
+            .write()
+            .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
+        let _ = self
+            .bound_settings
             .write()
             .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
     }

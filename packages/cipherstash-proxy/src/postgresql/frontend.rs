@@ -1,7 +1,7 @@
 use super::context::phase_timing::PhaseTimer;
 use super::context::{
-    ConnectionSettings, Context, Deallocation, KeysetIdentifier, SessionId, SettingChange,
-    SettingsCommand, Statement,
+    ConnectionSettings, Context, Deallocation, EffectiveSettings, KeysetIdentifier, SessionId,
+    SettingChange, SettingsCommand, Statement,
 };
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
@@ -229,7 +229,15 @@ where
                 self.describe_handler(&bytes).await?;
             }
             Code::Execute => {
-                self.execute_handler(&bytes).await?;
+                if let Err(err) = self.execute_handler(&bytes).await {
+                    warn!(
+                        client_id = self.context.client_id,
+                        msg = "Execute Handler Error",
+                        error = ?err.to_string(),
+                    );
+                    self.send_error_response(err)?;
+                    return Ok(());
+                }
             }
             Code::Parse => {
                 match self.parse_handler(&bytes).await {
@@ -374,6 +382,9 @@ where
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
+        let settings = self.context.projected_settings();
+        self.context
+            .check_bound_settings(&execute.portal, &settings)?;
         self.context
             .set_execute_for_portal(execute.portal.to_owned());
         Ok(())
@@ -833,6 +844,8 @@ where
                     .set_statement_deallocation(message.name.to_owned(), None);
                 self.context
                     .set_statement_settings(message.name.to_owned(), command);
+                self.context
+                    .set_prepared_settings(message.name.to_owned(), None);
                 self.context.update_statement_metadata(session_id, |m| {
                     m.statement_type = Some(StatementType::Other);
                     m.set_query_fingerprint(&message.statement);
@@ -850,6 +863,11 @@ where
         let command = self.settings_command(&statement, &settings)?;
         self.context
             .set_statement_settings(message.name.to_owned(), command);
+        // A statement Proxy maps runs only under the settings it was prepared under
+        let prepared =
+            eql_mapper::requires_type_check(&statement).then(|| EffectiveSettings::new(&settings));
+        self.context
+            .set_prepared_settings(message.name.to_owned(), prepared);
 
         if settings.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
@@ -915,6 +933,9 @@ where
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                 message.rewrite_param_types(&statement.param_columns);
+                if statement.literal_columns.iter().any(Option::is_some) {
+                    self.context.set_prepared_encrypted_literals(&message.name);
+                }
                 self.context
                     .add_statement(message.name.to_owned(), statement);
             }
@@ -1096,6 +1117,12 @@ where
         let settings = self.context.projected_settings();
         if settings.unsafe_disable_mapping() {
             if let Ok(bind) = Bind::try_from(bytes) {
+                self.context.bind_prepared_settings(
+                    &bind.portal,
+                    &bind.prepared_statement,
+                    &settings,
+                    false,
+                )?;
                 self.context
                     .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
                 self.context
@@ -1108,6 +1135,16 @@ where
         }
 
         let mut bind = Bind::try_from(bytes)?;
+        let statement = self.context.get_statement(&bind.prepared_statement);
+        let encrypted_values = statement
+            .as_ref()
+            .is_some_and(|statement| statement.param_columns.iter().any(Option::is_some));
+        self.context.bind_prepared_settings(
+            &bind.portal,
+            &bind.prepared_statement,
+            &settings,
+            encrypted_values,
+        )?;
         self.context
             .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
         self.context
@@ -1126,7 +1163,7 @@ where
 
         let mut portal = Portal::passthrough(session_id);
 
-        if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
+        if let Some(statement) = statement {
             debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
             if statement.has_params() {

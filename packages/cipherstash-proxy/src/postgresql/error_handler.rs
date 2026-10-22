@@ -42,6 +42,9 @@ pub trait PostgreSqlErrorHandler {
                     &column.column_name(),
                 )
             }
+            Error::Mapping(MappingError::PreparedSettingsChanged) => {
+                ErrorResponse::prepared_statement_invalidated(err.to_string())
+            }
             Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,
@@ -73,7 +76,8 @@ pub trait PostgreSqlErrorHandler {
 mod tests {
     use super::*;
     use crate::postgresql::messages::error_response::{
-        ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
+        ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_INVALID_SQL_STATEMENT_NAME,
+        CODE_SYSTEM_ERROR,
     };
     use std::time::Duration;
 
@@ -122,6 +126,12 @@ mod tests {
             error_message(&response),
             Some("Connection timed out after 5000 ms")
         );
+    }
+
+    #[test]
+    fn prepared_settings_changed_maps_to_26000() {
+        let response = TestHandler.error_to_response(MappingError::PreparedSettingsChanged.into());
+        assert_eq!(error_code(&response), Some(CODE_INVALID_SQL_STATEMENT_NAME));
     }
 
     #[test]

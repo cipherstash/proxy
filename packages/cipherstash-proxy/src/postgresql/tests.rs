@@ -1229,4 +1229,88 @@ mod settings_transactions {
         assert_eq!(connection.context.keyset_identifier(), keyset(KEYSET_A));
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
     }
+
+    /// Parse `sql` as statement `name` and Sync, leaving `status`
+    async fn prepare_in(connection: &mut Connection, name: &str, sql: &str, status: u8) {
+        connection.client(parse(name, sql)).await;
+        connection.client(sync()).await;
+        connection.server(parse_complete()).await;
+        connection.server(ready(status)).await;
+    }
+
+    #[tokio::test]
+    async fn a_statement_prepared_while_mapping_was_disabled_is_refused_after_a_rollback() {
+        let mut connection = connection().await;
+        connection.simple_in("BEGIN", "BEGIN", b'T').await;
+        connection
+            .simple_in("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET", b'T')
+            .await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'T').await;
+        connection.simple_in("ROLLBACK", "ROLLBACK", b'I').await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+
+        // The statement was not mapped, so binding it now would forward plaintext
+        connection.client(bind("", "s")).await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_statement_prepared_while_mapping_was_enabled_is_refused_once_it_is_disabled() {
+        let mut connection = connection().await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'I').await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+
+        connection.client(bind("", "s")).await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_portal_bound_before_mapping_is_disabled_is_refused_at_execute() {
+        let mut connection = connection().await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'T').await;
+        connection.client(bind("p", "s")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.server(ready(b'T')).await;
+        connection
+            .simple_in("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET", b'T')
+            .await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+
+        connection.client(execute("p")).await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+        assert_eq!(connection.context.state_sizes().pending_settings, 0);
+    }
+
+    #[tokio::test]
+    async fn a_statement_prepared_again_after_the_change_is_accepted() {
+        let mut connection = connection().await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'I').await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'I').await;
+
+        connection.client(bind("", "s")).await;
+        connection.client(execute("")).await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_closed_statement_and_its_portal_retain_nothing() {
+        let mut connection = connection().await;
+        prepare_in(&mut connection, "s", "SELECT 1", b'I').await;
+        connection.client(bind("p", "s")).await;
+        connection.client(close_statement("s")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.server(close_complete()).await;
+        connection.server(ready(b'I')).await;
+
+        let sizes = connection.context.state_sizes();
+        assert_eq!(sizes.prepared_settings, 0);
+        assert_eq!(sizes.bound_settings, 0);
+    }
 }

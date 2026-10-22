@@ -454,6 +454,45 @@ impl ConnectionSettings {
     }
 }
 
+/// Why a prepared statement or portal no longer matches the settings it would run under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsRefusal {
+    MappingChanged,
+    KeysetChanged,
+}
+
+/// The settings a statement Proxy maps was prepared or bound under.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveSettings {
+    keyset: Option<KeysetIdentifier>,
+    mapping_disabled: bool,
+}
+
+impl EffectiveSettings {
+    pub fn new(settings: &ConnectionSettings) -> Self {
+        Self {
+            keyset: settings.keyset(),
+            mapping_disabled: settings.unsafe_disable_mapping(),
+        }
+    }
+
+    /// Why a statement prepared or bound under these settings cannot run under `current`.
+    ///
+    /// A change of mapping is always refused: a statement prepared with mapping disabled would
+    /// forward plaintext, and one prepared with mapping enabled expects encrypted values. A
+    /// change of keyset is refused only when the statement holds values encrypted under the
+    /// old keyset.
+    pub fn refusal(&self, current: &Self, keyset_sensitive: bool) -> Option<SettingsRefusal> {
+        if self.mapping_disabled != current.mapping_disabled {
+            Some(SettingsRefusal::MappingChanged)
+        } else if keyset_sensitive && self.keyset != current.keyset {
+            Some(SettingsRefusal::KeysetChanged)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +514,37 @@ mod tests {
 
     fn succeeds(settings: &mut ConnectionSettings, sql: &str, tag: &str) {
         settings.command_succeeded(&command(sql), tag);
+    }
+
+    #[test]
+    fn prepared_settings_refuse_a_change_of_mapping_or_of_a_keyset_they_depend_on() {
+        let prepared = EffectiveSettings::new(&ConnectionSettings::default());
+        let mut disabled = ConnectionSettings::default();
+        succeeds(
+            &mut disabled,
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            "SET",
+        );
+        let mut tenant_b = ConnectionSettings::default();
+        succeeds(
+            &mut tenant_b,
+            "SET CIPHERSTASH.KEYSET_NAME = 'tenant-b'",
+            "SET",
+        );
+
+        for keyset_sensitive in [false, true] {
+            assert_eq!(
+                prepared.refusal(&EffectiveSettings::new(&disabled), keyset_sensitive),
+                Some(SettingsRefusal::MappingChanged)
+            );
+            assert_eq!(prepared.refusal(&prepared.clone(), keyset_sensitive), None);
+        }
+        let tenant_b = EffectiveSettings::new(&tenant_b);
+        assert_eq!(
+            prepared.refusal(&tenant_b, true),
+            Some(SettingsRefusal::KeysetChanged)
+        );
+        assert_eq!(prepared.refusal(&tenant_b, false), None);
     }
 
     #[test]

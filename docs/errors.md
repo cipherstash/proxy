@@ -12,15 +12,16 @@
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
   - [Internal Error](#mapping-internal-error)
+  - [Prepared settings changed](#mapping-prepared-settings-changed)
 
 - Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-encrypt-could-not-decrypt-data-for-keyset)
+  - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [Invalid keyset setting value](#encrypt-invalid-keyset-setting-value)
   - [Invalid mapping setting value](#encrypt-invalid-mapping-setting-value)
   - [Unknown CipherStash setting](#encrypt-unknown-cipherstash-setting)
-  - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
@@ -263,6 +264,30 @@ Statement encountered an internal error. This may be a bug in the statement mapp
 Check if you are running the latest version of CipherStash Proxy, and update to the latest version if not.
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Prepared settings changed <a id='mapping-prepared-settings-changed'></a>
+
+The prepared statement or bound values no longer match the connection's CipherStash settings.
+This happens when `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` changes after a statement Proxy maps was prepared or bound, or when the keyset changes and the statement holds values encrypted under the previous keyset.
+The change may come from a `SET`, a `RESET`, or a transaction rollback that undid the settings the statement was prepared under.
+Proxy refuses to run the statement to avoid forwarding plaintext or values encrypted under the wrong keyset.
+
+### Error message
+
+```
+The prepared statement or bound values no longer match the connection's CipherStash settings. Close the statement, then prepare and bind it again.
+```
+
+### How to fix
+
+The error uses SQLSTATE `26000`, so drivers such as PostgreSQL JDBC can invalidate their cached statements.
+
+Select the intended keyset and mapping mode, close the old statement, then prepare and bind it again.
+Prefer bound parameters over encrypted literals when a prepared statement must be reused across keysets.
 
 
 

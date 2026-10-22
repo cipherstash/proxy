@@ -449,6 +449,7 @@ SET CIPHERSTASH.KEYSET_NAME = 'tenant-1';
 - The keyset remains active for the duration of the connection, or until a subsequent `SET CIPHERSTASH.KEYSET`, `RESET` or `DISCARD ALL`
 - The keyset follows PostgreSQL's rules for settings in transactions: a change is kept on `COMMIT`, and undone on `ROLLBACK`, `ROLLBACK TO SAVEPOINT` or when the transaction fails
 - `SET LOCAL CIPHERSTASH.KEYSET_ID` and `SET LOCAL CIPHERSTASH.KEYSET_NAME` select a keyset for the rest of the current transaction only
+- A prepared statement that holds values encrypted under one keyset is refused after the keyset changes; prepare it again under the new keyset
 - If a default keyset is configured in the Proxy, these commands cannot be used, and will return an error
 - The active keyset is connection-scoped and does not affect other connections
 
@@ -468,6 +469,7 @@ Mapping is only ever disabled for the client connection the `SET` command was is
 The parameter follows PostgreSQL's rules for settings in transactions: a change is kept on `COMMIT`, and undone on `ROLLBACK`, `ROLLBACK TO SAVEPOINT` or when the transaction fails.
 `SET LOCAL CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true` disables mapping for the rest of the current transaction only.
 `RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`, `RESET ALL` and `DISCARD ALL` turn mapping back on.
+A prepared statement is refused once mapping has been turned on or off since it was prepared; prepare it again under the new setting.
 
 > [!IMPORTANT]
 > Extra care is required when using `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.

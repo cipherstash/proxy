@@ -107,6 +107,9 @@ pub enum MappingError {
     #[error("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL)]
     Internal(String),
 
+    #[error("The prepared statement or bound values no longer match the connection's CipherStash settings. Close the statement, then prepare and bind it again. For help visit {}#mapping-prepared-settings-changed", ERROR_DOC_BASE_URL)]
+    PreparedSettingsChanged,
+
     #[error(transparent)]
     EqlMapper(#[from] EqlMapperError),
 }
