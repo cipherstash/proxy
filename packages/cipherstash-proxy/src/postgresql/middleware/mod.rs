@@ -1007,6 +1007,11 @@ mod tests {
             };
             let code = response.fields.iter().find(|field| field.code == b'C').unwrap();
             assert_eq!(code.value, Bytes::from_static(b"26000"));
+            let message = response.fields.iter().find(|field| field.code == b'M').unwrap();
+            let expected = crate::error::MappingError::UnknownPreparedStatement {
+                name: "missing".to_owned(),
+            };
+            assert_eq!(message.value, Bytes::from(expected.to_string()));
             connection
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;

@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   Compatibility note: before upgrading, check that applications do not send these forms.
 
+- **Statements created with SQL `PREPARE` cannot be bound through the extended protocol**: Proxy now refuses a Bind that names a statement it saw no Parse for, with PostgreSQL's `26000` error. A statement created with SQL `PREPARE` and then bound with a protocol-level Bind is refused, where it previously ran with its values sent as they were. Prepare such statements with Parse instead, or run them with SQL `EXECUTE`. See [Unknown prepared statement](docs/errors.md#mapping-unknown-prepared-statement).
+
+  Compatibility note: before upgrading, check that applications and drivers do not bind statements created with SQL `PREPARE`.
+
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
