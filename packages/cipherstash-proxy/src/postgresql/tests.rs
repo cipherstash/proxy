@@ -8,33 +8,53 @@ use crate::{
     proxy::{EncryptConfig, EncryptionService},
 };
 use bytes::{BufMut, BytesMut};
-use eql_mapper::Schema;
-use std::sync::Arc;
+use eql_mapper::{EqlTraits, Schema, Table};
+use sqltk::parser::ast::Ident;
+use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf},
     sync::mpsc,
 };
 
-#[derive(Clone)]
-struct TestService;
+/// Records the keyset of each encryption and decryption, and refuses it, as it has no keys
+#[derive(Clone, Default)]
+struct TestService {
+    encrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+    decrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+}
 
 #[async_trait::async_trait]
 impl EncryptionService for TestService {
     async fn encrypt(
         &self,
-        _keyset_id: Option<KeysetIdentifier>,
-        _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+        keyset_id: Option<KeysetIdentifier>,
+        plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         _columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
-        Ok(vec![])
+        if plaintexts.iter().all(Option::is_none) {
+            return Ok(vec![None; plaintexts.len()]);
+        }
+        self.encrypted_with.lock().unwrap().push(keyset_id);
+        Err(crate::error::EncryptError::ColumnCouldNotBeEncrypted {
+            table: "users".to_string(),
+            column: "email".to_string(),
+        }
+        .into())
     }
 
     async fn decrypt(
         &self,
-        _keyset_id: Option<KeysetIdentifier>,
-        _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
-        Ok(vec![])
+        if ciphertexts.iter().all(Option::is_none) {
+            return Ok(vec![None; ciphertexts.len()]);
+        }
+        self.decrypted_with.lock().unwrap().push(keyset_id.clone());
+        Err(crate::error::EncryptError::CouldNotDecryptDataForKeyset {
+            keyset_id: format!("{keyset_id:?}"),
+        }
+        .into())
     }
 }
 
@@ -51,6 +71,10 @@ struct Connection {
     backend: Backend<ReadHalf<DuplexStream>, TestService>,
     to_client: mpsc::UnboundedReceiver<BytesMut>,
     context: Context<TestService>,
+    /// The keyset of each encryption so far
+    encrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+    /// The keyset of each decryption so far
+    decrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
 }
 
 impl Connection {
@@ -59,13 +83,42 @@ impl Connection {
     }
 
     fn with_config(config: TandemConfig) -> Self {
+        Self::with_schema(config, EncryptConfig::default(), Schema::new("public"))
+    }
+
+    /// A started connection to a Proxy with no default keyset that encrypts `users.email`
+    async fn encrypted() -> Self {
+        let mut config = TandemConfig::for_testing();
+        config.encrypt.default_keyset_id = None;
+        let encrypt_config = EncryptConfig::from_json(serde_json::json!({
+            "v": 1,
+            "tables": { "users": { "email": {} } }
+        }));
+        let mut users = Table::new(Ident::new("users"));
+        users.add_column(Arc::new(eql_mapper::Column::native(Ident::new("id"))));
+        users.add_column(Arc::new(eql_mapper::Column::eql(
+            Ident::new("email"),
+            EqlTraits::all(),
+        )));
+        let mut schema = Schema::new("public");
+        schema.add_table(users);
+
+        let mut connection = Self::with_schema(config, encrypt_config, schema);
+        connection.server(ready(b'I')).await;
+        connection
+    }
+
+    fn with_schema(config: TandemConfig, encrypt_config: EncryptConfig, schema: Schema) -> Self {
         let (reload_sender, _) = mpsc::unbounded_channel();
+        let service = TestService::default();
+        let encrypted_with = service.encrypted_with.clone();
+        let decrypted_with = service.decrypted_with.clone();
         let context = Context::new(
             1,
             Arc::new(config),
-            Arc::new(EncryptConfig::default()),
-            Arc::new(Schema::new("public")),
-            TestService,
+            Arc::new(encrypt_config),
+            Arc::new(schema),
+            service,
             reload_sender,
         );
 
@@ -89,6 +142,8 @@ impl Connection {
             backend: Backend::new(client_sender, server_reader, context.clone()),
             to_client,
             context,
+            encrypted_with,
+            decrypted_with,
         }
     }
 
@@ -186,6 +241,16 @@ impl Connection {
             .collect()
     }
 
+    /// The keyset of each decryption so far
+    fn decrypted_with(&self) -> Vec<Option<KeysetIdentifier>> {
+        self.decrypted_with.lock().unwrap().clone()
+    }
+
+    /// The keyset of each encryption so far
+    fn encrypted_with(&self) -> Vec<Option<KeysetIdentifier>> {
+        self.encrypted_with.lock().unwrap().clone()
+    }
+
     /// PostgreSQL rejects the message Proxy forwarded in place of a refused one, then sends
     /// `ReadyForQuery` with `transaction_status`
     async fn rejected(&mut self, transaction_status: u8) {
@@ -262,11 +327,36 @@ fn bind(portal: &str, statement: &str) -> BytesMut {
     message(b'B', &body)
 }
 
+/// A `Bind` of `statement` with one text parameter
+fn bind_text(portal: &str, statement: &str, value: &str) -> BytesMut {
+    let mut body = vec![];
+    cstring(&mut body, portal);
+    cstring(&mut body, statement);
+    // No parameter formats, so text
+    body.extend_from_slice(&0i16.to_be_bytes());
+    body.extend_from_slice(&1i16.to_be_bytes());
+    body.extend_from_slice(&(value.len() as i32).to_be_bytes());
+    body.extend_from_slice(value.as_bytes());
+    // No result formats
+    body.extend_from_slice(&0i16.to_be_bytes());
+    message(b'B', &body)
+}
+
 fn execute(portal: &str) -> BytesMut {
     let mut body = vec![];
     cstring(&mut body, portal);
     body.extend_from_slice(&0i32.to_be_bytes());
     message(b'E', &body)
+}
+
+/// A `DataRow` of one `eql_v2_encrypted` value for `users.email`, in text format
+fn encrypted_email_row() -> BytesMut {
+    let value = br#"("{""i"": {""c"": ""email"", ""t"": ""users""}, ""v"": 2}")"#;
+    let mut body = vec![];
+    body.extend_from_slice(&1i16.to_be_bytes());
+    body.extend_from_slice(&(value.len() as i32).to_be_bytes());
+    body.extend_from_slice(value);
+    message(b'D', &body)
 }
 
 fn close_statement(statement: &str) -> BytesMut {
@@ -1615,6 +1705,58 @@ mod settings_barrier {
     }
 
     #[tokio::test]
+    async fn a_commit_that_changes_no_setting_is_not_waited_for() {
+        let mut connection = connection().await;
+        connection.simple_in("BEGIN", "BEGIN", b'T').await;
+        connection.simple_in("SELECT 1", "SELECT 1", b'T').await;
+        connection.client(query("COMMIT")).await;
+        connection.client(query("BEGIN")).await;
+        connection.client(query("ROLLBACK")).await;
+        connection.client(parse("s", "SELECT 1")).await;
+    }
+
+    #[tokio::test]
+    async fn a_set_to_the_value_in_effect_is_not_waited_for() {
+        let mut connection = connection().await;
+        connection.simple(DISABLE_MAPPING, "SET").await;
+        connection.client(query(DISABLE_MAPPING)).await;
+        connection.client(parse("s", "SELECT 1")).await;
+    }
+
+    #[tokio::test]
+    async fn a_commit_after_a_set_in_the_transaction_is_waited_for() {
+        // If the transaction has failed, PostgreSQL rolls back and undoes the SET
+        let mut connection = connection().await;
+        connection.simple_in("BEGIN", "BEGIN", b'T').await;
+        connection.simple_in(DISABLE_MAPPING, "SET", b'T').await;
+        connection.client(query("COMMIT")).await;
+        connection
+            .client_after(
+                parse("s", "SELECT 1"),
+                vec![command_complete("COMMIT"), ready(b'I')],
+            )
+            .await;
+        assert!(connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
+    async fn a_response_to_an_earlier_batch_does_not_apply_a_later_set() {
+        let mut connection = connection().await;
+        connection.client(query("SELECT 1")).await;
+        connection.client(query(DISABLE_MAPPING)).await;
+
+        connection.server(command_complete("SELECT 1")).await;
+        assert!(!connection.context.unsafe_disable_mapping());
+        connection.server(ready(b'I')).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'I')).await;
+        assert!(connection.context.unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
     async fn messages_in_the_batch_that_changes_the_settings_are_not_held() {
         let mut connection = connection().await;
         connection.client(parse("", DISABLE_MAPPING)).await;
@@ -1626,6 +1768,114 @@ mod settings_barrier {
             .context
             .projected_settings()
             .unsafe_disable_mapping());
+    }
+}
+
+/// With an encrypted column, Proxy encrypts under the settings each statement runs with.
+mod encrypted {
+    use super::*;
+    use cipherstash_client::IdentifiedBy;
+
+    const KEYSET_A: &str = "7e5ea5a6-4e1c-4f4d-8a9c-9f0b4f6a0c11";
+
+    fn keyset_a() -> Option<KeysetIdentifier> {
+        Some(KeysetIdentifier(IdentifiedBy::Uuid(
+            KEYSET_A.parse().unwrap(),
+        )))
+    }
+
+    #[tokio::test]
+    async fn a_keyset_set_earlier_in_a_query_encrypts_the_values_after_it() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .client(query(&format!(
+                "SET CIPHERSTASH.KEYSET_ID = '{KEYSET_A}'; \
+                 INSERT INTO users (email) VALUES ('a@example.com')"
+            )))
+            .await;
+        assert_eq!(connection.encrypted_with(), vec![keyset_a()]);
+    }
+
+    #[tokio::test]
+    async fn mapping_disabled_earlier_in_a_query_leaves_the_values_after_it() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .client(query(
+                "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; \
+                 INSERT INTO users (email) VALUES ('a@example.com')",
+            ))
+            .await;
+        assert_eq!(connection.encrypted_with(), vec![]);
+        assert_eq!(connection.forwarded_codes().await, vec![b'Q']);
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_keyset_set_earlier_in_a_batch_encrypts_the_parameters_after_it() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .client(parse(
+                "",
+                &format!("SET CIPHERSTASH.KEYSET_ID = '{KEYSET_A}'"),
+            ))
+            .await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection
+            .client(parse("", "INSERT INTO users (email) VALUES ($1)"))
+            .await;
+        connection.client(bind_text("", "", "a@example.com")).await;
+        assert_eq!(connection.encrypted_with(), vec![keyset_a()]);
+    }
+
+    #[tokio::test]
+    async fn rows_are_decrypted_under_the_keyset_postgresql_has_confirmed() {
+        const KEYSET_B: &str = "0b9f3e2c-1d4a-4c6e-9f8a-2b7d5e1c3a90";
+        let mut connection = Connection::encrypted().await;
+        for sql in [
+            format!("SET CIPHERSTASH.KEYSET_ID = '{KEYSET_A}'"),
+            "SELECT email FROM users".to_string(),
+            format!("SET CIPHERSTASH.KEYSET_ID = '{KEYSET_B}'"),
+        ] {
+            connection.client(parse("", &sql)).await;
+            connection.client(bind("", "")).await;
+            connection.client(execute("")).await;
+        }
+        connection.client(sync()).await;
+
+        connection.server(parse_complete()).await;
+        connection.server(bind_complete()).await;
+        connection.server(command_complete("SET")).await;
+        connection.server(parse_complete()).await;
+        connection.server(bind_complete()).await;
+        connection.server(encrypted_email_row()).await;
+        connection.server(command_complete("SELECT 1")).await;
+        // The second SET is still to run
+        assert_eq!(connection.decrypted_with(), vec![keyset_a()]);
+    }
+
+    #[tokio::test]
+    async fn a_refused_bind_gets_proxys_error_in_place_of_postgresqls() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .simple(&format!("SET CIPHERSTASH.KEYSET_ID = '{KEYSET_A}'"), "SET")
+            .await;
+        connection
+            .prepare("s", "INSERT INTO users (email) VALUES ($1)")
+            .await;
+        connection.forwarded().await;
+        connection.errors_sent_to_client();
+
+        // The test service cannot encrypt, so Proxy refuses the Bind
+        connection.client(bind_text("", "s", "a@example.com")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        assert_eq!(connection.forwarded_codes().await, vec![b'B', b'S']);
+
+        connection.rejected(b'I').await;
+        let codes = connection.error_codes_sent_to_client();
+        assert_eq!(codes.len(), 1);
+        assert_ne!(codes[0], "25P02");
     }
 }
 

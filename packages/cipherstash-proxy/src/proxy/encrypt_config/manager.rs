@@ -36,6 +36,13 @@ impl EncryptConfig {
         }
     }
 
+    /// An `EncryptConfig` from canonical encryption config JSON
+    #[cfg(test)]
+    pub fn from_json(json: Value) -> Self {
+        let canonical: CanonicalEncryptionConfig = serde_json::from_value(json).unwrap();
+        Self::new_from_config(canonical_to_map(canonical).unwrap())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.config.is_empty()
     }
