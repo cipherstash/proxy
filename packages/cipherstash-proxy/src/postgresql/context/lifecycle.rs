@@ -104,10 +104,12 @@ impl<S: EncryptionService> Context<S> {
             if let Some(scope) = state.statement_metrics.get_mut(&metrics) {
                 scope.records_statement_metrics = false;
             }
-            state.statement_metrics_scopes.insert(name.clone(), metrics);
+            state
+                .prepared_statements
+                .set_metrics_scope(name.clone(), metrics);
             // Recorded with the statement, so a SQL deallocation never sees the statement
             // without the Parse that prepared it.
-            state.statement_operations.insert(name.clone(), operation);
+            state.prepared_statements.set_parse(name.clone(), operation);
             state.operations.entry(operation).or_default().preparation = Some(Preparation::Parse {
                 name,
                 metrics,
@@ -195,7 +197,9 @@ impl<S: EncryptionService> Context<S> {
             .as_ref()
             .is_some_and(|s| s.literal_columns.iter().any(Option::is_some));
         if let Some(statement) = statement {
-            state.statements.insert(name.clone(), Arc::new(statement));
+            state
+                .prepared_statements
+                .set_statement(name.clone(), Arc::new(statement));
         }
         state.settings_protocol.capture_literals(&name, sensitive);
         Ok(())
@@ -242,7 +246,7 @@ impl<S: EncryptionService> Context<S> {
             .protocol_state
             .write()
             .map_err(|_| ContextError::ProtocolStateUnavailable)?;
-        let statement = state.statements.get(statement).cloned();
+        let statement = state.prepared_statements.statement(statement);
         state.operations.entry(operation).or_default().preparation = Some(Preparation::Bind {
             name: portal,
             metrics,

@@ -160,6 +160,11 @@ pub enum MappingError {
         column_type: String,
     },
 
+    /// A Bind names a statement Proxy has no Parse for, so Proxy cannot tell whether its
+    /// values must be encrypted.
+    #[error("Prepared statement '{name}' does not exist on this connection. For help visit {}#mapping-unknown-prepared-statement", ERROR_DOC_BASE_URL)]
+    UnknownPreparedStatement { name: String },
+
     #[error("Statement could not be transformed: {0}")]
     StatementCouldNotBeTransformed(String),
 
@@ -324,6 +329,13 @@ pub enum EncryptError {
 
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
+
+    /// The encryption service returned a different number of values than it was given.
+    ///
+    /// Bind rewrites pair encrypted values with parameters by position, so a short result
+    /// would forward the remaining parameters unencrypted. The statement is refused instead.
+    #[error("Expected {expected} encrypted values but received {actual}. For help visit {}#encrypt-result-count-mismatch", ERROR_DOC_BASE_URL)]
+    EncryptionResultCountMismatch { expected: usize, actual: usize },
 
     /// `EqlTermVariant::JsonExtracted` types the RESULT of an encrypted JSON
     /// extraction, which is read back and decrypted — it is never a plaintext

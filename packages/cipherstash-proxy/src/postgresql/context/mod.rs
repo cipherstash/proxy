@@ -3,16 +3,18 @@ mod lifecycle;
 pub use lifecycle::ExecutionEnd;
 pub mod phase_timing;
 pub mod portal;
+mod prepared_statements;
 pub mod settings;
 mod settings_protocol;
 pub mod statement;
 pub mod statement_metadata;
+use self::prepared_statements::PreparedStatements;
 use self::settings::ConnectionSettings;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{column_mapper::ColumnMapper, rewrite::Name, Column, OperationId};
 use crate::{
     config::TandemConfig,
-    error::{ConfigError, Error},
+    error::{ConfigError, EncryptError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -30,7 +32,7 @@ use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, TransactionStatus};
 use serde_json::json;
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
@@ -142,10 +144,7 @@ pub(crate) struct ProtocolStateSizes {
     pub operations: usize,
     pub statement_metrics: usize,
     pub suspended_executions: usize,
-    pub statements: usize,
-    pub statement_metrics_scopes: usize,
-    pub statement_operations: usize,
-    pub statement_deallocations: usize,
+    pub prepared_statements: usize,
     pub settings_statements: usize,
     pub portals: usize,
     pub portal_operations: usize,
@@ -158,12 +157,7 @@ struct ConnectionProtocolState<K = OperationId> {
     operations: HashMap<K, OperationContext>,
     statement_metrics: HashMap<SessionId, SessionMetricsContext>,
     suspended_executions: HashMap<Name, (K, ExecuteContext)>,
-    statements: HashMap<Name, Arc<Statement>>,
-    statement_metrics_scopes: HashMap<Name, SessionId>,
-    /// The Parse operation that prepared each named statement
-    statement_operations: HashMap<Name, K>,
-    /// Statements whose SQL is a `DEALLOCATE` or `DISCARD ALL`
-    statement_deallocations: HashMap<Name, Deallocation>,
+    prepared_statements: PreparedStatements<K>,
     portals: HashMap<Name, Arc<Portal>>,
     portal_operations: HashMap<Name, PortalOwner<K>>,
 }
@@ -183,10 +177,7 @@ impl<K> Default for ConnectionProtocolState<K> {
             operations: HashMap::new(),
             statement_metrics: HashMap::new(),
             suspended_executions: HashMap::new(),
-            statements: HashMap::new(),
-            statement_metrics_scopes: HashMap::new(),
-            statement_operations: HashMap::new(),
-            statement_deallocations: HashMap::new(),
+            prepared_statements: PreparedStatements::default(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
         }
@@ -229,23 +220,22 @@ impl ConnectionProtocolState {
         let (restored, mut candidates) = self.settings_protocol.failed(operation);
         for restore in restored {
             if restore.statement {
-                candidates.extend(self.statement_metrics_scopes.remove(&restore.name));
-                self.statements.remove(&restore.name);
-                self.statement_operations.remove(&restore.name);
-                self.statement_deallocations.remove(&restore.name);
+                candidates.extend(self.prepared_statements.remove(&restore.name));
                 if let Some(operation) = restore.metadata.statement_operation {
-                    self.statement_operations
-                        .insert(restore.name.clone(), operation);
+                    self.prepared_statements
+                        .set_parse(restore.name.clone(), operation);
                 }
                 if let Some(deallocation) = restore.metadata.statement_deallocation {
-                    self.statement_deallocations
-                        .insert(restore.name.clone(), deallocation);
+                    self.prepared_statements
+                        .set_deallocation(restore.name.clone(), deallocation);
                 }
                 if let Some(statement) = restore.metadata.statement {
-                    self.statements.insert(restore.name.clone(), statement);
+                    self.prepared_statements
+                        .set_statement(restore.name.clone(), statement);
                 }
                 if let Some(metrics) = restore.metadata.statement_metrics {
-                    self.statement_metrics_scopes.insert(restore.name, metrics);
+                    self.prepared_statements
+                        .set_metrics_scope(restore.name, metrics);
                 }
             } else {
                 candidates.extend(
@@ -280,10 +270,10 @@ impl ConnectionProtocolState {
     /// Everything Proxy keeps for the named statement, for a rollback to restore
     fn statement_snapshot(&self, name: &Name) -> settings_protocol::MetadataSnapshot {
         settings_protocol::MetadataSnapshot {
-            statement: self.statements.get(name).cloned(),
-            statement_metrics: self.statement_metrics_scopes.get(name).copied(),
-            statement_operation: self.statement_operations.get(name).copied(),
-            statement_deallocation: self.statement_deallocations.get(name).cloned(),
+            statement: self.prepared_statements.statement(name),
+            statement_metrics: self.prepared_statements.metrics_scope(name),
+            statement_operation: self.prepared_statements.parse(name),
+            statement_deallocation: self.prepared_statements.deallocation(name),
             ..Default::default()
         }
     }
@@ -301,13 +291,10 @@ impl ConnectionProtocolState {
 
 impl<K> ConnectionProtocolState<K>
 where
-    K: Copy + Eq + std::hash::Hash,
+    K: Copy + Eq + std::hash::Hash + PartialOrd,
 {
     fn remove_statement_metadata(&mut self, name: &Name) -> Option<SessionMetricsContext> {
-        let session_id = self.statement_metrics_scopes.remove(name);
-        self.statements.remove(name);
-        self.statement_operations.remove(name);
-        self.statement_deallocations.remove(name);
+        let session_id = self.prepared_statements.remove(name);
         if session_id.is_some_and(|id| self.metrics_referenced(id)) {
             None
         } else {
@@ -317,10 +304,7 @@ where
 
     fn metrics_referenced(&self, session_id: SessionId) -> bool {
         self.settings_protocol.references_metrics(session_id)
-            || self
-                .statement_metrics_scopes
-                .values()
-                .any(|id| *id == session_id)
+            || self.prepared_statements.references_metrics(session_id)
             || self
                 .portals
                 .values()
@@ -520,7 +504,7 @@ where
             Describe {
                 name,
                 target: DescribeTarget::Statement,
-            } => state.statements.get(name).cloned(),
+            } => state.prepared_statements.statement(name),
         };
         state.operations.entry(operation).or_default().describe =
             Some(DescribeContext { statement });
@@ -792,8 +776,8 @@ where
         self.protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
-            .statements
-            .insert(name, Arc::new(statement));
+            .prepared_statements
+            .set_statement(name, Arc::new(statement));
         Ok(())
     }
 
@@ -821,8 +805,8 @@ where
         self.protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
-            .statement_deallocations
-            .insert(name, deallocation);
+            .prepared_statements
+            .set_deallocation(name, deallocation);
         Ok(())
     }
 
@@ -832,7 +816,7 @@ where
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        let deallocation = state.statement_deallocations.get(statement).cloned();
+        let deallocation = state.prepared_statements.deallocation(statement);
         if let Some(owner) = state.portal_operations.get_mut(portal) {
             owner.deallocation = deallocation;
         }
@@ -904,39 +888,13 @@ where
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
-            let names: HashSet<Name> = match deallocation {
-                Deallocation::Statement(name) => HashSet::from([name]),
-                Deallocation::AllStatements => state
-                    .statements
-                    .keys()
-                    .chain(state.statement_metrics_scopes.keys())
-                    .chain(state.statement_operations.keys())
-                    .chain(state.statement_deallocations.keys())
-                    // The unnamed statement is not removed by DEALLOCATE ALL or DISCARD ALL
-                    .filter(|name| !name.is_empty())
-                    .cloned()
-                    .collect(),
-            };
-
-            let mut candidates = Vec::new();
-            for name in names {
+            let names = state.prepared_statements.deallocation_names(deallocation);
+            for name in &names {
                 // Also when a later Parse prepared the name again, so that Parse's rollback
                 // cannot restore the statement PostgreSQL removed
-                state.settings_protocol.deallocated(operation, &name);
-                // A statement with no recorded Parse is kept: leaking it is safe, while removing a
-                // statement PostgreSQL still has would let its next Bind through unencrypted.
-                let prepared_earlier = state
-                    .statement_operations
-                    .get(&name)
-                    .is_some_and(|prepared| *prepared < operation);
-                if !prepared_earlier {
-                    continue;
-                }
-                state.statements.remove(&name);
-                state.statement_operations.remove(&name);
-                state.statement_deallocations.remove(&name);
-                candidates.extend(state.statement_metrics_scopes.remove(&name));
+                state.settings_protocol.deallocated(operation, name);
             }
+            let candidates = state.prepared_statements.deallocate(&names, operation);
             state.take_unreferenced_metrics(candidates)
         };
 
@@ -950,11 +908,7 @@ where
     #[cfg(test)]
     pub(crate) fn statement_operation_names(&self) -> Vec<String> {
         let state = self.protocol_state.read().unwrap();
-        state
-            .statement_operations
-            .keys()
-            .map(|name| String::from_utf8_lossy(name).into_owned())
-            .collect()
+        state.prepared_statements.parsed_names()
     }
 
     /// Size of every per-connection protocol state collection.
@@ -967,10 +921,7 @@ where
             operations: state.operations.len(),
             statement_metrics: state.statement_metrics.len(),
             suspended_executions: state.suspended_executions.len(),
-            statements: state.statements.len(),
-            statement_metrics_scopes: state.statement_metrics_scopes.len(),
-            statement_operations: state.statement_operations.len(),
-            statement_deallocations: state.statement_deallocations.len(),
+            prepared_statements: state.prepared_statements.len(),
             settings_statements: state.settings_protocol.statement_count(),
             portals: state.portals.len(),
             portal_operations: state.portal_operations.len(),
@@ -1121,13 +1072,22 @@ where
         Ok(())
     }
 
+    /// Whether a Parse on this connection prepared `name`.
+    pub fn is_prepared(&self, name: &Name) -> Result<bool, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.prepared_statements.contains(name))
+    }
+
     pub fn get_statement(&self, name: &Name) -> Result<Option<Arc<Statement>>, Error> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let state = self
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        Ok(state.statements.get(name).cloned())
+        Ok(state.prepared_statements.statement(name))
     }
 
     #[cfg(test)]
@@ -1143,7 +1103,9 @@ where
         if let Some(metrics) = state.statement_metrics.get_mut(&session_id) {
             metrics.records_statement_metrics = false;
         }
-        state.statement_metrics_scopes.insert(name, session_id);
+        state
+            .prepared_statements
+            .set_metrics_scope(name, session_id);
         Ok(())
     }
 
@@ -1152,7 +1114,7 @@ where
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        Ok(state.statement_metrics_scopes.get(name).copied())
+        Ok(state.prepared_statements.metrics_scope(name))
     }
 
     fn start_portal_metrics_scope(&mut self, statement: &Name) -> Result<Option<SessionId>, Error> {
@@ -1161,7 +1123,7 @@ where
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        let Some(template_id) = state.statement_metrics_scopes.get(statement).copied() else {
+        let Some(template_id) = state.prepared_statements.metrics_scope(statement) else {
             return Ok(None);
         };
         let Some(mut metrics) = state.statement_metrics.get(&template_id).cloned() else {
@@ -1503,8 +1465,8 @@ where
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         let settings = settings_protocol::EffectiveSettings::new(&state.settings);
         let encrypted_values = state
-            .statements
-            .get(name)
+            .prepared_statements
+            .statement(name)
             .is_some_and(|statement| statement.param_columns.iter().any(Option::is_some));
         let metadata = state.portal_snapshot(&portal);
         state
@@ -1624,14 +1586,12 @@ where
             ) {
                 let ConnectionProtocolState {
                     settings_protocol,
-                    statements,
-                    statement_metrics_scopes,
+                    prepared_statements,
                     portals,
                     portal_operations,
                     ..
                 } = &mut *state;
-                statements.retain(|name, _| settings_protocol.has_statement(name));
-                statement_metrics_scopes.retain(|name, _| settings_protocol.has_statement(name));
+                prepared_statements.retain(|name| settings_protocol.has_statement(name));
                 portals.retain(|name, _| settings_protocol.has_portal(name));
                 portal_operations.retain(|name, _| settings_protocol.has_portal(name));
                 let candidates = state.statement_metrics.keys().copied().collect::<Vec<_>>();
@@ -1696,10 +1656,22 @@ where
         }
 
         let keyset_id = self.keyset_identifier()?;
+        let expected = plaintexts.len();
 
-        self.encryption
+        let encrypted = self
+            .encryption
             .encrypt(keyset_id, plaintexts, columns)
-            .await
+            .await?;
+
+        // Values are paired with parameters by position, so a short result must never be used
+        if encrypted.len() != expected {
+            return Err(EncryptError::EncryptionResultCountMismatch {
+                expected,
+                actual: encrypted.len(),
+            }
+            .into());
+        }
+        Ok(encrypted)
     }
 
     pub async fn decrypt(
@@ -2603,12 +2575,13 @@ mod tests {
         context.preparation_acknowledged(original).unwrap();
         let rejected = prepare_lifecycle(&mut context, &name, "SELECT 1", Some(statement())).await;
         context.postgres_failed(Some(rejected), false).unwrap();
-        assert!(!context
+        assert!(context
             .protocol_state
             .read()
             .unwrap()
-            .statements
-            .contains_key(&name));
+            .prepared_statements
+            .statement(&name)
+            .is_none());
     }
 
     #[tokio::test]
@@ -2705,6 +2678,26 @@ mod tests {
 
         assert_eq!(output.len(), 2);
         assert!(output.iter().all(Option::is_none));
+    }
+
+    #[tokio::test]
+    async fn encryption_service_returning_fewer_values_fails_closed() {
+        let context = create_context();
+        // TestService returns no outputs at all
+        let plaintext = cipherstash_client::encryption::Plaintext::new("secret".to_owned());
+        let result = context
+            .encrypt(vec![Some(plaintext), None], &[None, None])
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(
+                crate::error::EncryptError::EncryptionResultCountMismatch {
+                    expected: 2,
+                    actual: 0
+                }
+            ))
+        ));
     }
     fn statement() -> Statement {
         Statement {

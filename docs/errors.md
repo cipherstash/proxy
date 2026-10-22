@@ -17,6 +17,7 @@
   - [Prepared settings changed](#mapping-prepared-settings-changed)
   - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
+  - [Unknown prepared statement](#mapping-unknown-prepared-statement)
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt errors:
@@ -38,6 +39,7 @@
   - [Missing encrypt configuration](#encrypt-missing-encrypt-configuration)
   - [Unexpected SET keyset](#encrypt-unexpected-set-keyset)
   - [Encrypted jsonb column configured for ORE ordering](#encrypt-ste-vec-ore-mode-unsupported)
+  - [Encryption result count mismatch](#encrypt-result-count-mismatch)
 
 - Decrypt errors:
    - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
@@ -405,6 +407,36 @@ If the column is no longer used, dropping it also resolves the error.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Unknown prepared statement <a id='mapping-unknown-prepared-statement'></a>
+
+A Bind named a prepared statement that was not prepared with a Parse on this connection.
+Proxy keeps encryption details only for statements that touch encrypted columns, so it cannot
+tell whether the values bound to an unknown statement must be encrypted. It refuses the Bind
+rather than send them as they are. The error uses PostgreSQL's own code for a missing prepared
+statement, `26000`, and the connection stays open: PostgreSQL skips the rest of the batch until
+the next Sync, as it does for any failed Bind.
+
+### Error message
+
+```
+Prepared statement '{name}' does not exist on this connection.
+```
+
+### How to fix
+
+- Prepare the statement with a Parse message on the same connection before binding it. Most
+  drivers do this for you.
+- A statement created with SQL `PREPARE name AS ...` cannot be bound through the extended
+  protocol through Proxy. Use `EXECUTE name` instead, or prepare it with a Parse message.
+- If a connection pool hands out connections whose prepared statements were deallocated, make
+  sure the driver prepares statements again after a reset (`DEALLOCATE ALL` or `DISCARD ALL`).
+
+The check does not apply while mapping is disabled.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
 ## Internal Mapper error <a id='mapping-internal-error'></a>
 
 An internal error occurred when attempting to type check or transform a SQL statement.
@@ -521,6 +553,30 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- TODO: Link to ZeroKMS Doc -->
 3. Check that the encrypted configuration `cast` matches the expected type.
 <!-- TODO: Link to config -->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Encryption result count mismatch <a id='encrypt-result-count-mismatch'></a>
+
+The encryption service returned a different number of encrypted values than the number of values it was asked to encrypt.
+
+### Error message
+
+```
+Expected 2 encrypted values but received 0.
+```
+
+### Notes
+
+Proxy matches encrypted values to statement parameters by position. If any value were missing, the parameters after it could be sent to the database unencrypted, so Proxy refuses the statement instead.
+
+### How to Fix
+
+This indicates an internal error in the encryption pipeline. Retry the statement, and if the error persists, contact CipherStash support with the Proxy logs.
 
 
 

@@ -661,6 +661,32 @@ impl SchemaMiddleware {
     }
 }
 
+#[cfg(test)]
+/// Builds a committed schema store from `CREATE TABLE` statements, classifying each column and
+/// deriving its encryption metadata exactly as observed DDL is modelled. Other statements are
+/// ignored.
+pub(crate) fn committed_store_from_ddl(ddl: &str) -> CommittedSchemaStore {
+    use eql_mapper::{Column, Table};
+    use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
+
+    let mut schema = Schema::new("public");
+    let mut encrypt_config = EncryptConfig::default();
+    for statement in Parser::parse_sql(&PostgreSqlDialect {}, ddl).unwrap() {
+        if let Statement::CreateTable(create) = &statement {
+            let mut table = Table::new(Ident::new(postgres_object_name(&create.name)));
+            for column in &create.columns {
+                table.add_column(Arc::new(Column {
+                    name: Ident::with_quote('"', postgres_identifier(&column.name)),
+                    kind: column_kind(column),
+                }));
+            }
+            schema.add_table(table);
+            apply_encrypt_config(&mut encrypt_config, &statement);
+        }
+    }
+    CommittedSchemaStore::for_testing(schema, encrypt_config)
+}
+
 /// Returns the unqualified PostgreSQL domain name declared for a column.
 fn column_domain(column: &ColumnDef) -> String {
     match &column.data_type {

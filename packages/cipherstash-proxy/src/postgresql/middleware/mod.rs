@@ -90,13 +90,13 @@ mod tests {
             context::{ProtocolStateSizes, Statement},
             test_operation_id, Column, Context, KeysetIdentifier, OperationId,
         },
-        proxy::{EncryptConfig, EncryptionService},
+        proxy::{schema::committed_store_from_ddl, EncryptConfig, EncryptionService},
     };
     use bytes::Bytes;
     use eql_mapper::Schema;
     use pg_proto::{
-        BackendMessage, Bind, Close, Describe, DescribeTarget, Execute, FrontendMessage, Parse,
-        TransactionStatus,
+        BackendMessage, BackendMiddlewareOutput, Bind, Close, Describe, DescribeTarget, Execute,
+        FrontendMessage, FrontendMiddlewareOutput, Parse, TransactionStatus,
     };
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -138,9 +138,22 @@ mod tests {
         frontend: Frontend<TestService>,
         backend: Backend<TestService>,
         context: Context<TestService>,
+        /// SQL the tests prepare: it reads an encrypted column when the schema has one
+        select: &'static str,
+        /// Whether the statements the tests prepare are stored as encrypted statements
+        encrypted: bool,
+    }
+
+    /// The `encrypted` table from the integration test schema
+    fn encrypted_table_ddl() -> &'static str {
+        const SCHEMA: &str = include_str!("../../../../../tests/sql/schema.sql");
+        let start = SCHEMA.find("CREATE TABLE encrypted (").unwrap();
+        let end = start + SCHEMA[start..].find(");").unwrap() + 2;
+        &SCHEMA[start..end]
     }
 
     impl Connection {
+        /// A connection with no encrypt config, so every statement is passthrough
         fn new() -> Self {
             Self::with_config(TandemConfig::for_testing())
         }
@@ -156,31 +169,84 @@ mod tests {
                 TestService,
                 reload_sender,
             );
+            Self::with_context(context, "select 1", false)
+        }
+
+        /// A connection whose schema has the integration tests' `encrypted` table, so the
+        /// statements the tests prepare are stored as encrypted statements
+        fn encrypted() -> Self {
+            let (reload_sender, _) = mpsc::unbounded_channel();
+            let context = Context::new_with_schema_store(
+                1,
+                Arc::new(TandemConfig::for_testing()),
+                committed_store_from_ddl(encrypted_table_ddl()),
+                Arc::new(rustls::RootCertStore::empty()),
+                TestService,
+                reload_sender,
+            );
+            Self::with_context(context, "SELECT encrypted_text FROM encrypted", true)
+        }
+
+        fn with_context(
+            context: Context<TestService>,
+            select: &'static str,
+            encrypted: bool,
+        ) -> Self {
             Self {
                 frontend: Frontend::new(context.clone()),
                 backend: Backend::new(context.clone()),
                 context,
+                select,
+                encrypted,
             }
+        }
+
+        /// Whether the connection still holds the named statement. An encrypted connection
+        /// must also still hold its Statement, or the next Bind would skip encryption.
+        fn holds_statement(&self, name: &'static [u8]) -> bool {
+            let name = Bytes::from_static(name);
+            let held = self
+                .context
+                .test_statement_metrics_scope(&name)
+                .unwrap()
+                .is_some();
+            if self.encrypted {
+                assert_eq!(self.context.get_statement(&name).unwrap().is_some(), held);
+            }
+            held
         }
 
         /// Client sends a message; returns the operation pg-proto assigns it
         async fn client(&mut self, message: FrontendMessage) -> OperationId {
-            let operation = test_operation_id();
-            self.frontend.intercept(operation, message).await.unwrap();
-            operation
+            self.client_output(message).await.0
         }
 
-        async fn server(&mut self, operation: OperationId, message: BackendMessage) {
+        /// Client sends a message; returns its operation and what Proxy sends PostgreSQL
+        async fn client_output(
+            &mut self,
+            message: FrontendMessage,
+        ) -> (OperationId, FrontendMiddlewareOutput) {
+            let operation = test_operation_id();
+            let output = self.frontend.intercept(operation, message).await.unwrap();
+            (operation, output)
+        }
+
+        /// PostgreSQL responds to an operation; returns what Proxy sends the client
+        async fn server(
+            &mut self,
+            operation: OperationId,
+            message: BackendMessage,
+        ) -> BackendMiddlewareOutput {
             self.backend
                 .intercept(Some(operation), message)
                 .await
-                .unwrap();
+                .unwrap()
         }
 
         async fn parse(&mut self, statement: &'static [u8]) -> OperationId {
             self.client(FrontendMessage::Parse(Parse {
                 statement: Bytes::from_static(statement),
-                query: Bytes::from_static(b"select 1"),
+                query: Bytes::from_static(self.select.as_bytes()),
                 parameter_types: vec![],
             }))
             .await
@@ -189,7 +255,7 @@ mod tests {
         async fn parse_named(&mut self, statement: String) -> OperationId {
             self.client(FrontendMessage::Parse(Parse {
                 statement: Bytes::from(statement),
-                query: Bytes::from_static(b"select 1"),
+                query: Bytes::from_static(self.select.as_bytes()),
                 parameter_types: vec![],
             }))
             .await
@@ -260,200 +326,240 @@ mod tests {
         ))
     }
 
-    #[tokio::test]
-    async fn prepare_and_describe_without_execute_retains_nothing() {
-        let mut connection = Connection::new();
-        for _ in 0..ITERATIONS {
-            let parse = connection.parse(b"").await;
-            let describe = connection
-                .client(FrontendMessage::Describe(Describe {
-                    target: DescribeTarget::Statement,
-                    name: Bytes::new(),
-                }))
-                .await;
-            let sync = connection.client(FrontendMessage::Sync).await;
+    /// Runs a harness test against a passthrough connection and against one whose statements
+    /// read an encrypted column
+    macro_rules! both_configs {
+        (async fn $name:ident($connect:ident) $body:block) => {
+            mod $name {
+                use super::*;
 
-            connection
-                .server(parse, BackendMessage::ParseComplete)
-                .await;
-            connection.server(describe, BackendMessage::NoData).await;
-            connection
-                .server(sync, ready(TransactionStatus::Idle))
-                .await;
-        }
-        // Only the unnamed statement's own state remains
-        assert!(connection.sizes().statement_metrics <= 1);
-        assert_eq!(connection.sizes().operations, 0);
-    }
+                async fn run($connect: fn() -> Connection) $body
 
-    #[tokio::test]
-    async fn executing_a_prepared_statement_retains_nothing() {
-        let mut connection = Connection::new();
-        let parse = connection.parse(b"S_1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
-        let prepared = connection.sizes();
+                #[tokio::test]
+                async fn plaintext() {
+                    run(Connection::new).await
+                }
 
-        for _ in 0..ITERATIONS {
-            let bind = connection
-                .bind(Bytes::from_static(b"S_1"), Bytes::new())
-                .await;
-            let execute = connection.execute(Bytes::new()).await;
-            let sync = connection.client(FrontendMessage::Sync).await;
-            connection.server(bind, BackendMessage::BindComplete).await;
-            connection
-                .server(execute, command_complete(b"SELECT 1"))
-                .await;
-            connection
-                .server(sync, ready(TransactionStatus::Idle))
-                .await;
-        }
-        // Only the prepared statement's own state remains
-        assert_eq!(connection.sizes(), prepared);
-    }
-
-    #[tokio::test]
-    async fn pipelined_batch_failing_part_way_retains_nothing() {
-        let mut connection = Connection::new();
-        for _ in 0..ITERATIONS {
-            let mut operations = vec![];
-            for _ in 0..2 {
-                let parse = connection.parse(b"").await;
-                let bind = connection.bind(Bytes::new(), Bytes::new()).await;
-                let execute = connection.execute(Bytes::new()).await;
-                operations.push((parse, bind, execute));
+                #[tokio::test]
+                async fn encrypted() {
+                    run(Connection::encrypted).await
+                }
             }
-            let sync = connection.client(FrontendMessage::Sync).await;
-
-            // The first Execute fails; PostgreSQL skips the rest until Sync
-            let (parse, bind, execute) = operations[0];
-            connection
-                .server(parse, BackendMessage::ParseComplete)
-                .await;
-            connection.server(bind, BackendMessage::BindComplete).await;
-            connection.server(execute, error()).await;
-            connection
-                .server(sync, ready(TransactionStatus::Idle))
-                .await;
-        }
-        let sizes = connection.sizes();
-        assert_eq!(sizes.operations, 0);
-        assert_eq!(sizes.portals, 0);
-        assert_eq!(sizes.portal_operations, 0);
-        assert!(sizes.statement_metrics <= 1);
+        };
     }
 
     #[tokio::test]
-    async fn unique_named_portals_retain_nothing() {
+    async fn encrypted_connection_stores_the_statements_it_prepares() {
+        let mut connection = Connection::encrypted();
+        prepare(&mut connection, &["a1"]).await;
+        let a1 = Bytes::from_static(b"a1");
+        assert!(connection.context.get_statement(&a1).unwrap().is_some());
+
         let mut connection = Connection::new();
-        let parse = connection.parse(b"S_1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::InTransaction))
-            .await;
-
-        for i in 0..ITERATIONS {
-            let portal = Bytes::from(format!("C_{i}"));
-            let bind = connection
-                .bind(Bytes::from_static(b"S_1"), portal.clone())
-                .await;
-            let execute = connection.execute(portal.clone()).await;
-            let close = connection
-                .client(FrontendMessage::Close(Close {
-                    target: DescribeTarget::Portal,
-                    name: portal,
-                }))
-                .await;
-            let sync = connection.client(FrontendMessage::Sync).await;
-
-            connection.server(bind, BackendMessage::BindComplete).await;
-            connection
-                .server(execute, command_complete(b"SELECT 1"))
-                .await;
-            connection
-                .server(close, BackendMessage::CloseComplete)
-                .await;
-            connection
-                .server(sync, ready(TransactionStatus::InTransaction))
-                .await;
-        }
-        let sizes = connection.sizes();
-        assert_eq!(sizes.operations, 0);
-        assert_eq!(sizes.portals, 0);
-        assert_eq!(sizes.portal_operations, 0);
+        prepare(&mut connection, &["a1"]).await;
+        assert!(connection.context.get_statement(&a1).unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn sql_deallocate_retains_nothing() {
-        let mut connection = Connection::new();
-        for i in 0..ITERATIONS {
-            let name = format!("_pg3_{i}");
-            let parse = connection.parse_named(name.clone()).await;
-            let bind = connection
-                .bind(Bytes::from(name.clone()), Bytes::new())
-                .await;
-            let execute = connection.execute(Bytes::new()).await;
-            let sync = connection.client(FrontendMessage::Sync).await;
-            connection
-                .server(parse, BackendMessage::ParseComplete)
-                .await;
-            connection.server(bind, BackendMessage::BindComplete).await;
-            connection
-                .server(execute, command_complete(b"SELECT 1"))
-                .await;
-            connection
-                .server(sync, ready(TransactionStatus::Idle))
-                .await;
-
-            let query = connection.query(&format!("DEALLOCATE {name}")).await;
-            connection
-                .server(query, command_complete(b"DEALLOCATE"))
-                .await;
-            connection
-                .server(query, ready(TransactionStatus::Idle))
-                .await;
-        }
-        assert_eq!(connection.sizes(), ProtocolStateSizes::default());
-    }
-
-    #[tokio::test]
-    async fn sql_deallocate_all_and_discard_all_retain_nothing() {
-        for (sql, tag) in [
-            ("DEALLOCATE ALL", &b"DEALLOCATE ALL"[..]),
-            ("DISCARD ALL", &b"DISCARD ALL"[..]),
-        ] {
-            let mut connection = Connection::new();
-            for i in 0..ITERATIONS {
-                let parse = connection.parse_named(format!("a{i}")).await;
+    both_configs! {
+        async fn prepare_and_describe_without_execute_retains_nothing(connect) {
+            let mut connection = connect();
+            for _ in 0..ITERATIONS {
+                let parse = connection.parse(b"").await;
+                let describe = connection
+                    .client(FrontendMessage::Describe(Describe {
+                        target: DescribeTarget::Statement,
+                        name: Bytes::new(),
+                    }))
+                    .await;
                 let sync = connection.client(FrontendMessage::Sync).await;
+
                 connection
                     .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection.server(describe, BackendMessage::NoData).await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+            }
+            // Only the unnamed statement's own state remains
+            assert!(connection.sizes().statement_metrics <= 1);
+            assert_eq!(connection.sizes().operations, 0);
+        }
+    }
+
+    both_configs! {
+        async fn executing_a_prepared_statement_retains_nothing(connect) {
+            let mut connection = connect();
+            let parse = connection.parse(b"S_1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            let prepared = connection.sizes();
+
+            for _ in 0..ITERATIONS {
+                let bind = connection
+                    .bind(Bytes::from_static(b"S_1"), Bytes::new())
+                    .await;
+                let execute = connection.execute(Bytes::new()).await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection
+                    .server(execute, command_complete(b"SELECT 1"))
                     .await;
                 connection
                     .server(sync, ready(TransactionStatus::Idle))
                     .await;
             }
+            // Only the prepared statement's own state remains
+            assert_eq!(connection.sizes(), prepared);
+        }
+    }
 
-            let query = connection.query(sql).await;
+    both_configs! {
+        async fn pipelined_batch_failing_part_way_retains_nothing(connect) {
+            let mut connection = connect();
+            for _ in 0..ITERATIONS {
+                let mut operations = vec![];
+                for _ in 0..2 {
+                    let parse = connection.parse(b"").await;
+                    let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+                    let execute = connection.execute(Bytes::new()).await;
+                    operations.push((parse, bind, execute));
+                }
+                let sync = connection.client(FrontendMessage::Sync).await;
+
+                // The first Execute fails; PostgreSQL skips the rest until Sync
+                let (parse, bind, execute) = operations[0];
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection.server(execute, error()).await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+            }
+            let sizes = connection.sizes();
+            assert_eq!(sizes.operations, 0);
+            assert_eq!(sizes.portals, 0);
+            assert_eq!(sizes.portal_operations, 0);
+            assert!(sizes.statement_metrics <= 1);
+        }
+    }
+
+    both_configs! {
+        async fn unique_named_portals_retain_nothing(connect) {
+            let mut connection = connect();
+            let parse = connection.parse(b"S_1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
             connection
-                .server(
-                    query,
-                    BackendMessage::CommandComplete(Bytes::from_static(tag)),
-                )
+                .server(parse, BackendMessage::ParseComplete)
                 .await;
             connection
-                .server(query, ready(TransactionStatus::Idle))
+                .server(sync, ready(TransactionStatus::InTransaction))
                 .await;
 
-            assert_eq!(connection.sizes(), ProtocolStateSizes::default(), "{sql}");
+            for i in 0..ITERATIONS {
+                let portal = Bytes::from(format!("C_{i}"));
+                let bind = connection
+                    .bind(Bytes::from_static(b"S_1"), portal.clone())
+                    .await;
+                let execute = connection.execute(portal.clone()).await;
+                let close = connection
+                    .client(FrontendMessage::Close(Close {
+                        target: DescribeTarget::Portal,
+                        name: portal,
+                    }))
+                    .await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection
+                    .server(execute, command_complete(b"SELECT 1"))
+                    .await;
+                connection
+                    .server(close, BackendMessage::CloseComplete)
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::InTransaction))
+                    .await;
+            }
+            let sizes = connection.sizes();
+            assert_eq!(sizes.operations, 0);
+            assert_eq!(sizes.portals, 0);
+            assert_eq!(sizes.portal_operations, 0);
+        }
+    }
+
+    both_configs! {
+        async fn sql_deallocate_retains_nothing(connect) {
+            let mut connection = connect();
+            for i in 0..ITERATIONS {
+                let name = format!("_pg3_{i}");
+                let parse = connection.parse_named(name.clone()).await;
+                let bind = connection
+                    .bind(Bytes::from(name.clone()), Bytes::new())
+                    .await;
+                let execute = connection.execute(Bytes::new()).await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection
+                    .server(execute, command_complete(b"SELECT 1"))
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+
+                let query = connection.query(&format!("DEALLOCATE {name}")).await;
+                connection
+                    .server(query, command_complete(b"DEALLOCATE"))
+                    .await;
+                connection
+                    .server(query, ready(TransactionStatus::Idle))
+                    .await;
+            }
+            assert_eq!(connection.sizes(), ProtocolStateSizes::default());
+        }
+    }
+
+    both_configs! {
+        async fn sql_deallocate_all_and_discard_all_retain_nothing(connect) {
+            for (sql, tag) in [
+                ("DEALLOCATE ALL", &b"DEALLOCATE ALL"[..]),
+                ("DISCARD ALL", &b"DISCARD ALL"[..]),
+            ] {
+                let mut connection = connect();
+                for i in 0..ITERATIONS {
+                    let parse = connection.parse_named(format!("a{i}")).await;
+                    let sync = connection.client(FrontendMessage::Sync).await;
+                    connection
+                        .server(parse, BackendMessage::ParseComplete)
+                        .await;
+                    connection
+                        .server(sync, ready(TransactionStatus::Idle))
+                        .await;
+                }
+
+                let query = connection.query(sql).await;
+                connection
+                    .server(
+                        query,
+                        BackendMessage::CommandComplete(Bytes::from_static(tag)),
+                    )
+                    .await;
+                connection
+                    .server(query, ready(TransactionStatus::Idle))
+                    .await;
+
+                assert_eq!(connection.sizes(), ProtocolStateSizes::default(), "{sql}");
+            }
         }
     }
 
@@ -477,103 +583,110 @@ mod tests {
         names
     }
 
-    #[tokio::test]
-    async fn multi_statement_query_deallocates_each_statement() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["a1", "a2", "a3"]).await;
+    both_configs! {
+        async fn multi_statement_query_deallocates_each_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1", "a2", "a3"]).await;
 
-        let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
 
-        assert_eq!(statement_names(&connection), vec!["a3"]);
-        assert_eq!(connection.sizes().operations, 0);
+            assert_eq!(statement_names(&connection), vec!["a3"]);
+            assert_eq!(connection.sizes().operations, 0);
+        }
     }
 
-    #[tokio::test]
-    async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["a1", "a2"]).await;
+    both_configs! {
+        async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1", "a2"]).await;
 
-        let query = connection
-            .query("DEALLOCATE a1; SELECT 1/0; DEALLOCATE a2")
-            .await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection.server(query, error()).await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            let query = connection
+                .query("DEALLOCATE a1; SELECT 1/0; DEALLOCATE a2")
+                .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
 
-        assert_eq!(statement_names(&connection), vec!["a2"]);
-        assert_eq!(connection.sizes().operations, 0);
+            assert_eq!(statement_names(&connection), vec!["a2"]);
+            assert_eq!(connection.sizes().operations, 0);
+        }
     }
 
-    #[tokio::test]
-    async fn deallocate_folds_unquoted_names_and_keeps_quoted_ones() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["Mixed", "upper", "UPPER"]).await;
+    both_configs! {
+        async fn deallocate_folds_unquoted_names_and_keeps_quoted_ones(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["Mixed", "upper", "UPPER"]).await;
 
-        let query = connection
-            .query(r#"DEALLOCATE "Mixed"; DEALLOCATE UPPER"#)
-            .await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            let query = connection
+                .query(r#"DEALLOCATE "Mixed"; DEALLOCATE UPPER"#)
+                .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
 
-        assert_eq!(statement_names(&connection), vec!["UPPER"]);
+            assert_eq!(statement_names(&connection), vec!["UPPER"]);
+        }
     }
 
-    #[tokio::test]
-    async fn deallocate_prepare_removes_the_statement() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["a1", "a2"]).await;
+    both_configs! {
+        async fn deallocate_prepare_removes_the_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1", "a2"]).await;
 
-        let query = connection.query("DEALLOCATE PREPARE a1").await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            let query = connection.query("DEALLOCATE PREPARE a1").await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
 
-        assert_eq!(statement_names(&connection), vec!["a2"]);
+            assert_eq!(statement_names(&connection), vec!["a2"]);
+            assert!(!connection.holds_statement(b"a1"));
+            assert!(connection.holds_statement(b"a2"));
+        }
     }
 
-    #[tokio::test]
-    async fn deallocation_that_does_not_match_the_command_tag_removes_nothing() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["a1", "a2"]).await;
+    both_configs! {
+        async fn deallocation_that_does_not_match_the_command_tag_removes_nothing(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1", "a2"]).await;
 
-        // Proxy queued DEALLOCATE a1 and DEALLOCATE a2, but PostgreSQL reports DEALLOCATE ALL
-        let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE ALL"))
-            .await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            // Proxy queued DEALLOCATE a1 and DEALLOCATE a2, but PostgreSQL reports DEALLOCATE ALL
+            let query = connection.query("DEALLOCATE a1; DEALLOCATE a2").await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE ALL"))
+                .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
 
-        // Out of step with PostgreSQL, so nothing is applied: keeping statements is safe
-        assert_eq!(statement_names(&connection), vec!["a1", "a2"]);
-        assert_eq!(connection.sizes().operations, 0);
+            // Out of step with PostgreSQL, so nothing is applied: keeping statements is safe
+            assert_eq!(statement_names(&connection), vec!["a1", "a2"]);
+            assert_eq!(connection.sizes().operations, 0);
+        }
     }
 
     #[tokio::test]
@@ -597,43 +710,16 @@ mod tests {
             .await;
 
         // Keeping it can only leak; removing it would let its next Bind through unencrypted
-        assert_eq!(connection.sizes().statements, 1);
+        assert_eq!(connection.sizes().prepared_statements, 1);
     }
 
-    #[tokio::test]
-    async fn extended_protocol_sql_deallocate_retains_nothing() {
-        let mut connection = Connection::new();
-        let mut after_first = None;
-        for i in 0..ITERATIONS {
-            let name = format!("_pg3_{i}");
-            let parse = connection.parse_named(name.clone()).await;
-            let sync = connection.client(FrontendMessage::Sync).await;
-            connection
-                .server(parse, BackendMessage::ParseComplete)
-                .await;
-            connection
-                .server(sync, ready(TransactionStatus::Idle))
-                .await;
-
-            connection
-                .extended(format!("DEALLOCATE {name}"), b"DEALLOCATE")
-                .await;
-            after_first.get_or_insert_with(|| connection.sizes());
-        }
-        // Only the unnamed statement holding the last DEALLOCATE remains
-        assert_eq!(connection.sizes(), after_first.unwrap());
-        assert_eq!(connection.sizes().statement_operations, 1);
-    }
-
-    #[tokio::test]
-    async fn extended_protocol_deallocate_all_and_discard_all_retain_nothing() {
-        for (sql, tag) in [
-            ("DEALLOCATE ALL", &b"DEALLOCATE ALL"[..]),
-            ("DISCARD ALL", &b"DISCARD ALL"[..]),
-        ] {
-            let mut connection = Connection::new();
+    both_configs! {
+        async fn extended_protocol_sql_deallocate_retains_nothing(connect) {
+            let mut connection = connect();
+            let mut after_first = None;
             for i in 0..ITERATIONS {
-                let parse = connection.parse_named(format!("a{i}")).await;
+                let name = format!("_pg3_{i}");
+                let parse = connection.parse_named(name.clone()).await;
                 let sync = connection.client(FrontendMessage::Sync).await;
                 connection
                     .server(parse, BackendMessage::ParseComplete)
@@ -641,246 +727,336 @@ mod tests {
                 connection
                     .server(sync, ready(TransactionStatus::Idle))
                     .await;
-            }
 
-            let tag = Bytes::copy_from_slice(tag);
-            let parse = connection.parse_sql(b"", sql.to_owned()).await;
-            let bind = connection.bind(Bytes::new(), Bytes::new()).await;
-            let execute = connection.execute(Bytes::new()).await;
+                connection
+                    .extended(format!("DEALLOCATE {name}"), b"DEALLOCATE")
+                    .await;
+                after_first.get_or_insert_with(|| connection.sizes());
+            }
+            // Only the unnamed statement holding the last DEALLOCATE remains
+            assert_eq!(connection.sizes(), after_first.unwrap());
+            assert_eq!(connection.sizes().prepared_statements, 1);
+        }
+    }
+
+    both_configs! {
+        async fn extended_protocol_deallocate_all_and_discard_all_retain_nothing(connect) {
+            for (sql, tag) in [
+                ("DEALLOCATE ALL", &b"DEALLOCATE ALL"[..]),
+                ("DISCARD ALL", &b"DISCARD ALL"[..]),
+            ] {
+                let mut connection = connect();
+                for i in 0..ITERATIONS {
+                    let parse = connection.parse_named(format!("a{i}")).await;
+                    let sync = connection.client(FrontendMessage::Sync).await;
+                    connection
+                        .server(parse, BackendMessage::ParseComplete)
+                        .await;
+                    connection
+                        .server(sync, ready(TransactionStatus::Idle))
+                        .await;
+                }
+
+                let tag = Bytes::copy_from_slice(tag);
+                let parse = connection.parse_sql(b"", sql.to_owned()).await;
+                let bind = connection.bind(Bytes::new(), Bytes::new()).await;
+                let execute = connection.execute(Bytes::new()).await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection
+                    .server(execute, BackendMessage::CommandComplete(tag))
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+
+                // Only the unnamed statement that ran the deallocation remains
+                assert_eq!(connection.sizes().prepared_statements, 1, "{sql}");
+                assert_eq!(connection.sizes().portals, 0, "{sql}");
+            }
+        }
+    }
+
+    both_configs! {
+        async fn sql_deallocate_all_keeps_the_unnamed_statement(connect) {
+            let mut connection = connect();
+            let unnamed = connection.parse(b"").await;
+            let named = connection.parse(b"a1").await;
             let sync = connection.client(FrontendMessage::Sync).await;
             connection
-                .server(parse, BackendMessage::ParseComplete)
+                .server(unnamed, BackendMessage::ParseComplete)
                 .await;
-            connection.server(bind, BackendMessage::BindComplete).await;
             connection
-                .server(execute, BackendMessage::CommandComplete(tag))
+                .server(named, BackendMessage::ParseComplete)
                 .await;
             connection
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
-            // Only the unnamed statement that ran the deallocation remains
-            assert_eq!(connection.sizes().statement_operations, 1, "{sql}");
-            assert_eq!(connection.sizes().statement_metrics_scopes, 1, "{sql}");
-            assert_eq!(connection.sizes().portals, 0, "{sql}");
+            let query = connection.query("DEALLOCATE ALL").await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE ALL"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.holds_statement(b""));
+            assert!(!connection.holds_statement(b"a1"));
         }
     }
 
-    #[tokio::test]
-    async fn sql_deallocate_all_keeps_the_unnamed_statement() {
-        let mut connection = Connection::new();
-        let unnamed = connection.parse(b"").await;
-        let named = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(unnamed, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(named, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+    both_configs! {
+        async fn failed_sql_deallocate_keeps_the_statement(connect) {
+            let mut connection = connect();
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::InTransaction))
+                .await;
 
-        let query = connection.query("DEALLOCATE ALL").await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE ALL"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
+            // DEALLOCATE inside a failed transaction
+            let query = connection.query("DEALLOCATE a1").await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::FailedTransaction))
+                .await;
 
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&Bytes::new())
-            .unwrap()
-            .is_some());
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&Bytes::from_static(b"a1"))
-            .unwrap()
-            .is_none());
+            assert!(connection.holds_statement(b"a1"));
+            assert_eq!(connection.sizes().operations, 0);
+        }
     }
 
-    #[tokio::test]
-    async fn failed_sql_deallocate_keeps_the_statement() {
-        let mut connection = Connection::new();
-        let parse = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::InTransaction))
-            .await;
+    both_configs! {
+        async fn sql_deallocate_keeps_a_statement_prepared_after_it(connect) {
+            let mut connection = connect();
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        // DEALLOCATE inside a failed transaction
-        let query = connection.query("DEALLOCATE a1").await;
-        connection.server(query, error()).await;
-        connection
-            .server(query, ready(TransactionStatus::FailedTransaction))
-            .await;
+            let query = connection.query("DEALLOCATE a1").await;
+            // The client prepares the name again before PostgreSQL confirms the DEALLOCATE
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
 
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&Bytes::from_static(b"a1"))
-            .unwrap()
-            .is_some());
-        assert_eq!(connection.sizes().operations, 0);
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(connection.holds_statement(b"a1"));
+        }
     }
 
-    #[tokio::test]
-    async fn sql_deallocate_keeps_a_statement_prepared_after_it() {
-        let mut connection = Connection::new();
-        let parse = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+    both_configs! {
+        async fn failed_parse_after_sql_deallocate_does_not_restore_the_statement(connect) {
+            let mut connection = connect();
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        let query = connection.query("DEALLOCATE a1").await;
-        // The client prepares the name again before PostgreSQL confirms the DEALLOCATE
-        let parse = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
+            let query = connection.query("DEALLOCATE a1").await;
+            // The client prepares the name again before PostgreSQL confirms the DEALLOCATE,
+            // and PostgreSQL rejects that Parse
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
 
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+            connection.server(parse, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&Bytes::from_static(b"a1"))
-            .unwrap()
-            .is_some());
+            // PostgreSQL has no statement `a1`, so Proxy must not restore the deallocated one
+            assert!(!connection.holds_statement(b"a1"));
+            assert_eq!(connection.sizes().settings_statements, 0);
+            assert_eq!(connection.sizes().prepared_statements, 0);
+        }
     }
 
-    #[tokio::test]
-    async fn failed_parse_after_sql_deallocate_does_not_restore_the_statement() {
-        let mut connection = Connection::new();
-        let parse = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+    both_configs! {
+        async fn failed_close_keeps_the_statement_releasable_by_sql_deallocate(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["s1"]).await;
 
-        let query = connection.query("DEALLOCATE a1").await;
-        // The client prepares the name again before PostgreSQL confirms the DEALLOCATE,
-        // and PostgreSQL rejects that Parse
-        let parse = connection.parse(b"a1").await;
-        let sync = connection.client(FrontendMessage::Sync).await;
+            // An earlier message in the batch fails, so PostgreSQL skips the Close and keeps `s1`
+            let parse = connection.parse(b"z").await;
+            connection
+                .client(FrontendMessage::Close(Close {
+                    target: DescribeTarget::Statement,
+                    name: Bytes::from_static(b"s1"),
+                }))
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(parse, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
-        connection.server(parse, error()).await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+            assert!(connection.holds_statement(b"s1"));
 
-        // PostgreSQL has no statement `a1`, so Proxy must not restore the deallocated one
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&Bytes::from_static(b"a1"))
-            .unwrap()
-            .is_none());
-        assert_eq!(connection.sizes().settings_statements, 0);
-        assert_eq!(connection.sizes().statement_operations, 0);
+            let query = connection.query("DEALLOCATE s1").await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+            // Released with the statement, not leaked for the life of the connection
+            assert!(!connection.holds_statement(b"s1"));
+            assert_eq!(statement_names(&connection), Vec::<String>::new());
+        }
     }
 
-    #[tokio::test]
-    async fn failed_close_keeps_the_statement_releasable_by_sql_deallocate() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["s1"]).await;
+    both_configs! {
+        async fn failed_reparse_keeps_the_deallocation_of_the_retained_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["x"]).await;
+            let parse = connection.parse_sql(b"d", "DEALLOCATE x".to_owned()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        // An earlier message in the batch fails, so PostgreSQL skips the Close and keeps `s1`
-        let parse = connection.parse(b"z").await;
-        connection
-            .client(FrontendMessage::Close(Close {
-                target: DescribeTarget::Statement,
-                name: Bytes::from_static(b"s1"),
-            }))
-            .await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection.server(parse, error()).await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+            // PostgreSQL rejects a second Parse of `d` and keeps the first
+            let parse = connection.parse_sql(b"d", "SELECT 1".to_owned()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(parse, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
 
-        let s1 = Bytes::from_static(b"s1");
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&s1)
-            .unwrap()
-            .is_some());
-
-        let query = connection.query("DEALLOCATE s1").await;
-        connection
-            .server(query, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(query, ready(TransactionStatus::Idle))
-            .await;
-        // Released with the statement, not leaked for the life of the connection
-        assert!(connection
-            .context
-            .test_statement_metrics_scope(&s1)
-            .unwrap()
-            .is_none());
-        assert_eq!(statement_names(&connection), Vec::<String>::new());
+            let bind = connection
+                .bind(Bytes::from_static(b"d"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            assert_eq!(statement_names(&connection), vec!["d".to_owned()]);
+        }
     }
 
-    #[tokio::test]
-    async fn failed_reparse_keeps_the_deallocation_of_the_retained_statement() {
-        let mut connection = Connection::new();
-        prepare(&mut connection, &["x"]).await;
-        let parse = connection.parse_sql(b"d", "DEALLOCATE x".to_owned()).await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection
-            .server(parse, BackendMessage::ParseComplete)
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+    fn bind_message(statement: &'static [u8]) -> FrontendMessage {
+        FrontendMessage::Bind(Bind {
+            portal: Bytes::new(),
+            statement: Bytes::from_static(statement),
+            parameter_formats: vec![],
+            parameters: vec![],
+            result_formats: vec![],
+        })
+    }
 
-        // PostgreSQL rejects a second Parse of `d` and keeps the first
-        let parse = connection.parse_sql(b"d", "SELECT 1".to_owned()).await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection.server(parse, error()).await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
+    both_configs! {
+        async fn bind_to_a_statement_proxy_did_not_see_prepared_fails_closed(connect) {
+            let mut connection = connect();
 
-        let bind = connection
-            .bind(Bytes::from_static(b"d"), Bytes::new())
-            .await;
-        let execute = connection.execute(Bytes::new()).await;
-        let sync = connection.client(FrontendMessage::Sync).await;
-        connection.server(bind, BackendMessage::BindComplete).await;
-        connection
-            .server(execute, command_complete(b"DEALLOCATE"))
-            .await;
-        connection
-            .server(sync, ready(TransactionStatus::Idle))
-            .await;
-        assert_eq!(statement_names(&connection), vec!["d".to_owned()]);
+            let (bind, output) = connection.client_output(bind_message(b"missing")).await;
+            connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+
+            // Proxy cannot tell whether the statement needs encryption, so its values never
+            // reach PostgreSQL under that name
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_ne!(forwarded.statement, Bytes::from_static(b"missing"));
+
+            // PostgreSQL rejects the redirected Bind, and the client sees Proxy's error
+            let output = connection.server(bind, error()).await;
+            let BackendMiddlewareOutput::Forward(BackendMessage::ErrorResponse(response)) = output
+            else {
+                panic!("expected an ErrorResponse, got {output:?}");
+            };
+            let code = response.fields.iter().find(|field| field.code == b'C').unwrap();
+            assert_eq!(code.value, Bytes::from_static(b"26000"));
+            let message = response.fields.iter().find(|field| field.code == b'M').unwrap();
+            let expected = crate::error::MappingError::UnknownPreparedStatement {
+                name: "missing".to_owned(),
+            };
+            assert_eq!(message.value, Bytes::from(expected.to_string()));
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // The connection stays usable
+            prepare(&mut connection, &["a1"]).await;
+            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_eq!(forwarded.statement, Bytes::from_static(b"a1"));
+        }
+    }
+
+    both_configs! {
+        async fn statements_prepared_while_mapping_is_disabled_stay_prepared_after_it_is_enabled(connect) {
+            let mut connection = connect();
+            for (sql, prepared) in [
+                ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", Some("a1")),
+                ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", None),
+            ] {
+                let query = connection.query(sql).await;
+                connection.server(query, command_complete(b"SET")).await;
+                connection
+                    .server(query, ready(TransactionStatus::Idle))
+                    .await;
+                if let Some(name) = prepared {
+                    prepare(&mut connection, &[name]).await;
+                }
+            }
+
+            // Every Parse records its name, also while mapping is disabled
+            assert!(connection
+                .context
+                .is_prepared(&Bytes::from_static(b"a1"))
+                .unwrap());
+
+            // The Bind is still refused, because the statement was prepared under different
+            // effective settings
+            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_ne!(forwarded.statement, Bytes::from_static(b"a1"));
+        }
     }
 
     #[test]
@@ -972,6 +1148,7 @@ mod tests {
             connection.execute_prepared(b"disable", b"SET").await;
             connection.simple("DISCARD ALL", b"DISCARD ALL").await;
             assert!(!connection.context.unsafe_disable_mapping().unwrap());
+            assert_eq!(connection.sizes().prepared_statements, 0);
 
             connection
                 .prepare(b"disable", "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
@@ -1375,6 +1552,7 @@ mod tests {
                     .server(sync, ready(TransactionStatus::Idle))
                     .await;
             }
+            assert_eq!(connection.sizes().prepared_statements, 0);
         }
 
         #[tokio::test]

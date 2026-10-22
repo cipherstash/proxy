@@ -29,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   Compatibility note: before upgrading, check that applications do not send these forms.
 
+- **Statements created with SQL `PREPARE` cannot be bound through the extended protocol**: Proxy now refuses a Bind that names a statement it saw no Parse for, with PostgreSQL's `26000` error. A statement created with SQL `PREPARE` and then bound with a protocol-level Bind is refused, where it previously ran with its values sent as they were. Prepare such statements with Parse instead, or run them with SQL `EXECUTE`. See [Unknown prepared statement](docs/errors.md#mapping-unknown-prepared-statement).
+
+  Compatibility note: before upgrading, check that applications and drivers do not bind statements created with SQL `PREPARE`.
+
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
@@ -62,6 +66,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Keyset and mapping settings no longer cross between clients of a session-mode pooler**: PgBouncer sends `DISCARD ALL` before giving a pooled connection to a new client in session mode, and Proxy now honours it, as described in "Connection settings after a pool reset" under Fixed. Previously the next client inherited the previous client's keyset or disabled mapping, so in multitenant deployments one tenant's keyset could be used for another tenant's queries. A session-level `SET CIPHERSTASH.KEYSET_*` remains unsafe behind a transaction-mode pooler and behind PgCat; use `SET LOCAL` there. See [Connection poolers](docs/reference/connection-poolers.md).
 
 - **`SET LOCAL CIPHERSTASH.*` is no longer promoted to the whole connection**: Proxy ignored the `LOCAL` modifier and kept the value for the rest of the connection. It now ends with the transaction. Applications that relied on a `SET LOCAL` keyset persisting after `COMMIT` must use `SET` instead.
+
+- **Bind to a statement Proxy did not see prepared**: Proxy now refuses a Bind that names a prepared statement it has no Parse for on the connection, with PostgreSQL's own `26000` error, and the connection stays open. Proxy keeps encryption details only for statements that touch encrypted columns, so before this change it could not tell an unknown statement from a plaintext one and sent the bound values as they were. This includes statements created with SQL `PREPARE` and then bound through the extended protocol; prepare them with Parse instead. The check does not apply while mapping is disabled. See [Unknown prepared statement](docs/errors.md#mapping-unknown-prepared-statement).
+
+- **Short encryption results**: Proxy now refuses a statement when the encryption service returns fewer values than it was given, instead of sending the unmatched parameters unencrypted. See [Encryption result count mismatch](docs/errors.md#encrypt-result-count-mismatch).
 
 - **Updated PostgreSQL client library**: Proxy is now built against `tokio-postgres` 0.7.18, which resolves [GHSA-3gjw-f78c-vvpw](https://github.com/advisories/GHSA-3gjw-f78c-vvpw). No configuration change is required.
 
