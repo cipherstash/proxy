@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792630808181,
+  "lastUpdate": 1792631741706,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28090,6 +28090,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.445729,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bf4e4633f0a8b2cf6b376e59141c8267f2b5d83c",
+          "message": "Merge pull request #476 from cipherstash/claude/project-thread-i1no80\n\nConsolidate prepared statement state and fail closed on unknown statements",
+          "timestamp": "2026-10-22T12:09:25+11:00",
+          "tree_id": "eeacdfb814208254f0927993c93ca1b1aea37065",
+          "url": "https://github.com/cipherstash/proxy/commit/bf4e4633f0a8b2cf6b376e59141c8267f2b5d83c"
+        },
+        "date": 1792631740155,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.140008,
             "unit": "Number"
           }
         ]
