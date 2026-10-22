@@ -1,0 +1,14 @@
+{
+  "name": "cipherstash-proxy-specs",
+  "private": true,
+  "description": "Quint models of CipherStash Proxy behaviour",
+  "scripts": {
+    "check": "./check.sh basic",
+    "check:tlc": "./check.sh tlc",
+    "check:mutations": "./check.sh mutations",
+    "check:all": "./check.sh all"
+  },
+  "devDependencies": {
+    "@informalsystems/quint": "0.33.0"
+  }
+}
