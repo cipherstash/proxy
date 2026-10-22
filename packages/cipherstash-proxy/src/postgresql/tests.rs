@@ -1349,20 +1349,32 @@ mod settings_transactions {
         connection.client(bind("", "")).await;
         connection.client(execute("")).await;
         connection.client(sync()).await;
-        assert!(connection.context.projected_settings().unsafe_disable_mapping());
+        assert!(connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
 
         connection.server(parse_complete()).await;
         connection.server(bind_complete()).await;
         connection.server(command_complete("SELECT 1")).await;
-        assert!(connection.context.projected_settings().unsafe_disable_mapping());
+        assert!(connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
 
         // PostgreSQL skips the SET
         connection.server(parse_complete()).await;
         connection.server(bind_complete()).await;
         connection.server(error()).await;
-        assert!(!connection.context.projected_settings().unsafe_disable_mapping());
+        assert!(!connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
         connection.server(ready(b'I')).await;
-        assert!(!connection.context.projected_settings().unsafe_disable_mapping());
+        assert!(!connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
     }
 }
