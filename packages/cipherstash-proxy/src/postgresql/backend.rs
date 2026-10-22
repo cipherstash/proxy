@@ -200,11 +200,15 @@ where
             match code.into() {
                 BackendCode::CommandComplete
                 | BackendCode::EmptyQueryResponse
-                | BackendCode::PortalSuspended
-                | BackendCode::ErrorResponse => {
+                | BackendCode::PortalSuspended => {
                     self.context.complete_execution();
                     self.context.finish_session();
                     self.command_completed(completed);
+                }
+                BackendCode::ErrorResponse => {
+                    self.context.complete_execution();
+                    self.context.finish_session();
+                    self.context.settings_failed();
                 }
                 _ => {}
             }
@@ -258,6 +262,7 @@ where
 
                 self.context.complete_execution();
                 self.context.finish_session();
+                self.context.settings_failed();
             }
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
@@ -370,14 +375,13 @@ where
         Ok(())
     }
 
-    /// Apply the SQL deallocation or settings reset that a `CommandComplete` confirms
+    /// Apply the SQL deallocation or settings command that a `CommandComplete`,
+    /// `EmptyQueryResponse` or `PortalSuspended` confirms
     fn command_completed(&mut self, completed: CompletedCommand) {
         if completed.deallocation {
             self.context.complete_deallocation();
         }
-        if completed.settings_reset {
-            self.context.complete_settings_reset();
-        }
+        self.context.settings_completed(&completed.tag);
     }
 
     ///
@@ -768,27 +772,25 @@ fn is_deallocation(bytes: &BytesMut) -> bool {
 }
 
 /// What a `CommandComplete` confirms, read before the message is forwarded
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct CompletedCommand {
     deallocation: bool,
-    settings_reset: bool,
+    /// The `CommandComplete` tag, empty for any other message
+    tag: String,
 }
 
 impl From<&BytesMut> for CompletedCommand {
     fn from(bytes: &BytesMut) -> Self {
+        let tag = if bytes.first() == Some(&b'C') {
+            String::from_utf8_lossy(command_tag(bytes)).into_owned()
+        } else {
+            String::new()
+        };
         CompletedCommand {
             deallocation: is_deallocation(bytes),
-            settings_reset: is_settings_reset(bytes),
+            tag,
         }
     }
-}
-
-/// Whether a `CommandComplete` confirms a `RESET`, `SET` or `DISCARD ALL`
-fn is_settings_reset(bytes: &BytesMut) -> bool {
-    if bytes.first() != Some(&b'C') {
-        return false;
-    }
-    matches!(command_tag(bytes), b"RESET" | b"SET" | b"DISCARD ALL")
 }
 
 /// The transaction status (`I`, `T` or `E`) of a `ReadyForQuery` message
@@ -1045,15 +1047,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_reset_command_tags() {
-        assert!(super::is_settings_reset(&command_complete("RESET")));
-        assert!(super::is_settings_reset(&command_complete("SET")));
-        assert!(super::is_settings_reset(&command_complete("DISCARD ALL")));
-        assert!(!super::is_settings_reset(&command_complete(
-            "DISCARD PLANS"
-        )));
-        assert!(!super::is_settings_reset(&command_complete("SELECT 1")));
-        assert!(!super::is_settings_reset(&error_response_bytes()));
+    fn completed_command_tags() {
+        assert_eq!(
+            CompletedCommand::from(&command_complete("ROLLBACK")).tag,
+            "ROLLBACK"
+        );
+        assert_eq!(CompletedCommand::from(&command_complete("SET")).tag, "SET");
+        assert_eq!(CompletedCommand::from(&error_response_bytes()).tag, "");
+        assert_eq!(CompletedCommand::from(&portal_suspended_bytes()).tag, "");
     }
 
     #[test]

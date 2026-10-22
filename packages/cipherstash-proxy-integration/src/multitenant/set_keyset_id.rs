@@ -12,6 +12,105 @@ mod tests {
     };
     use uuid::Uuid;
 
+    /// Pipelined SET LOCAL must be applied before the dependent Bind is encrypted,
+    /// so ciphertext and search terms use the transaction's local keyset.
+    #[tokio::test]
+    async fn pipelined_set_local_encrypts_bound_parameters_with_the_local_keyset() {
+        trace();
+        clear().await;
+
+        let local_keyset = std::env::var("CS_TENANT_KEYSET_ID_2")
+            .map(|s| Uuid::parse_str(&s).unwrap())
+            .unwrap();
+        // This session value is deliberately unavailable. If Bind used it instead of the
+        // SET LOCAL sent before it, encryption would fail.
+        let session_keyset = Uuid::new_v4();
+        assert_ne!(session_keyset, local_keyset);
+        let client = connect_with_tls(PROXY).await;
+        client
+            .batch_execute(&format!("SET CIPHERSTASH.KEYSET_ID = '{session_keyset}'"))
+            .await
+            .unwrap();
+        let begin = client.prepare("BEGIN").await.unwrap();
+        let local = client
+            .prepare(&format!(
+                "SET LOCAL CIPHERSTASH.KEYSET_ID = '{local_keyset}'"
+            ))
+            .await
+            .unwrap();
+        let insert = client
+            .prepare("INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)")
+            .await
+            .unwrap();
+        let id = random_id();
+        let value = 4922_i32;
+        let params: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[&id, &value];
+
+        // Each future is polled in wire order before any response is awaited.
+        // Prepared inputs ensure the dependent request already contains Bind.
+        let (began, changed, inserted) = tokio::join!(
+            biased;
+            client.execute(&begin, &[]),
+            client.execute(&local, &[]),
+            client.execute(&insert, params),
+        );
+        began.unwrap();
+        changed.unwrap();
+        assert_eq!(inserted.unwrap(), 1);
+        client.batch_execute("COMMIT").await.unwrap();
+
+        // A fresh connection must match the local tenant's encrypted search
+        // terms and decrypt the value, independently of the writer's state.
+        let reader = connect_with_tls(PROXY).await;
+        reader
+            .batch_execute(&format!("SET CIPHERSTASH.KEYSET_ID = '{local_keyset}'"))
+            .await
+            .unwrap();
+        let row = reader
+            .query_one(
+                "SELECT encrypted_int4 FROM encrypted WHERE id = $1 AND encrypted_int4 = $2",
+                &[&id, &value],
+            )
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, i32>(0), value);
+    }
+
+    /// A keyset selected earlier in a simple query encrypts the literals after it, and the
+    /// SET still reaches PostgreSQL when Proxy rewrites the query.
+    #[tokio::test]
+    async fn set_keyset_id_and_insert_in_one_simple_query() {
+        trace();
+        clear().await;
+
+        let keyset = std::env::var("CS_TENANT_KEYSET_ID_1")
+            .map(|s| Uuid::parse_str(&s).unwrap())
+            .unwrap();
+        let id = random_id();
+        let value = 5073_i32;
+
+        let client = connect_with_tls(PROXY).await;
+        client
+            .simple_query(&format!(
+                "SET CIPHERSTASH.KEYSET_ID = '{keyset}'; \
+                 INSERT INTO encrypted (id, encrypted_int4) VALUES ({id}, {value})"
+            ))
+            .await
+            .unwrap();
+
+        let shown = simple_query_with_client::<String>("SHOW cipherstash.keyset_id", &client).await;
+        assert_eq!(shown, vec![keyset.to_string()]);
+
+        let row = client
+            .query_one(
+                "SELECT encrypted_int4 FROM encrypted WHERE id = $1 AND encrypted_int4 = $2",
+                &[&id, &value],
+            )
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, i32>(0), value);
+    }
+
     ///
     /// Tests that the `SET CIPHERSTASH.KEYSET_ID = 'keyset_id'` command is handled correctly
     ///
@@ -412,5 +511,66 @@ mod tests {
             let result = client.query(insert_sql, &[&random_id(), &1]).await;
             assert!(result.is_err(), "{reset}");
         }
+    }
+
+    ///
+    /// Tests that the keyset follows PostgreSQL's transactions: a reset in a rolled-back
+    /// transaction keeps the keyset, and a rolled-back `SET` is undone.
+    /// Test both extended and simple query protocols
+    ///
+    #[tokio::test]
+    async fn rolled_back_keyset_changes_are_undone() {
+        trace();
+        clear().await;
+
+        let tenant_keyset_id_1 = std::env::var("CS_TENANT_KEYSET_ID_1")
+            .map(|s| Uuid::parse_str(&s).unwrap())
+            .unwrap();
+
+        let insert_sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
+        let set_sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
+
+        let client = connect_with_tls(PROXY).await;
+        client.simple_query(&set_sql).await.unwrap();
+
+        for reset in [
+            "RESET ALL",
+            "RESET CIPHERSTASH.KEYSET_ID",
+            "SET CIPHERSTASH.KEYSET_ID TO DEFAULT",
+        ] {
+            // Simple query
+            client.simple_query("BEGIN").await.unwrap();
+            client.simple_query(reset).await.unwrap();
+            client.simple_query("ROLLBACK").await.unwrap();
+
+            // The keyset is still selected
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_ok(), "{reset}");
+
+            // Extended query
+            client.execute("BEGIN", &[]).await.unwrap();
+            client.execute(reset, &[]).await.unwrap();
+            client.execute("ROLLBACK", &[]).await.unwrap();
+
+            let result = client.query(insert_sql, &[&random_id(), &1]).await;
+            assert!(result.is_ok(), "{reset}");
+        }
+
+        client.simple_query("RESET ALL").await.unwrap();
+
+        // DEFAULT_KEYSET_ID IS DISABLED FOR THIS TEST, SO A ROLLED-BACK SET LEAVES NO KEYSET
+        client.simple_query("BEGIN").await.unwrap();
+        client.simple_query(&set_sql).await.unwrap();
+        client.simple_query("ROLLBACK").await.unwrap();
+
+        let result = client.query(insert_sql, &[&random_id(), &1]).await;
+        assert!(result.is_err());
+
+        client.execute("BEGIN", &[]).await.unwrap();
+        client.execute(&set_sql, &[]).await.unwrap();
+        client.execute("ROLLBACK", &[]).await.unwrap();
+
+        let result = client.query(insert_sql, &[&random_id(), &1]).await;
+        assert!(result.is_err());
     }
 }

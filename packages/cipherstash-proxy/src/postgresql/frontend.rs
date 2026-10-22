@@ -1,5 +1,8 @@
 use super::context::phase_timing::PhaseTimer;
-use super::context::{Context, Deallocation, SessionId, SettingsReset, Statement};
+use super::context::{
+    ConnectionSettings, Context, Deallocation, KeysetIdentifier, SessionId, SettingChange,
+    SettingsCommand, Statement,
+};
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
@@ -7,7 +10,7 @@ use super::messages::execute::Execute;
 use super::messages::parse::Parse;
 use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
-use super::parser::{ResetStatement, SqlParser};
+use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
@@ -103,9 +106,9 @@ where
     error_state: Option<ErrorState>,
     /// SQL deallocations in the simple `Query` being handled, queued once it is forwarded
     deallocations: Vec<Deallocation>,
-    /// Settings resets in the simple `Query` being handled, each with the settings change
-    /// counts at its position, queued once it is forwarded
-    settings_resets: Vec<(SettingsReset, (u64, u64))>,
+    /// Settings commands of the statements in the simple `Query` being handled, queued once it
+    /// is forwarded
+    settings_commands: Vec<SettingsCommand>,
 }
 
 #[derive(Debug)]
@@ -138,7 +141,7 @@ where
             context,
             error_state: None,
             deallocations: vec![],
-            settings_resets: vec![],
+            settings_commands: vec![],
         }
     }
 
@@ -201,10 +204,10 @@ where
             Code::Query => {
                 let result = self.query_handler(&bytes).await;
                 let deallocations = std::mem::take(&mut self.deallocations);
-                let settings_resets = std::mem::take(&mut self.settings_resets);
+                let settings_commands = std::mem::take(&mut self.settings_commands);
                 if result.is_ok() {
                     self.context.add_deallocations(deallocations);
-                    self.context.add_settings_resets_at(settings_resets);
+                    self.context.add_settings_commands(settings_commands);
                 }
                 match result {
                     Ok(Some(mapped)) => bytes = mapped,
@@ -430,11 +433,14 @@ where
                 let Some(resets) = SqlParser::parse_resets(&query.statement) else {
                     return Err(err);
                 };
-                let changes = self.context.settings_change_counts();
-                self.settings_resets = resets
+                self.settings_commands = resets
                     .iter()
-                    .map(|reset| (to_settings_reset(reset), changes))
-                    .collect();
+                    .map(|reset| {
+                        Ok(SettingChange::from_reset(reset)?
+                            .map(SettingsCommand::Change)
+                            .unwrap_or(SettingsCommand::Other))
+                    })
+                    .collect::<Result<_, Error>>()?;
                 self.context
                     .record_parse_duration(session_id, parse_timer.elapsed());
                 self.context.update_statement_metadata(session_id, |m| {
@@ -453,10 +459,17 @@ where
             .iter()
             .filter_map(to_deallocation)
             .collect();
-        // Each reset is queued with the change counts at its position, so it undoes the SETs
-        // before it in the Query but not those after it
-        let statement_resets = to_statement_resets(&parsed_statements);
-        self.settings_resets.clear();
+        // The settings each statement runs with: those PostgreSQL will have once the commands
+        // sent before it succeed. If one fails, PostgreSQL skips the rest of the Query.
+        let mut settings = self.context.projected_settings();
+        let mut statement_settings = Vec::with_capacity(parsed_statements.len());
+        self.settings_commands = Vec::with_capacity(parsed_statements.len());
+        for statement in &parsed_statements {
+            let command = self.settings_command(statement, &settings)?;
+            settings.project(&command);
+            statement_settings.push((settings.unsafe_disable_mapping(), settings.keyset()));
+            self.settings_commands.push(command);
+        }
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -468,30 +481,23 @@ where
         let mut encrypted = false;
         let mut parse_duration_recorded = false;
 
-        for (index, statement) in parsed_statements.iter().enumerate() {
-            self.push_settings_resets(&statement_resets[index..=index]);
-            if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(statement)
-            {
-                warn!(
-                    msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
-                    mapping_disabled
-                );
-            }
-
-            if self.context.unsafe_disable_mapping() {
-                self.record_keyset_while_mapping_disabled(statement)?;
+        for (statement, (mapping_disabled, keyset)) in
+            parsed_statements.iter().zip(statement_settings)
+        {
+            // Every statement is forwarded, so PostgreSQL answers each settings command
+            if mapping_disabled {
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                transformed_statements.push(statement.clone());
                 continue;
             }
-
-            self.handle_set_keyset(statement)?;
 
             self.check_for_schema_change(statement);
 
             if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                transformed_statements.push(statement.clone());
                 continue;
             }
 
@@ -501,19 +507,8 @@ where
                     if self.context.mapping_errors_enabled() {
                         return Err(err);
                     } else {
-                        // The Query is forwarded unchanged, so the SETs and resets after this
-                        // statement still run, in order
-                        for (later, statement) in
-                            parsed_statements.iter().enumerate().skip(index + 1)
-                        {
-                            self.push_settings_resets(&statement_resets[later..=later]);
-                            self.context.maybe_set_unsafe_disable_mapping(statement);
-                            if self.context.unsafe_disable_mapping() {
-                                self.record_keyset_while_mapping_disabled(statement)?;
-                            } else {
-                                self.handle_set_keyset(statement)?;
-                            }
-                        }
+                        // The Query is forwarded unchanged, so the settings commands after
+                        // this statement still run, in order
                         return Ok(None);
                     };
                 }
@@ -537,6 +532,7 @@ where
                         let encrypted_literals = self
                             .encrypt_literals(
                                 session_id,
+                                keyset.clone(),
                                 &typed_statement,
                                 &statement.literal_columns,
                             )
@@ -668,6 +664,7 @@ where
     async fn encrypt_literals(
         &mut self,
         session_id: SessionId,
+        keyset_id: Option<KeysetIdentifier>,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
@@ -686,7 +683,7 @@ where
 
         let encrypted = self
             .context
-            .encrypt(plaintexts, literal_columns)
+            .encrypt(keyset_id, plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -829,12 +826,13 @@ where
                 let Some([reset]) = resets.as_deref() else {
                     return Err(err);
                 };
+                let command = SettingChange::from_reset(reset)?
+                    .map(SettingsCommand::Change)
+                    .unwrap_or(SettingsCommand::Other);
                 self.context
                     .set_statement_deallocation(message.name.to_owned(), None);
                 self.context
-                    .set_statement_setting(message.name.to_owned(), None);
-                self.context
-                    .set_statement_reset(message.name.to_owned(), Some(to_settings_reset(reset)));
+                    .set_statement_settings(message.name.to_owned(), command);
                 self.context.update_statement_metadata(session_id, |m| {
                     m.statement_type = Some(StatementType::Other);
                     m.set_query_fingerprint(&message.statement);
@@ -845,20 +843,15 @@ where
         };
         self.context
             .set_statement_deallocation(message.name.to_owned(), to_deallocation(&statement));
-        // Every `SET` is recorded, even one that resets nothing, as PostgreSQL confirms each
-        // executed `SET` with the same tag and a reset later in the batch must wait for its own
+        // A settings command takes effect each time the statement is executed and PostgreSQL
+        // confirms it, as PostgreSQL only prepares it here. A SET Proxy would refuse is refused
+        // now.
+        let settings = self.context.projected_settings();
+        let command = self.settings_command(&statement, &settings)?;
         self.context
-            .set_statement_reset(message.name.to_owned(), to_statement_reset(&statement));
-        self.context.set_statement_setting(
-            message.name.to_owned(),
-            is_cipherstash_set(&statement).then(|| statement.clone()),
-        );
-        // A `SET CIPHERSTASH.<setting>` takes effect when it is executed, see
-        // `apply_statement_setting`, as PostgreSQL only prepares it here. A keyset SET Proxy would
-        // refuse then is refused now, as before.
-        self.check_set_keyset(&statement)?;
+            .set_statement_settings(message.name.to_owned(), command);
 
-        if self.context.unsafe_disable_mapping() {
+        if settings.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -898,7 +891,12 @@ where
                     parse_duration_recorded = true;
 
                     let encrypted_literals = self
-                        .encrypt_literals(session_id, &typed_statement, &statement.literal_columns)
+                        .encrypt_literals(
+                            session_id,
+                            settings.keyset(),
+                            &typed_statement,
+                            &statement.literal_columns,
+                        )
                         .await?;
 
                     if let Some(transformed_statement) = self
@@ -968,100 +966,45 @@ where
         }
     }
 
-    /// Apply the `SET CIPHERSTASH.<setting>` of prepared statement `name` when a portal is bound
-    /// from it, as PostgreSQL applies it each time it runs and not when it is prepared. Applying
-    /// it counts as a change, so a reset sent before it does not undo it.
-    fn apply_statement_setting(&mut self, name: &Name) -> Result<(), Error> {
-        let Some(statement) = self.context.statement_setting(name) else {
-            return Ok(());
-        };
-        if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
-            warn!(
-                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
-                mapping_disabled
-            );
-        }
-        if self.context.unsafe_disable_mapping() {
-            self.record_keyset_while_mapping_disabled(&statement)?;
-        } else {
-            self.handle_set_keyset(&statement)?;
-        }
-        Ok(())
-    }
-
-    /// Refuse a `SET CIPHERSTASH.KEYSET_*` that [`Self::handle_set_keyset`] or
-    /// [`Self::record_keyset_while_mapping_disabled`] would refuse, without applying it
-    fn check_set_keyset(&self, statement: &ast::Statement) -> Result<(), Error> {
-        let default_keyset = self.context.default_keyset_id().is_some();
-        if (self.context.unsafe_disable_mapping() && default_keyset)
-            || matches!(
-                to_statement_reset(statement),
-                Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
-            )
-        {
-            return Ok(());
-        }
-        if self.context.keyset_in(statement)?.is_some() && default_keyset {
-            return Err(EncryptError::UnexpectedSetKeyset.into());
-        }
-        Ok(())
-    }
-
-    /// Queue `resets` with the settings change counts as they are now
-    fn push_settings_resets(&mut self, resets: &[Option<SettingsReset>]) {
-        let changes = self.context.settings_change_counts();
-        self.settings_resets
-            .extend(resets.iter().flatten().map(|reset| (*reset, changes)));
-    }
-
-    /// Record a `SET CIPHERSTASH.KEYSET_*` sent while mapping is disabled.
+    /// The settings command `statement` runs, given the `settings` in effect before it.
     ///
-    /// Mapping is turned back on only once PostgreSQL confirms the reset, so a keyset chosen
-    /// before then must still be kept. With a `default_keyset_id` a keyset cannot be chosen, and
-    /// the statement is passed through as before. A `KEYSET_ID` that is not a UUID is an error,
-    /// as it is with mapping enabled.
-    fn record_keyset_while_mapping_disabled(
-        &mut self,
+    /// Refuses a `SET CIPHERSTASH.*` Proxy cannot honour: an unknown setting, a value it cannot
+    /// interpret, or a keyset when Proxy is configured with a `default_keyset_id`. While mapping
+    /// is disabled, a keyset SET with a `default_keyset_id` is passed through and ignored, as
+    /// before.
+    fn settings_command(
+        &self,
         statement: &ast::Statement,
-    ) -> Result<(), Error> {
-        if self.context.default_keyset_id().is_some() {
-            return Ok(());
-        }
-        self.handle_set_keyset(statement)
-    }
-
-    ///
-    /// Handles `SET CIPHERSTASH KEYSET_*` statements
-    ///
-    /// Returns an error if `SET CIPHERSTASH KEYSET_*` is called and proxy is configured with a `default_keyset_id`
-    /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
-    ///
-    fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
-        // `SET CIPHERSTASH.KEYSET_* TO DEFAULT` is a reset, applied once PostgreSQL confirms it
-        if matches!(
-            to_statement_reset(statement),
-            Some(SettingsReset::KeysetId | SettingsReset::KeysetName)
-        ) {
-            return Ok(());
-        }
-        if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
-            debug!(client_id = self.context.client_id, ?keyset_identifier);
-
-            if self.context.default_keyset_id().is_some() {
+        settings: &ConnectionSettings,
+    ) -> Result<SettingsCommand, Error> {
+        let Some(change) = SettingChange::parse(statement)? else {
+            return Ok(SettingsCommand::from_statement(statement));
+        };
+        match &change {
+            SettingChange::Keyset(..) if self.context.default_keyset_id().is_some() => {
+                if settings.unsafe_disable_mapping() {
+                    return Ok(SettingsCommand::Other);
+                }
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
                     default_keyset_id = ?self.context.default_keyset_id(),
-                    ?keyset_identifier
+                    ?change
                 );
                 return Err(EncryptError::UnexpectedSetKeyset.into());
             }
-            info!(
+            SettingChange::Keyset(scope, keyset_identifier) => info!(
                 msg = "SET CIPHERSTASH.KEYSET",
+                ?scope,
                 keyset_identifier = keyset_identifier.to_string()
-            );
+            ),
+            SettingChange::Mapping(scope, mapping_disabled) => warn!(
+                msg = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING",
+                ?scope,
+                mapping_disabled
+            ),
+            _ => (),
         }
-
-        Ok(())
+        Ok(SettingsCommand::Change(change))
     }
 
     ///
@@ -1150,13 +1093,13 @@ where
     /// - `Ok(None)` - No parameter encryption needed, forward original message
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
-        if self.context.unsafe_disable_mapping() {
+        let settings = self.context.projected_settings();
+        if settings.unsafe_disable_mapping() {
             if let Ok(bind) = Bind::try_from(bytes) {
                 self.context
                     .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
                 self.context
-                    .bind_portal_settings_reset(&bind.portal, &bind.prepared_statement);
-                self.apply_statement_setting(&bind.prepared_statement)?;
+                    .bind_portal_settings(&bind.portal, &bind.prepared_statement);
             }
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
@@ -1168,7 +1111,7 @@ where
         self.context
             .bind_portal_deallocation(&bind.portal, &bind.prepared_statement);
         self.context
-            .bind_portal_settings_reset(&bind.portal, &bind.prepared_statement);
+            .bind_portal_settings(&bind.portal, &bind.prepared_statement);
 
         let session_id = self
             .context
@@ -1187,7 +1130,9 @@ where
             debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
             if statement.has_params() {
-                let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
+                let encrypted = self
+                    .encrypt_params(session_id, settings.keyset(), &bind, &statement)
+                    .await?;
                 bind.rewrite(encrypted)?;
             }
             if statement.has_projection() {
@@ -1203,7 +1148,6 @@ where
 
         debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
         self.context.add_portal(bind.portal.to_owned(), portal);
-        self.apply_statement_setting(&bind.prepared_statement)?;
 
         if bind.requires_rewrite() {
             let bytes = BytesMut::try_from(bind)?;
@@ -1230,6 +1174,7 @@ where
     async fn encrypt_params(
         &mut self,
         session_id: Option<SessionId>,
+        keyset_id: Option<KeysetIdentifier>,
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
@@ -1242,7 +1187,7 @@ where
 
         let encrypted = self
             .context
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt(keyset_id, plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -1374,92 +1319,6 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
         } => Some(Deallocation::AllStatements),
         _ => None,
     }
-}
-
-/// The Proxy setting a `RESET` statement returns to its startup value
-fn to_settings_reset(reset: &ResetStatement) -> SettingsReset {
-    match reset {
-        ResetStatement::All => SettingsReset::All,
-        ResetStatement::Parameter(name) => setting_reset(name),
-    }
-}
-
-/// The Proxy setting named `name`, in lower case with its parts joined with `.`, as a reset
-fn setting_reset(name: &str) -> SettingsReset {
-    match name {
-        "cipherstash.keyset_id" => SettingsReset::KeysetId,
-        "cipherstash.keyset_name" => SettingsReset::KeysetName,
-        "cipherstash.unsafe_disable_mapping" => SettingsReset::UnsafeDisableMapping,
-        _ => SettingsReset::Other,
-    }
-}
-
-/// The settings resets in a simple `Query`, one for each `DISCARD ALL` and `SET`, as PostgreSQL
-/// confirms each with its own `CommandComplete`. Empty if none of them resets a Proxy setting.
-fn to_statement_resets(statements: &[ast::Statement]) -> Vec<Option<SettingsReset>> {
-    let resets = statements
-        .iter()
-        .map(to_statement_reset)
-        .collect::<Vec<_>>();
-    if resets
-        .iter()
-        .flatten()
-        .all(|reset| *reset == SettingsReset::Other)
-    {
-        return vec![None; statements.len()];
-    }
-    resets
-}
-
-/// The settings reset by a `DISCARD ALL` or `SET` statement, if it is one.
-///
-/// `DISCARD ALL` resets every setting, as `RESET ALL` does, and `SET <setting> TO DEFAULT`
-/// resets that setting, as `RESET <setting>` does. Any other `SET` is `Other`.
-fn to_statement_reset(statement: &ast::Statement) -> Option<SettingsReset> {
-    match statement {
-        ast::Statement::Discard {
-            object_type: ast::DiscardObject::ALL,
-        } => Some(SettingsReset::All),
-        ast::Statement::Set(set) => Some(to_set_default_reset(set).unwrap_or(SettingsReset::Other)),
-        _ => None,
-    }
-}
-
-/// Whether `statement` is a `SET CIPHERSTASH.<setting>`, spelled as the `maybe_set_*` handlers
-/// match it
-fn is_cipherstash_set(statement: &ast::Statement) -> bool {
-    let ast::Statement::Set(ast::Set::SingleAssignment { variable, .. }) = statement else {
-        return false;
-    };
-    variable
-        .0
-        .first()
-        .and_then(|part| part.as_ident())
-        .is_some_and(|ident| ident.value == "CIPHERSTASH")
-}
-
-/// The setting a `SET <setting> TO DEFAULT` returns to its startup value
-fn to_set_default_reset(set: &ast::Set) -> Option<SettingsReset> {
-    let ast::Set::SingleAssignment {
-        variable, values, ..
-    } = set
-    else {
-        return None;
-    };
-    let [ast::Expr::Identifier(value)] = values.as_slice() else {
-        return None;
-    };
-    if value.quote_style.is_some() || !value.value.eq_ignore_ascii_case("default") {
-        return None;
-    }
-    let name = variable
-        .0
-        .iter()
-        .filter_map(|part| part.as_ident())
-        .map(|ident| ident.value.to_lowercase())
-        .collect::<Vec<_>>()
-        .join(".");
-    Some(setting_reset(&name))
 }
 
 fn literals_to_plaintext(
