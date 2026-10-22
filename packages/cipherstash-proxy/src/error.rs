@@ -107,6 +107,9 @@ pub enum MappingError {
     #[error("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL)]
     Internal(String),
 
+    #[error("The prepared statement or bound values no longer match the connection's CipherStash settings. Close the statement, then prepare and bind it again. For help visit {}#mapping-prepared-settings-changed", ERROR_DOC_BASE_URL)]
+    PreparedSettingsChanged,
+
     #[error(transparent)]
     EqlMapper(#[from] EqlMapperError),
 }
@@ -259,6 +262,15 @@ pub enum EncryptError {
         ERROR_DOC_BASE_URL
     )]
     KeysetIdCouldNotBeParsed { id: String },
+
+    #[error("Setting '{setting}' requires exactly one value. Use a quoted UUID for KEYSET_ID, a keyset name (quoted, unquoted, or numeric) for KEYSET_NAME, or DEFAULT to reset. For help visit {}#encrypt-invalid-keyset-setting-value", ERROR_DOC_BASE_URL)]
+    InvalidKeysetSettingValue { setting: String },
+
+    #[error("Setting 'CIPHERSTASH.UNSAFE_DISABLE_MAPPING' requires exactly one boolean value, such as true, false, on, off, yes, no, 1 or 0, or DEFAULT to reset. For help visit {}#encrypt-invalid-mapping-setting-value", ERROR_DOC_BASE_URL)]
+    InvalidMappingSettingValue,
+
+    #[error("Setting '{setting}' is not a CipherStash setting. Use CIPHERSTASH.KEYSET_ID, CIPHERSTASH.KEYSET_NAME or CIPHERSTASH.UNSAFE_DISABLE_MAPPING. For help visit {}#encrypt-unknown-cipherstash-setting", ERROR_DOC_BASE_URL)]
+    UnknownCipherStashSetting { setting: String },
 
     #[error(
         "Keyset Id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",

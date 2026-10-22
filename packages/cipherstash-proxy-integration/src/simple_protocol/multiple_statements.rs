@@ -2,7 +2,7 @@
 mod tests {
     use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use fake::{Fake, Faker};
-    use tokio_postgres::SimpleQueryMessage::CommandComplete;
+    use tokio_postgres::SimpleQueryMessage::{self, CommandComplete};
 
     #[tokio::test]
     async fn multiple_inserts_with_text() {
@@ -107,5 +107,36 @@ mod tests {
                 assert_eq!(encrypted_text, result);
             }
         }
+    }
+
+    /// A statement Proxy maps without rewriting it is still forwarded when another statement in
+    /// the query is rewritten.
+    #[tokio::test]
+    async fn insert_and_select_in_one_query() {
+        trace();
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+        let id = random_id();
+        let encrypted_text = Faker.fake::<String>();
+
+        let sql = format!(
+            "INSERT INTO encrypted (id, encrypted_text) VALUES ({id}, '{encrypted_text}'); \
+             SELECT encrypted_text FROM encrypted WHERE id = {id}"
+        );
+        let messages = client.simple_query(&sql).await.unwrap();
+
+        // Both statements run. Proxy does not decrypt the SELECT's row when it follows another
+        // statement in one query, so only the responses are counted.
+        let completed = messages
+            .iter()
+            .filter(|message| matches!(message, CommandComplete(_)))
+            .count();
+        let rows = messages
+            .iter()
+            .filter(|message| matches!(message, SimpleQueryMessage::Row(_)))
+            .count();
+        assert_eq!(completed, 2);
+        assert_eq!(rows, 1);
     }
 }

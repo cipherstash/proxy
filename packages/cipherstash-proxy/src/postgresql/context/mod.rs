@@ -1,9 +1,15 @@
 pub mod column;
 pub mod phase_timing;
 pub mod portal;
+pub mod settings;
 pub mod statement;
 pub mod statement_metadata;
-pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
+pub use self::{
+    phase_timing::PhaseTiming,
+    portal::Portal,
+    settings::{ConnectionSettings, EffectiveSettings, SettingChange, SettingsCommand},
+    statement::Statement,
+};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
@@ -11,7 +17,7 @@ use super::{
 };
 use crate::{
     config::TandemConfig,
-    error::{EncryptError, Error},
+    error::Error,
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -19,23 +25,22 @@ use crate::{
     },
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
+use bytes::BytesMut;
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
 use serde_json::json;
-use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, LazyLock, Mutex, RwLock,
+        Arc, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 use tracing::{debug, error, warn};
-use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
@@ -73,9 +78,12 @@ where
     schema_changed: Arc<RwLock<bool>>,
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
-    /// Shared by the frontend and backend, as the backend resets it
-    unsafe_disable_mapping: Arc<AtomicBool>,
-    keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
+    /// The `SET CIPHERSTASH.*` settings PostgreSQL has confirmed, and the commands it has not
+    /// answered yet. Shared by the frontend, which queues commands, and the backend, which
+    /// applies them as PostgreSQL answers.
+    settings: Arc<Mutex<SettingsState>>,
+    /// Notified on every `ReadyForQuery`, see [`Context::settings_barrier`]
+    batch_answered: Arc<Notify>,
     session_id_counter: Arc<AtomicU64>,
     sync_generation: Arc<AtomicU64>,
     ready_generation: Arc<AtomicU64>,
@@ -94,57 +102,115 @@ where
     statement_deallocations: Arc<RwLock<HashMap<Name, Deallocation>>>,
     /// Portals bound from one of those statements, with the generation they were bound in
     portal_deallocations: Arc<RwLock<HashMap<Name, (u64, Deallocation)>>>,
-    pending_settings_resets: Arc<RwLock<VecDeque<PendingSettingsReset>>>,
-    /// Held while a setting is changed or reset, so a reset never undoes a concurrent `SET`
-    settings_changes: Arc<Mutex<SettingsChanges>>,
-    /// Statements whose SQL is a `RESET`, `DISCARD ALL` or `SET`
-    statement_resets: Arc<RwLock<HashMap<Name, SettingsReset>>>,
+    /// Statements that change settings or end a transaction, with their settings command
+    statement_settings: Arc<RwLock<HashMap<Name, SettingsCommand>>>,
     /// Portals bound from one of those statements, with the generation they were bound in
-    portal_resets: Arc<RwLock<HashMap<Name, (u64, SettingsReset)>>>,
-    /// Statements whose SQL is a `SET CIPHERSTASH.<setting>`, applied each time they run
-    statement_settings: Arc<RwLock<HashMap<Name, sqltk::parser::ast::Statement>>>,
+    portal_settings: Arc<RwLock<HashMap<Name, (u64, SettingsCommand)>>>,
+    /// Statements Proxy maps, with the settings they were prepared under
+    prepared_settings: Arc<RwLock<HashMap<Name, PreparedSettings>>>,
+    /// Portals bound from one of those statements, with the generation they were bound in
+    bound_settings: Arc<RwLock<HashMap<Name, (u64, BoundSettings)>>>,
+    /// The errors of messages Proxy refused, see [`Context::refuse`]
+    refusals: Arc<RwLock<VecDeque<Refusal>>>,
 }
 
-/// A connection setting returned to its startup value by SQL `RESET`, `DISCARD ALL` or
-/// `SET <setting> TO DEFAULT`.
-///
-/// Applied only once PostgreSQL confirms the command with a `CommandComplete`, so that a
-/// reset that fails (for example inside a failed transaction) changes nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SettingsReset {
-    /// `DISCARD ALL` or `RESET ALL`
-    All,
-    /// `RESET CIPHERSTASH.KEYSET_ID`
-    KeysetId,
-    /// `RESET CIPHERSTASH.KEYSET_NAME`
-    KeysetName,
-    /// `RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`
-    UnsafeDisableMapping,
-    /// A `RESET` or `SET` of a setting Proxy does not keep. Queued only to keep the
-    /// `CommandComplete` tags of a batch in step with the statements that sent them.
-    Other,
-}
-
-/// A [`SettingsReset`] forwarded to PostgreSQL and waiting for its `CommandComplete`.
-#[derive(Clone, Debug)]
-struct PendingSettingsReset {
+/// A message Proxy refused, forwarded as a message that names an object that does not exist.
+#[derive(Debug)]
+struct Refusal {
     /// Generation of the batch it was sent in, see [`Context::sync_generation`]
     generation: u64,
-    reset: SettingsReset,
-    /// [`SettingsChanges::keyset`] when it was sent
-    keyset_changes: u64,
-    /// [`SettingsChanges::unsafe_disable_mapping`] when it was sent
-    unsafe_disable_mapping_changes: u64,
+    /// The name of the object that does not exist, which PostgreSQL's error names
+    name: String,
+    /// Proxy's error, sent to the client in place of PostgreSQL's
+    response: BytesMut,
 }
 
-/// How many times each connection setting has been changed with `SET CIPHERSTASH.*`.
-///
-/// A reset is applied when PostgreSQL confirms it, after the client may have sent a later
-/// `SET`. Comparing these counts keeps the reset from undoing that `SET`.
+/// The settings a statement Proxy maps was prepared under.
+#[derive(Clone, Debug)]
+struct PreparedSettings {
+    settings: EffectiveSettings,
+    /// The statement holds literals encrypted under the keyset it was prepared with
+    encrypted_literals: bool,
+}
+
+/// The settings a portal of a statement Proxy maps was bound under.
+#[derive(Clone, Debug)]
+struct BoundSettings {
+    settings: EffectiveSettings,
+    /// The portal holds values encrypted under the keyset it was bound with
+    encrypted_values: bool,
+}
+
+/// The connection's settings, and the settings commands waiting for PostgreSQL's answer.
 #[derive(Debug, Default)]
-struct SettingsChanges {
-    keyset: u64,
-    unsafe_disable_mapping: u64,
+struct SettingsState {
+    confirmed: ConnectionSettings,
+    pending: VecDeque<PendingSettings>,
+    /// [`SettingsState::projected`], kept while it stays valid, so a long pipeline does not
+    /// replay every pending command for each message
+    projected: Option<ConnectionSettings>,
+    /// Generation of the last batch with a command that may change the settings, see
+    /// [`Context::settings_barrier`]
+    barrier: Option<u64>,
+}
+
+impl SettingsState {
+    /// The confirmed settings, with every pending command assumed to succeed
+    fn projected(&mut self) -> ConnectionSettings {
+        let confirmed = &self.confirmed;
+        let pending = &self.pending;
+        self.projected
+            .get_or_insert_with(|| {
+                let mut settings = confirmed.clone();
+                for pending in pending {
+                    settings.project(&pending.command);
+                }
+                settings
+            })
+            .clone()
+    }
+
+    fn push(&mut self, pending: PendingSettings) {
+        if !matches!(pending.command, SettingsCommand::Other) {
+            let mut projected = self.projected();
+            if pending.command.may_change_effective(&projected) {
+                self.barrier = Some(pending.generation);
+            }
+            projected.project(&pending.command);
+            self.projected = Some(projected);
+        }
+        self.pending.push_back(pending);
+    }
+
+    /// The pending entry at the front, applied to the confirmed settings.
+    ///
+    /// The projection stays valid when that entry changes no setting, as it was projected as
+    /// succeeding.
+    fn pop_front(&mut self) -> Option<PendingSettings> {
+        let pending = self.pending.pop_front()?;
+        if !matches!(pending.command, SettingsCommand::Other) {
+            self.projected = None;
+        }
+        Some(pending)
+    }
+
+    /// Change the confirmed settings in a way the projection did not assume
+    fn confirmed_mut(&mut self) -> &mut ConnectionSettings {
+        self.projected = None;
+        &mut self.confirmed
+    }
+}
+
+/// A settings command forwarded to PostgreSQL and waiting for its response.
+///
+/// Every statement of a simple `Query` that contains a settings command is queued, and every
+/// `Execute`, as PostgreSQL answers each with its own `CommandComplete` (or
+/// `EmptyQueryResponse` or `PortalSuspended`), in order.
+#[derive(Clone, Debug)]
+struct PendingSettings {
+    /// Generation of the batch it was sent in, see [`Context::sync_generation`]
+    generation: u64,
+    command: SettingsCommand,
 }
 
 /// A prepared-statement removal requested with SQL rather than a protocol `Close`.
@@ -266,10 +332,12 @@ pub(crate) struct StateSizes {
     pub pending_deallocations: usize,
     pub statement_deallocations: usize,
     pub portal_deallocations: usize,
-    pub pending_settings_resets: usize,
-    pub statement_resets: usize,
-    pub portal_resets: usize,
+    pub pending_settings: usize,
     pub statement_settings: usize,
+    pub portal_settings: usize,
+    pub prepared_settings: usize,
+    pub bound_settings: usize,
+    pub refusals: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -308,8 +376,8 @@ where
             column_mapper,
             encryption,
             reload_sender,
-            unsafe_disable_mapping: Arc::new(AtomicBool::new(false)),
-            keyset_id: Arc::new(RwLock::new(None)),
+            settings: Arc::new(Mutex::new(SettingsState::default())),
+            batch_answered: Arc::new(Notify::new()),
             session_id_counter: Arc::new(AtomicU64::new(1)),
             // The StartupMessage is answered by the first ReadyForQuery
             sync_generation: Arc::new(AtomicU64::new(1)),
@@ -322,11 +390,11 @@ where
             pending_deallocations: Arc::new(RwLock::new(VecDeque::new())),
             statement_deallocations: Arc::new(RwLock::new(HashMap::new())),
             portal_deallocations: Arc::new(RwLock::new(HashMap::new())),
-            pending_settings_resets: Arc::new(RwLock::new(VecDeque::new())),
-            settings_changes: Arc::new(Mutex::new(SettingsChanges::default())),
-            statement_resets: Arc::new(RwLock::new(HashMap::new())),
-            portal_resets: Arc::new(RwLock::new(HashMap::new())),
             statement_settings: Arc::new(RwLock::new(HashMap::new())),
+            portal_settings: Arc::new(RwLock::new(HashMap::new())),
+            prepared_settings: Arc::new(RwLock::new(HashMap::new())),
+            bound_settings: Arc::new(RwLock::new(HashMap::new())),
+            refusals: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
 
@@ -446,6 +514,21 @@ where
 
     /// Set execute state for portal, looking up session ID internally.
     pub fn set_execute_for_portal(&mut self, name: Name) {
+        let command = self.portal_settings_command(&name);
+        self.execute_portal(name, command);
+    }
+
+    /// The settings command the portal `name` runs.
+    pub fn portal_settings_command(&self, name: &Name) -> SettingsCommand {
+        self.portal_settings
+            .read()
+            .ok()
+            .and_then(|portals| portals.get(name).map(|(_, command)| command.clone()))
+            .unwrap_or(SettingsCommand::Other)
+    }
+
+    /// Set execute state for the portal `name`, which runs the settings command `command`.
+    pub fn execute_portal(&mut self, name: Name, command: SettingsCommand) {
         let session_id = self.get_portal_session_id(&name);
         // A portal running `DEALLOCATE` or `DISCARD ALL` through the extended protocol
         let deallocation = self
@@ -456,13 +539,8 @@ where
         if let Some(deallocation) = deallocation {
             self.add_deallocations(vec![deallocation]);
         }
-        // A portal running `RESET`, `DISCARD ALL` or `SET` through the extended protocol
-        let reset = self
-            .portal_resets
-            .read()
-            .ok()
-            .and_then(|portals| portals.get(&name).map(|(_, reset)| *reset));
-        self.add_settings_resets(reset.into_iter().collect());
+        // Every Execute is queued, so each settings command waits for its own response
+        self.queue_settings_commands(vec![command]);
         self.set_execute(name, session_id);
     }
 
@@ -500,10 +578,12 @@ where
             pending_deallocations: self.pending_deallocations.read().unwrap().len(),
             statement_deallocations: self.statement_deallocations.read().unwrap().len(),
             portal_deallocations: self.portal_deallocations.read().unwrap().len(),
-            pending_settings_resets: self.pending_settings_resets.read().unwrap().len(),
-            statement_resets: self.statement_resets.read().unwrap().len(),
-            portal_resets: self.portal_resets.read().unwrap().len(),
+            pending_settings: self.settings.lock().unwrap().pending.len(),
             statement_settings: self.statement_settings.read().unwrap().len(),
+            portal_settings: self.portal_settings.read().unwrap().len(),
+            prepared_settings: self.prepared_settings.read().unwrap().len(),
+            bound_settings: self.bound_settings.read().unwrap().len(),
+            refusals: self.refusals.read().unwrap().len(),
         }
     }
 
@@ -622,12 +702,12 @@ where
             .map(|mut guarded| guarded.remove(name));
 
         let _ = self
-            .statement_resets
+            .statement_settings
             .write()
             .map(|mut guarded| guarded.remove(name));
 
         let _ = self
-            .statement_settings
+            .prepared_settings
             .write()
             .map(|mut guarded| guarded.remove(name));
     }
@@ -658,53 +738,180 @@ where
         });
     }
 
-    /// Record the settings the SQL parsed as statement `name` resets, if any.
-    pub fn set_statement_reset(&mut self, name: Name, reset: Option<SettingsReset>) {
-        let _ = self.statement_resets.write().map(|mut guarded| {
-            match reset {
-                Some(reset) => guarded.insert(name, reset),
-                None => guarded.remove(&name),
-            };
-        });
-    }
-
-    /// Record whether the SQL parsed as statement `name` is a `SET CIPHERSTASH.<setting>`, so
-    /// that executing it again applies the setting again.
-    pub fn set_statement_setting(
-        &mut self,
-        name: Name,
-        setting: Option<sqltk::parser::ast::Statement>,
-    ) {
+    /// Record the settings command the SQL parsed as statement `name` runs, if any, so that
+    /// each execution of it is applied when PostgreSQL confirms it.
+    pub fn set_statement_settings(&mut self, name: Name, command: SettingsCommand) {
         let _ = self.statement_settings.write().map(|mut guarded| {
-            match setting {
-                Some(setting) => guarded.insert(name, setting),
-                None => guarded.remove(&name),
+            match command {
+                SettingsCommand::Other => guarded.remove(&name),
+                command => guarded.insert(name, command),
             };
         });
     }
 
-    /// The `SET CIPHERSTASH.<setting>` that statement `name` runs, if any
-    pub fn statement_setting(&self, name: &Name) -> Option<sqltk::parser::ast::Statement> {
-        self.statement_settings
+    /// Carry the settings command of `statement`, if any, onto the portal bound from it.
+    pub fn bind_portal_settings(&mut self, portal: &Name, statement: &Name) {
+        let command = self
+            .statement_settings
             .read()
             .ok()
-            .and_then(|statements| statements.get(name).cloned())
-    }
-
-    /// Carry the settings reset of `statement`, if any, onto the portal bound from it.
-    pub fn bind_portal_settings_reset(&mut self, portal: &Name, statement: &Name) {
-        let reset = self
-            .statement_resets
-            .read()
-            .ok()
-            .and_then(|statements| statements.get(statement).copied());
+            .and_then(|statements| statements.get(statement).cloned());
         let generation = self.sync_generation();
-        let _ = self.portal_resets.write().map(|mut guarded| {
-            match reset {
-                Some(reset) => guarded.insert(portal.clone(), (generation, reset)),
+        let _ = self.portal_settings.write().map(|mut guarded| {
+            match command {
+                Some(command) => guarded.insert(portal.clone(), (generation, command)),
                 None => guarded.remove(portal),
             };
         });
+    }
+
+    /// Record the settings statement `name` is prepared under, if it is a statement Proxy maps.
+    ///
+    /// A statement prepared under other settings than it is bound under is refused, see
+    /// [`Context::bind_prepared_settings`].
+    pub fn set_prepared_settings(&mut self, name: Name, settings: Option<EffectiveSettings>) {
+        let _ = self.prepared_settings.write().map(|mut guarded| {
+            match settings {
+                Some(settings) => guarded.insert(
+                    name,
+                    PreparedSettings {
+                        settings,
+                        encrypted_literals: false,
+                    },
+                ),
+                None => guarded.remove(&name),
+            };
+        });
+    }
+
+    /// Record that statement `name` holds literals encrypted under the keyset it was prepared
+    /// with.
+    pub fn set_prepared_encrypted_literals(&mut self, name: &Name) {
+        let _ = self.prepared_settings.write().map(|mut guarded| {
+            if let Some(prepared) = guarded.get_mut(name) {
+                prepared.encrypted_literals = true;
+            }
+        });
+    }
+
+    /// Check that `statement` can be bound to `portal` under `settings`, and record the settings
+    /// the portal is bound under.
+    ///
+    /// Refuses a statement Proxy maps if mapping has changed since it was prepared, or if the
+    /// keyset has changed and it holds encrypted literals.
+    pub fn bind_prepared_settings(
+        &mut self,
+        portal: &Name,
+        statement: &Name,
+        settings: &ConnectionSettings,
+        encrypted_values: bool,
+    ) -> Result<(), Error> {
+        let prepared = self
+            .prepared_settings
+            .read()
+            .ok()
+            .and_then(|statements| statements.get(statement).cloned());
+        let current = EffectiveSettings::new(settings);
+        let bound = match prepared {
+            Some(prepared) => {
+                if let Some(refusal) = prepared
+                    .settings
+                    .refusal(&current, prepared.encrypted_literals)
+                {
+                    return Err(self.prepared_settings_changed(refusal));
+                }
+                Some(BoundSettings {
+                    settings: current,
+                    encrypted_values: encrypted_values || prepared.encrypted_literals,
+                })
+            }
+            None => None,
+        };
+        let generation = self.sync_generation();
+        let _ = self.bound_settings.write().map(|mut guarded| {
+            match bound {
+                Some(bound) => guarded.insert(portal.clone(), (generation, bound)),
+                None => guarded.remove(portal),
+            };
+        });
+        Ok(())
+    }
+
+    /// Record the error of a message Proxy refused, which is forwarded as a message that names
+    /// `name`, an object that does not exist, so the client gets `response` in place of
+    /// PostgreSQL's error.
+    pub fn refuse(&mut self, name: String, response: BytesMut) {
+        let generation = self.sync_generation();
+        let _ = self.refusals.write().map(|mut refusals| {
+            refusals.push_back(Refusal {
+                generation,
+                name,
+                response,
+            })
+        });
+    }
+
+    /// The error to send the client in place of `error`, the `ErrorResponse` PostgreSQL is
+    /// answering the current batch with, if it rejects a message Proxy refused.
+    ///
+    /// PostgreSQL skips the rest of a batch after an error, so an error that does not name the
+    /// refused message's object is from an earlier message, and reaches the client as it is.
+    pub fn take_refusal(&mut self, error: &[u8]) -> Option<BytesMut> {
+        let answering = self.ready_generation();
+        let mut refusals = self.refusals.write().ok()?;
+        while refusals
+            .front()
+            .is_some_and(|refusal| refusal.generation < answering)
+        {
+            refusals.pop_front();
+        }
+        if !refusals
+            .front()
+            .is_some_and(|refusal| refusal.generation == answering)
+        {
+            return None;
+        }
+        let refusal = refusals.pop_front()?;
+        let name = refusal.name.as_bytes();
+        error
+            .windows(name.len())
+            .any(|window| window == name)
+            .then_some(refusal.response)
+    }
+
+    /// Check that `portal` can be executed under `settings`.
+    ///
+    /// Refuses a portal of a statement Proxy maps if mapping has changed since it was bound, or
+    /// if the keyset has changed and it holds encrypted values.
+    pub fn check_bound_settings(
+        &self,
+        portal: &Name,
+        settings: &ConnectionSettings,
+    ) -> Result<(), Error> {
+        let bound = self
+            .bound_settings
+            .read()
+            .ok()
+            .and_then(|portals| portals.get(portal).map(|(_, bound)| bound.clone()));
+        let refusal = bound.and_then(|bound| {
+            bound
+                .settings
+                .refusal(&EffectiveSettings::new(settings), bound.encrypted_values)
+        });
+        match refusal {
+            Some(refusal) => Err(self.prepared_settings_changed(refusal)),
+            None => Ok(()),
+        }
+    }
+
+    fn prepared_settings_changed(&self, refusal: settings::SettingsRefusal) -> Error {
+        warn!(
+            target: CONTEXT,
+            client_id = self.client_id,
+            ?refusal,
+            msg = "Prepared statement refused after the connection settings changed"
+        );
+        crate::error::MappingError::PreparedSettingsChanged.into()
     }
 
     /// Close both statement and its associated portal.
@@ -779,7 +986,7 @@ where
 
     /// Close the portal `name` for an execution of generation `generation`.
     ///
-    /// The SQL deallocation and settings reset of a portal bound in a later batch are kept: a
+    /// The SQL deallocation and settings command of a portal bound in a later batch are kept: a
     /// client can bind the unnamed portal for its next batch before PostgreSQL has finished
     /// executing the current one.
     fn close_portal_bound_by(&mut self, name: &Name, generation: u64) {
@@ -800,7 +1007,15 @@ where
                 guarded.remove(name);
             }
         });
-        let _ = self.portal_resets.write().map(|mut guarded| {
+        let _ = self.portal_settings.write().map(|mut guarded| {
+            if guarded
+                .get(name)
+                .is_some_and(|(bound, _)| *bound <= generation)
+            {
+                guarded.remove(name);
+            }
+        });
+        let _ = self.bound_settings.write().map(|mut guarded| {
             if guarded
                 .get(name)
                 .is_some_and(|(bound, _)| *bound <= generation)
@@ -921,15 +1136,61 @@ where
                 pending.pop_front();
             }
         });
-        let _ = self.pending_settings_resets.write().map(|mut pending| {
-            while pending.front().is_some_and(|p| p.generation < answered) {
-                pending.pop_front();
+        let _ = self.refusals.write().map(|mut refusals| {
+            while refusals
+                .front()
+                .is_some_and(|refusal| refusal.generation < answered)
+            {
+                refusals.pop_front();
             }
         });
+        if let Ok(mut settings) = self.settings.lock() {
+            while settings
+                .pending
+                .front()
+                .is_some_and(|p| p.generation < answered)
+            {
+                settings.pending.pop_front();
+            }
+            settings.confirmed_mut().ready_for_query(transaction_status);
+        }
 
         if transaction_status == b'I' {
             self.discard_portals_before(answered);
         }
+        self.batch_answered.notify_waiters();
+    }
+
+    /// Wait until PostgreSQL has answered every batch sent so far that may change the settings.
+    ///
+    /// Within a batch, a statement runs only if the statements before it succeed, so it can be
+    /// mapped under the settings projected from them. A later batch runs whether or not they
+    /// succeed, and after a `SET LOCAL` in the batch has ended, so it is mapped under the
+    /// settings PostgreSQL confirms.
+    pub async fn settings_barrier(&self) {
+        loop {
+            let answered = self.batch_answered.notified();
+            tokio::pin!(answered);
+            answered.as_mut().enable();
+            if !self.settings_in_flight() {
+                return;
+            }
+            debug!(target: CONTEXT, client_id = self.client_id, msg = "Waiting for settings");
+            answered.await;
+        }
+    }
+
+    /// A batch that may change the settings has been sent and not answered yet
+    fn settings_in_flight(&self) -> bool {
+        // A poisoned lock still waits, so Proxy fails closed
+        let barrier = self
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .barrier;
+        barrier.is_some_and(|generation| {
+            generation < self.sync_generation() && generation >= self.ready_generation()
+        })
     }
 
     fn discard_portals_before(&mut self, generation: u64) {
@@ -946,7 +1207,11 @@ where
             .write()
             .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
         let _ = self
-            .portal_resets
+            .portal_settings
+            .write()
+            .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
+        let _ = self
+            .bound_settings
             .write()
             .map(|mut guarded| guarded.retain(|_, (bound, _)| *bound >= generation));
     }
@@ -1040,113 +1305,94 @@ where
         }
     }
 
-    /// Queue the settings resets in a simple `Query`, or an executed portal, that is about to be
-    /// forwarded to PostgreSQL.
-    pub fn add_settings_resets(&mut self, resets: Vec<SettingsReset>) {
-        if resets.is_empty() {
+    /// Queue the settings commands of a simple `Query`, one for each statement, that is about to
+    /// be forwarded to PostgreSQL.
+    ///
+    /// A `Query` with no settings command queues nothing, as PostgreSQL's answers to it change
+    /// no setting.
+    pub fn add_settings_commands(&mut self, commands: Vec<SettingsCommand>) {
+        if commands
+            .iter()
+            .all(|command| matches!(command, SettingsCommand::Other))
+        {
             return;
         }
-        let changes = self.settings_change_counts();
-        self.add_settings_resets_at(resets.into_iter().map(|reset| (reset, changes)).collect());
+        self.queue_settings_commands(commands);
     }
 
-    /// How many times each setting has been changed so far, as `(keyset, unsafe_disable_mapping)`
-    pub fn settings_change_counts(&self) -> (u64, u64) {
-        let changes = self
-            .settings_changes
+    fn queue_settings_commands(&mut self, commands: Vec<SettingsCommand>) {
+        let generation = self.sync_generation();
+        // A poisoned lock still queues the entries, so the batch's responses stay in step
+        let mut settings = self
+            .settings
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (changes.keyset, changes.unsafe_disable_mapping)
-    }
-
-    /// Queue settings resets, each with the [`Context::settings_change_counts`] taken at its
-    /// position in the batch, so it does not undo a `SET` sent after it.
-    pub fn add_settings_resets_at(&mut self, resets: Vec<(SettingsReset, (u64, u64))>) {
-        if resets.is_empty() {
-            return;
-        }
-        let generation = self.sync_generation();
-        // A poisoned lock still queues the entries, so the batch's tags stay in step
-        let mut pending = self
-            .pending_settings_resets
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        pending.extend(resets.into_iter().map(
-            |(reset, (keyset_changes, unsafe_disable_mapping_changes))| PendingSettingsReset {
+        for command in commands {
+            settings.push(PendingSettings {
                 generation,
-                reset,
-                keyset_changes,
-                unsafe_disable_mapping_changes,
-            },
-        ));
+                command,
+            });
+        }
     }
 
     ///
-    /// Handle a `CommandComplete` from PostgreSQL for a `RESET`, `SET` or `DISCARD ALL`.
+    /// Handle a `CommandComplete`, `EmptyQueryResponse` or `PortalSuspended` from PostgreSQL,
+    /// with `tag` the `CommandComplete` tag.
     ///
-    /// Applies the oldest queued settings reset for the batch being answered, returning the
-    /// settings PostgreSQL has just reset to their startup values, unless the client has changed
-    /// a setting with `SET CIPHERSTASH.*` since it sent the reset. Without this, a connection
-    /// pool that resets a connection between clients hands the next client the previous
-    /// client's keyset and `UNSAFE_DISABLE_MAPPING` setting.
+    /// Applies the oldest queued settings command for the batch being answered, so a setting
+    /// changes only once PostgreSQL has run the command, in the order PostgreSQL ran it. A
+    /// `COMMIT` confirmed with `ROLLBACK` rolls back.
     ///
-    pub fn complete_settings_reset(&mut self) {
+    pub fn settings_completed(&mut self, tag: &str) {
         let answering = self.ready_generation();
-        let pending = self
-            .pending_settings_resets
-            .write()
-            .ok()
-            .and_then(|mut pending| {
-                if pending.front().is_some_and(|p| p.generation == answering) {
-                    pending.pop_front()
-                } else {
-                    None
-                }
-            });
-        let Some(PendingSettingsReset {
-            reset,
-            keyset_changes,
-            unsafe_disable_mapping_changes,
-            ..
-        }) = pending
-        else {
+        let Ok(mut settings) = self.settings.lock() else {
             return;
         };
-
-        debug!(target: CONTEXT, client_id = self.client_id, msg = "Reset settings", ?reset);
-
-        let Ok(changes) = self.settings_changes.lock() else {
-            return;
-        };
-
-        if changes.unsafe_disable_mapping == unsafe_disable_mapping_changes
-            && matches!(
-                reset,
-                SettingsReset::All | SettingsReset::UnsafeDisableMapping
-            )
+        if !settings
+            .pending
+            .front()
+            .is_some_and(|p| p.generation == answering)
         {
-            self.unsafe_disable_mapping.store(false, Ordering::Release);
+            return;
         }
+        let Some(PendingSettings { command, .. }) = settings.pop_front() else {
+            return;
+        };
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Settings command", ?command, tag);
+        settings.confirmed.command_succeeded(&command, tag);
+    }
 
-        let _ = self.keyset_id.write().map(|mut keyset_id| {
-            // The keyset is set by ID or by name, and each RESET clears only its own setting
-            if changes.keyset == keyset_changes
-                && matches!(
-                    (reset, &*keyset_id),
-                    (SettingsReset::All, _)
-                        | (
-                            SettingsReset::KeysetId,
-                            Some(KeysetIdentifier(IdentifiedBy::Uuid(_)))
-                        )
-                        | (
-                            SettingsReset::KeysetName,
-                            Some(KeysetIdentifier(IdentifiedBy::Name(_)))
-                        )
-                )
-            {
-                *keyset_id = None;
-            }
-        });
+    ///
+    /// Handle an `ErrorResponse` from PostgreSQL.
+    ///
+    /// PostgreSQL skips the rest of the batch being answered, so its queued settings commands
+    /// never run, and fails the current transaction, which undoes its settings changes once it
+    /// is rolled back.
+    ///
+    pub fn settings_failed(&mut self) {
+        let answering = self.ready_generation();
+        let Ok(mut settings) = self.settings.lock() else {
+            return;
+        };
+        while settings
+            .pending
+            .front()
+            .is_some_and(|p| p.generation == answering)
+        {
+            settings.pending.pop_front();
+        }
+        settings.confirmed_mut().execution_failed();
+    }
+
+    /// The settings statements sent now run with: the confirmed settings, with every command
+    /// PostgreSQL has not answered yet assumed to succeed.
+    ///
+    /// Fails closed, with mapping enabled and no keyset, if the settings are unavailable.
+    pub fn projected_settings(&self) -> ConnectionSettings {
+        self.settings
+            .lock()
+            .map(|mut settings| settings.projected())
+            .unwrap_or_default()
     }
 
     pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
@@ -1245,222 +1491,33 @@ where
         self.table_resolver.clone()
     }
 
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET UNSAFE_DISABLE_MAPPING = {boolean};`
-    /// then it sets the flag [`Context::unsafe_disable_mapping`] to the provided `{boolean}`` value.
-    ///
-    ///
-    pub fn maybe_set_unsafe_disable_mapping(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Option<bool> {
-        // The CIPHERSTASH. namespace prevents errors UNSAFE_DISABLE_MAPPING
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING: LazyLock<ObjectName> =
-            LazyLock::new(|| {
-                ObjectName(vec![
-                    ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                    ObjectNamePart::Identifier(Ident::new("UNSAFE_DISABLE_MAPPING")),
-                ])
-            });
-
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING {
-                if let Some(Expr::Value(ValueWithSpan {
-                    value: Value::Boolean(value),
-                    ..
-                })) = values.first()
-                {
-                    if let Ok(mut changes) = self.settings_changes.lock() {
-                        self.unsafe_disable_mapping.store(*value, Ordering::Release);
-                        changes.unsafe_disable_mapping += 1;
-                    }
-                    return Some(*value);
-                }
-            }
-        }
-        None
-    }
-
+    /// Whether `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true` is in effect, as PostgreSQL has
+    /// confirmed it. Statements are mapped with [`Context::projected_settings`] instead.
+    #[cfg(test)]
     pub fn unsafe_disable_mapping(&self) -> bool {
-        self.unsafe_disable_mapping.load(Ordering::Acquire)
+        self.settings
+            .lock()
+            .is_ok_and(|settings| settings.confirmed.unsafe_disable_mapping())
     }
 
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_ID = {keyset_id};`
-    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_id}`` value.
-    ///
-    ///
-    pub fn maybe_set_keyset_id(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        let identifier = self.keyset_id_in(statement)?;
-        if let Some(identifier) = &identifier {
-            self.set_keyset_identifier(identifier.clone());
-        }
-        Ok(identifier)
-    }
-
-    /// The keyset a `SET CIPHERSTASH.KEYSET_ID = {keyset_id}` selects, without selecting it
-    fn keyset_id_in(
-        &self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        // The CIPHERSTASH. namespace prevents errors KEYSET_ID
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
-            ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                ObjectNamePart::Identifier(Ident::new("KEYSET_ID")),
-            ])
-        });
-
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_KEYSET_ID {
-                if let Some(Expr::Value(ValueWithSpan { value, .. })) = values.first() {
-                    let value_str = match value {
-                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.clone(),
-                        Value::Number(n, _) => n.to_string(),
-                        _ => {
-                            let err = EncryptError::KeysetIdCouldNotBeSet;
-                            warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                            return Ok(None);
-                        }
-                    };
-                    let keyset_id = Uuid::parse_str(&value_str).map_err(|_| {
-                        EncryptError::KeysetIdCouldNotBeParsed {
-                            id: value_str.to_owned(),
-                        }
-                    })?;
-
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetId", ?keyset_id);
-
-                    return Ok(Some(KeysetIdentifier(IdentifiedBy::Uuid(keyset_id))));
-                } else {
-                    let err = EncryptError::KeysetIdCouldNotBeSet;
-                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                    // We let the database handle any syntax errors to avoid complexifying the fronted flow (more)
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_NAME = {keyset_name};`
-    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_name}`` value.
-    ///
-    ///
-    pub fn maybe_set_keyset_name(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        let identifier = self.keyset_name_in(statement);
-        if let Some(identifier) = &identifier {
-            self.set_keyset_identifier(identifier.clone());
-        }
-        Ok(identifier)
-    }
-
-    /// The keyset a `SET CIPHERSTASH.KEYSET_NAME = {keyset_name}` selects, without selecting it
-    fn keyset_name_in(
-        &self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Option<KeysetIdentifier> {
-        // The CIPHERSTASH. namespace prevents errors KEYSET_NAME
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_KEYSET_NAME: LazyLock<ObjectName> = LazyLock::new(|| {
-            ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                ObjectNamePart::Identifier(Ident::new("KEYSET_NAME")),
-            ])
-        });
-
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_KEYSET_NAME {
-                // Try to extract keyset name from Value (quoted string/number) or Identifier (unquoted)
-                let keyset_name = match values.first() {
-                    Some(Expr::Value(ValueWithSpan { value, .. })) => match value {
-                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
-                            Some(s.clone())
-                        }
-                        Value::Number(n, _) => Some(n.to_string()),
-                        _ => None,
-                    },
-                    Some(Expr::Identifier(ident)) => Some(ident.value.clone()),
-                    _ => None,
-                };
-
-                if let Some(keyset_name) = keyset_name {
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetName", ?keyset_name);
-
-                    return Some(KeysetIdentifier(IdentifiedBy::Name(keyset_name.into())));
-                } else {
-                    let err = EncryptError::KeysetNameCouldNotBeSet;
-                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                    // We let the database handle any syntax errors to avoid complexifying the frontend flow
-                }
-            }
-        }
-        None
-    }
-
-    /// The keyset a `SET CIPHERSTASH.KEYSET_ID` or `KEYSET_NAME` selects, without selecting it.
-    ///
-    /// Returns an error for a `KEYSET_ID` that is not a UUID.
-    pub fn keyset_in(
-        &self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        match self.keyset_id_in(statement)? {
-            Some(identifier) => Ok(Some(identifier)),
-            None => Ok(self.keyset_name_in(statement)),
-        }
-    }
-
-    /// Single entry point for setting keyset identifiers by either ID or name.
-    /// Tries to set keyset_id first, then keyset_name if that doesn't match.
-    ///
-    pub fn maybe_set_keyset(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        match self.maybe_set_keyset_id(statement)? {
-            Some(identifier) => Ok(Some(identifier)),
-            None => self.maybe_set_keyset_name(statement),
-        }
-    }
-
-    /// Set the connection's keyset, counting the change for [`Self::complete_settings_reset`]
-    fn set_keyset_identifier(&self, identifier: KeysetIdentifier) {
-        if let Ok(mut changes) = self.settings_changes.lock() {
-            let _ = self
-                .keyset_id
-                .write()
-                .map(|mut guard| *guard = Some(identifier));
-            changes.keyset += 1;
-        }
-    }
-
+    /// The keyset selected with `SET CIPHERSTASH.KEYSET_ID` or `KEYSET_NAME`, as PostgreSQL has
+    /// confirmed it
     pub fn keyset_identifier(&self) -> Option<KeysetIdentifier> {
-        self.keyset_id.read().ok().and_then(|k| k.clone())
+        self.settings
+            .lock()
+            .ok()
+            .and_then(|settings| settings.confirmed.keyset())
     }
 
     // Service delegation methods
+    /// Encrypt with `keyset_id`, the keyset the statement being mapped will run with, see
+    /// [`Self::projected_settings`]
     pub async fn encrypt(
         &self,
+        keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
-        let keyset_id = self.keyset_identifier();
-
         self.encryption
             .encrypt(keyset_id, plaintexts, columns)
             .await
@@ -1798,12 +1855,10 @@ mod tests {
         proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };
-    use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
 
     struct TestService {}
 
@@ -2085,239 +2140,6 @@ mod tests {
         statements.first().unwrap().clone()
     }
 
-    #[test]
-    pub fn disable_mapping() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = 1";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = '1'";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = t";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-    }
-
-    #[test]
-    pub fn set_keyset_id() {
-        log::init(LogConfig::default());
-
-        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
-
-        let sql = vec![
-            "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-            "SET SESSION CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-            "SET CIPHERSTASH.KEYSET_ID TO '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-        ];
-
-        for s in sql {
-            let mut context = create_context();
-            assert!(context.keyset_identifier().is_none());
-
-            let statement = parse_statement(s);
-            let result = context.maybe_set_keyset_id(&statement);
-
-            // OK and has a value
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
-
-            // keyset id set
-            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-        }
-    }
-
-    #[test]
-    pub fn set_keyset_id_error_handling() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        // Returns OK if unknown command
-        let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-        assert!(result.is_ok());
-
-        // Value is NONE as nothing was set
-        let value = result.unwrap();
-        assert!(value.is_none());
-
-        // Returns OK(None) if SET but badly formatted (no quotes)
-        let sql = "SET CIPHERSTASH.KEYSET_ID = d74cbd7fba0d49859ed2ebe2ffe77590";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-
-        // Returns ERROR if SET but not UUIOD
-        let sql = "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    pub fn set_keyset_name() {
-        log::init(LogConfig::default());
-
-        let sql = vec![
-            "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
-            "SET SESSION CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
-            "SET CIPHERSTASH.KEYSET_NAME TO 'test-keyset'",
-        ];
-
-        for s in sql {
-            let mut context = create_context();
-            assert!(context.keyset_identifier().is_none());
-
-            let statement = parse_statement(s);
-            let result = context.maybe_set_keyset_name(&statement);
-
-            let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
-
-            // OK and has a value
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
-
-            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-        }
-    }
-
-    #[test]
-    pub fn set_keyset_name_error_handling() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        // Returns OK if unknown command
-        let sql = "SET CIPHERSTASH.BLAH = 'keyset_name'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-
-        // Value is NONE as nothing was set
-        let value = result.unwrap();
-        assert!(value.is_none());
-
-        // Returns OK(None) if SET but badly formatted (unquoted)
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = test-keyset";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-
-        // Returns OK(Some) if SET with number value (now supported)
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = 123";
-        let statement = parse_statement(sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("123".to_string().into()));
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-    }
-
-    #[test]
-    pub fn set_keyset_supports_numbers() {
-        log::init(LogConfig::default());
-
-        // Test keyset name with number
-        let mut context = create_context();
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
-        let statement = parse_statement(sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("12345".to_string().into()));
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test keyset id with numeric UUID (should work if it's a valid UUID)
-        let mut context = create_context();
-        // This will fail because 123 is not a valid UUID, but it shows the number is processed
-        let sql = "SET CIPHERSTASH.KEYSET_ID = 123";
-        let statement = parse_statement(sql);
-        let result = context.maybe_set_keyset_id(&statement);
-
-        // Should return error because 123 is not a valid UUID
-        assert!(result.is_err());
-    }
-
-    #[test]
-    pub fn maybe_set_keyset_unified_function() {
-        log::init(LogConfig::default());
-
-        // Test that maybe_set_keyset handles both ID and name
-        let mut context = create_context();
-
-        // Test with keyset ID
-        let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
-        let statement = parse_statement(keyset_id_sql);
-
-        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test with keyset name
-        let mut context = create_context();
-        let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
-        let statement = parse_statement(keyset_name_sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test with unknown command
-        let mut context = create_context();
-        let unknown_sql = "SET CIPHERSTASH.UNKNOWN = 'value'";
-        let statement = parse_statement(unknown_sql);
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_none());
-    }
     // Connection state lifecycle
     //
     // Each helper makes the Context calls the frontend and backend make for one protocol message,

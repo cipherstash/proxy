@@ -18,6 +18,7 @@ pub const CODE_SYNTAX_ERROR: &str = "42601";
 pub const CODE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
 pub const CODE_IDLE_SESSION_TIMEOUT: &str = "57P05";
 pub const CODE_SYSTEM_ERROR: &str = "58000";
+pub const CODE_INVALID_SQL_STATEMENT_NAME: &str = "26000";
 
 ///
 /// ErrorResponse (B)
@@ -156,6 +157,35 @@ impl ErrorResponse {
         }
 
         Self { fields }
+    }
+
+    ///
+    /// A prepared statement Proxy no longer runs as PostgreSQL error
+    /// Code: 26000 invalid_sql_statement_name
+    ///
+    /// Drivers such as PostgreSQL JDBC invalidate their cached statements on this code.
+    ///
+    pub fn prepared_statement_invalidated(message: String) -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "ERROR".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "ERROR".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: CODE_INVALID_SQL_STATEMENT_NAME.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: message,
+                },
+            ],
+        }
     }
 
     ///
