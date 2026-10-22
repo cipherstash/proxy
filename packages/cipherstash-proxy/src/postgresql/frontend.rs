@@ -20,7 +20,6 @@ use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::close::Close;
-use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
 use crate::postgresql::messages::{Name, Target};
 use crate::prometheus::{
@@ -31,7 +30,7 @@ use crate::prometheus::{
 };
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
 use metrics::{counter, histogram};
@@ -189,6 +188,8 @@ where
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+        // Proxy has already forwarded a message PostgreSQL rejects, so PostgreSQL discards the
+        // rest of the batch too, and the Sync is forwarded.
         if self.error_state.is_some() {
             warn!(target: PROTOCOL,
                 client_id = self.context.client_id,
@@ -198,6 +199,7 @@ where
             if code != Code::Sync {
                 return Ok(());
             }
+            self.error_state = None;
         }
 
         match code {
@@ -219,9 +221,7 @@ where
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err)?;
-                        self.send_ready_for_query()?;
-                        return Ok(());
+                        bytes = self.refuse(err, refused_query())?;
                     }
                 }
             }
@@ -235,8 +235,8 @@ where
                         msg = "Execute Handler Error",
                         error = ?err.to_string(),
                     );
-                    self.send_error_response(err)?;
-                    return Ok(());
+                    bytes = self.refuse(err, refused_execute())?;
+                    self.error_state = Some(ErrorState);
                 }
             }
             Code::Parse => {
@@ -250,8 +250,11 @@ where
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err)?;
-                        return Ok(());
+                        let name = Parse::try_from(&bytes)
+                            .map(|parse| parse.name)
+                            .unwrap_or_else(|_| Name::unnamed());
+                        bytes = self.refuse(err, refused_parse(&name))?;
+                        self.error_state = Some(ErrorState);
                     }
                 }
             }
@@ -260,33 +263,34 @@ where
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => match err {
-                        Error::Mapping(MappingError::InvalidParameter(_)) => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "EncryptError::InvalidParameter",
-                            );
-                            self.send_error_response(err)?;
-                            return Ok(());
+                    Err(err) => {
+                        match err {
+                            Error::Mapping(MappingError::InvalidParameter(_)) => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "EncryptError::InvalidParameter",
+                                );
+                            }
+                            Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "EncryptError::UnknownKeysetIdentifier",
+                                );
+                            }
+                            _ => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "Bind Error",
+                                    err = err.to_string()
+                                );
+                            }
                         }
-                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "EncryptError::UnknownKeysetIdentifier",
-                            );
-                            self.send_error_response(err)?;
-                            return Ok(());
-                        }
-                        _ => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "Bind Error",
-                                err = err.to_string()
-                            );
-                            self.send_error_response(err)?;
-                            return Ok(());
-                        }
-                    },
+                        let portal = Bind::try_from(&bytes)
+                            .map(|bind| bind.portal)
+                            .unwrap_or_else(|_| Name::unnamed());
+                        bytes = self.refuse(err, refused_bind(&portal))?;
+                        self.error_state = Some(ErrorState);
+                    }
                 }
             }
             Code::Sync => {
@@ -296,15 +300,6 @@ where
                 );
 
                 self.context.reload_schema_if_changed().await;
-
-                if self.error_state.is_some() {
-                    debug!(target: PROTOCOL,
-                        client_id = self.context.client_id,
-                        msg = "Ready for Query",
-                    );
-                    self.send_ready_for_query()?;
-                    return Ok(());
-                }
             }
             Code::Close => {
                 self.close_handler(&bytes).await?;
@@ -321,6 +316,16 @@ where
         self.record_forwarded(code);
         self.write_to_server(bytes).await?;
         Ok(())
+    }
+
+    /// Refuse a message with `err`, returning the `replacement` to forward in its place.
+    ///
+    /// PostgreSQL rejects the replacement, so it fails the batch, or the transaction, as if it
+    /// had refused the message itself, and the client gets `err` in place of PostgreSQL's error.
+    fn refuse(&mut self, err: Error, replacement: BytesMut) -> Result<BytesMut, Error> {
+        let response = BytesMut::try_from(self.error_to_response(err))?;
+        self.context.refuse(response);
+        Ok(replacement)
     }
 
     /// Track a message about to be forwarded, so each `ReadyForQuery` is matched to its batch.
@@ -1307,24 +1312,6 @@ where
         }
     }
 
-    ///
-    /// Send an ReadyForQuery to the client and remove error state.
-    ///
-    fn send_ready_for_query(&mut self) -> Result<(), Error> {
-        let message = BytesMut::from(ReadyForQuery);
-
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_ready_for_query",
-            ?message,
-        );
-
-        self.client_sender.send(message)?;
-        self.error_state = None;
-
-        Ok(())
-    }
-
     /// TODO output err as structured data.
     ///      err can carry any additional context from caller
     fn to_database_exception(&self, err: Error) -> Result<BytesMut, Error> {
@@ -1438,6 +1425,63 @@ where
 
         Ok(())
     }
+}
+
+/// A name no client can have used for a statement, portal or type, so a message that refers to
+/// it always fails.
+fn refusal_name() -> String {
+    // PostgreSQL compares names by their first 63 bytes, so the random part is within them
+    format!("__cipherstash_{}", uuid::Uuid::new_v4().simple())
+}
+
+fn message(code: u8, body: &[u8]) -> BytesMut {
+    let mut bytes = BytesMut::with_capacity(body.len() + 5);
+    bytes.put_u8(code);
+    bytes.put_i32(body.len() as i32 + 4);
+    bytes.put_slice(body);
+    bytes
+}
+
+/// SQL that PostgreSQL fails to parse, as it casts to a type that does not exist
+fn refused_sql() -> String {
+    format!("SELECT NULL::\"{}\"", refusal_name())
+}
+
+/// A `Query` PostgreSQL rejects
+fn refused_query() -> BytesMut {
+    let mut body = refused_sql().into_bytes();
+    body.push(0);
+    message(b'Q', &body)
+}
+
+/// A `Parse` of statement `name` that PostgreSQL rejects
+fn refused_parse(name: &str) -> BytesMut {
+    let mut body = name.as_bytes().to_vec();
+    body.push(0);
+    body.extend_from_slice(refused_sql().as_bytes());
+    body.push(0);
+    // No parameter types
+    body.extend_from_slice(&0i16.to_be_bytes());
+    message(b'P', &body)
+}
+
+/// A `Bind` of portal `portal` that PostgreSQL rejects, as its statement does not exist
+fn refused_bind(portal: &str) -> BytesMut {
+    let mut body = portal.as_bytes().to_vec();
+    body.push(0);
+    body.extend_from_slice(refusal_name().as_bytes());
+    body.push(0);
+    // No parameter formats, parameters or result formats
+    body.extend_from_slice(&[0; 6]);
+    message(b'B', &body)
+}
+
+/// An `Execute` PostgreSQL rejects, as its portal does not exist
+fn refused_execute() -> BytesMut {
+    let mut body = refusal_name().into_bytes();
+    body.push(0);
+    body.extend_from_slice(&0i32.to_be_bytes());
+    message(b'E', &body)
 }
 
 #[cfg(test)]

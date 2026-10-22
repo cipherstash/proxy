@@ -11,7 +11,7 @@ use bytes::{BufMut, BytesMut};
 use eql_mapper::Schema;
 use std::sync::Arc;
 use tokio::{
-    io::{AsyncWriteExt, DuplexStream, ReadHalf, Sink},
+    io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf},
     sync::mpsc,
 };
 
@@ -44,7 +44,9 @@ impl EncryptionService for TestService {
 /// [`Connection::server`] sends a message from PostgreSQL through the backend.
 struct Connection {
     client: DuplexStream,
-    frontend: Frontend<ReadHalf<DuplexStream>, Sink, TestService>,
+    frontend: Frontend<ReadHalf<DuplexStream>, DuplexStream, TestService>,
+    /// What the frontend forwards to PostgreSQL
+    to_server: DuplexStream,
     server: DuplexStream,
     backend: Backend<ReadHalf<DuplexStream>, TestService>,
     to_client: mpsc::UnboundedReceiver<BytesMut>,
@@ -72,15 +74,17 @@ impl Connection {
         let (server, server_reader) = tokio::io::duplex(64 * 1024);
         let (server_reader, _) = tokio::io::split(server_reader);
         let (client_sender, to_client) = mpsc::unbounded_channel();
+        let (server_writer, to_server) = tokio::io::duplex(64 * 1024);
 
         Self {
             client,
             frontend: Frontend::new(
                 client_reader,
                 client_sender.clone(),
-                tokio::io::sink(),
+                server_writer,
                 context.clone(),
             ),
+            to_server,
             server,
             backend: Backend::new(client_sender, server_reader, context.clone()),
             to_client,
@@ -125,6 +129,64 @@ impl Connection {
         self.server(bind_complete()).await;
         self.server(command_complete(tag)).await;
         self.server(ready(b'I')).await;
+    }
+
+    /// The messages forwarded to PostgreSQL since the last call, as (code, body)
+    async fn forwarded(&mut self) -> Vec<(u8, Vec<u8>)> {
+        let mut bytes = vec![];
+        let mut buffer = [0; 4096];
+        while let Ok(Ok(read)) = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            self.to_server.read(&mut buffer),
+        )
+        .await
+        {
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        let mut messages = vec![];
+        let mut rest = &bytes[..];
+        while rest.len() >= 5 {
+            let len = i32::from_be_bytes(rest[1..5].try_into().unwrap()) as usize;
+            messages.push((rest[0], rest[5..1 + len].to_vec()));
+            rest = &rest[1 + len..];
+        }
+        messages
+    }
+
+    /// The codes of the messages forwarded to PostgreSQL since the last call
+    async fn forwarded_codes(&mut self) -> Vec<u8> {
+        self.forwarded()
+            .await
+            .into_iter()
+            .map(|(code, _)| code)
+            .collect()
+    }
+
+    /// PostgreSQL rejects the message Proxy forwarded in place of a refused one, then sends
+    /// `ReadyForQuery` with `transaction_status`
+    async fn rejected(&mut self, transaction_status: u8) {
+        self.server(error()).await;
+        self.server(ready(transaction_status)).await;
+    }
+
+    /// The `ErrorResponse` messages sent to the client so far, as their SQLSTATE codes
+    fn error_codes_sent_to_client(&mut self) -> Vec<String> {
+        let mut codes = vec![];
+        while let Ok(message) = self.to_client.try_recv() {
+            if message.first() == Some(&b'E') {
+                let fields = &message[5..];
+                let code = fields
+                    .split(|byte| *byte == 0)
+                    .find(|field| field.first() == Some(&b'C'))
+                    .map(|field| String::from_utf8_lossy(&field[1..]).into_owned())
+                    .unwrap_or_default();
+                codes.push(code);
+            }
+        }
+        codes
     }
 
     /// The number of `ErrorResponse` messages sent to the client so far, whether from Proxy or
@@ -833,6 +895,7 @@ mod settings_reset {
         connection
             .client(query("SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'"))
             .await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.context.keyset_identifier(), None);
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
@@ -841,6 +904,8 @@ mod settings_reset {
     async fn a_keyset_set_with_a_default_keyset_is_refused_when_prepared() {
         let mut connection = Connection::started().await;
         connection.client(parse("set_keyset", KEYSET_ID)).await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
         assert_eq!(connection.context.keyset_identifier(), None);
     }
@@ -864,6 +929,9 @@ mod settings_reset {
             .await;
         connection.client(bind("", "set_keyset")).await;
         connection.client(execute("")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
     }
@@ -1181,10 +1249,13 @@ mod settings_transactions {
         connection
             .client(query("SET CIPHERSTASH.UNKNOWN = 'value'"))
             .await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
         connection
             .client(parse("unknown", "RESET cipherstash.unknown"))
             .await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
 
@@ -1231,6 +1302,9 @@ mod settings_transactions {
             .await;
         connection.client(query("ROLLBACK")).await;
         connection.client(query(&set_keyset(KEYSET_A))).await;
+        connection.server(command_complete("ROLLBACK")).await;
+        connection.server(ready(b'I')).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
 
@@ -1274,6 +1348,8 @@ mod settings_transactions {
 
         // The statement was not mapped, so binding it now would forward plaintext
         connection.client(bind("", "s")).await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
 
@@ -1286,6 +1362,8 @@ mod settings_transactions {
             .await;
 
         connection.client(bind("", "s")).await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
 
@@ -1303,6 +1381,8 @@ mod settings_transactions {
         assert_eq!(connection.errors_sent_to_client(), 0);
 
         connection.client(execute("p")).await;
+        connection.client(sync()).await;
+        connection.rejected(b'E').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
     }
@@ -1376,5 +1456,139 @@ mod settings_transactions {
             .projected_settings()
             .unsafe_disable_mapping());
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
+    }
+}
+
+/// A message Proxy refuses still fails the batch, or the transaction, in PostgreSQL: Proxy
+/// forwards a message PostgreSQL rejects in its place, and the Sync, and sends the client its own
+/// error in place of PostgreSQL's.
+mod refusals {
+    use super::*;
+
+    const UNDEFINED_OBJECT_OR_NAME: [&str; 2] = ["26000", "34000"];
+
+    /// A started connection to a Proxy with no default keyset, with statement `s` prepared while
+    /// mapping was enabled and mapping now disabled
+    async fn connection_with_stale_statement() -> Connection {
+        let mut config = TandemConfig::for_testing();
+        config.encrypt.default_keyset_id = None;
+        let mut connection = Connection::with_config(config);
+        connection.server(ready(b'I')).await;
+        connection.prepare("s", "SELECT 1").await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection.forwarded().await;
+        connection.errors_sent_to_client();
+        connection
+    }
+
+    /// The name a forwarded Bind binds, or a forwarded Execute executes
+    fn target(body: &[u8], skip_portal: bool) -> String {
+        let mut fields = body.split(|byte| *byte == 0);
+        if skip_portal {
+            fields.next();
+        }
+        String::from_utf8_lossy(fields.next().unwrap()).into_owned()
+    }
+
+    #[tokio::test]
+    async fn a_refused_bind_is_forwarded_as_a_bind_postgresql_rejects() {
+        let mut connection = connection_with_stale_statement().await;
+        connection.client(bind("", "s")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        let forwarded = connection.forwarded().await;
+        let codes = forwarded.iter().map(|(code, _)| *code).collect::<Vec<_>>();
+        assert_eq!(codes, vec![b'B', b'S']);
+        assert!(target(&forwarded[0].1, true).starts_with("__cipherstash_"));
+        // The client gets Proxy's error once PostgreSQL rejects the Bind, then PostgreSQL's
+        // ReadyForQuery
+        assert_eq!(
+            connection.error_codes_sent_to_client(),
+            Vec::<String>::new()
+        );
+
+        connection.server(error()).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+        assert_eq!(connection.context.state_sizes().pending_settings, 0);
+    }
+
+    #[tokio::test]
+    async fn a_refused_execute_is_forwarded_as_an_execute_postgresql_rejects() {
+        let mut connection = Connection::started().await;
+        connection.client(query("BEGIN")).await;
+        connection.server(command_complete("BEGIN")).await;
+        connection.server(ready(b'T')).await;
+        connection.prepare("s", "SELECT 1").await;
+        connection.client(bind("p", "s")).await;
+        connection.client(sync()).await;
+        connection.server(bind_complete()).await;
+        connection.server(ready(b'T')).await;
+        connection
+            .client(query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"))
+            .await;
+        connection.server(command_complete("SET")).await;
+        connection.server(ready(b'T')).await;
+        connection.forwarded().await;
+        connection.errors_sent_to_client();
+
+        connection.client(execute("p")).await;
+        connection.client(sync()).await;
+
+        let forwarded = connection.forwarded().await;
+        let codes = forwarded.iter().map(|(code, _)| *code).collect::<Vec<_>>();
+        assert_eq!(codes, vec![b'E', b'S']);
+        assert!(target(&forwarded[0].1, false).starts_with("__cipherstash_"));
+
+        // PostgreSQL fails the transaction, so the client's COMMIT rolls back
+        connection.server(error()).await;
+        connection.server(ready(b'E')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+    }
+
+    #[tokio::test]
+    async fn a_refused_parse_is_forwarded_as_a_parse_postgresql_rejects() {
+        let mut connection = Connection::started().await;
+        connection.forwarded().await;
+        connection
+            .client(parse("", "SET CIPHERSTASH.UNKNOWN_SETTING = 1"))
+            .await;
+        connection.client(sync()).await;
+
+        assert_eq!(connection.forwarded_codes().await, vec![b'P', b'S']);
+        connection.server(error()).await;
+        connection.server(ready(b'I')).await;
+        let codes = connection.error_codes_sent_to_client();
+        assert_eq!(codes.len(), 1);
+        assert!(!UNDEFINED_OBJECT_OR_NAME.contains(&codes[0].as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_refused_query_is_forwarded_as_a_query_postgresql_rejects() {
+        let mut connection = Connection::started().await;
+        connection.client(query("BEGIN")).await;
+        connection.server(command_complete("BEGIN")).await;
+        connection.server(ready(b'T')).await;
+        connection.forwarded().await;
+        connection.errors_sent_to_client();
+
+        connection
+            .client(query("SET CIPHERSTASH.UNKNOWN_SETTING = 1"))
+            .await;
+
+        // PostgreSQL answers, and fails the transaction, rather than Proxy answering for it
+        assert_eq!(connection.forwarded_codes().await, vec![b'Q']);
+        assert_eq!(
+            connection.error_codes_sent_to_client(),
+            Vec::<String>::new()
+        );
+        connection.server(error()).await;
+        connection.server(ready(b'E')).await;
+        let codes = connection.error_codes_sent_to_client();
+        assert_eq!(codes.len(), 1);
+        assert!(!UNDEFINED_OBJECT_OR_NAME.contains(&codes[0].as_str()));
     }
 }

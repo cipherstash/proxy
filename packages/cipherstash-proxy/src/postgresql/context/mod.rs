@@ -25,6 +25,7 @@ use crate::{
     },
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
+use bytes::BytesMut;
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
@@ -107,6 +108,9 @@ where
     prepared_settings: Arc<RwLock<HashMap<Name, PreparedSettings>>>,
     /// Portals bound from one of those statements, with the generation they were bound in
     bound_settings: Arc<RwLock<HashMap<Name, (u64, BoundSettings)>>>,
+    /// The errors of messages Proxy refused, sent to the client in place of the error
+    /// PostgreSQL answers the batch with, with the generation of the batch
+    refusals: Arc<RwLock<VecDeque<(u64, BytesMut)>>>,
 }
 
 /// The settings a statement Proxy maps was prepared under.
@@ -313,6 +317,7 @@ pub(crate) struct StateSizes {
     pub portal_settings: usize,
     pub prepared_settings: usize,
     pub bound_settings: usize,
+    pub refusals: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -368,6 +373,7 @@ where
             portal_settings: Arc::new(RwLock::new(HashMap::new())),
             prepared_settings: Arc::new(RwLock::new(HashMap::new())),
             bound_settings: Arc::new(RwLock::new(HashMap::new())),
+            refusals: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
 
@@ -556,6 +562,7 @@ where
             portal_settings: self.portal_settings.read().unwrap().len(),
             prepared_settings: self.prepared_settings.read().unwrap().len(),
             bound_settings: self.bound_settings.read().unwrap().len(),
+            refusals: self.refusals.read().unwrap().len(),
         }
     }
 
@@ -807,6 +814,37 @@ where
             };
         });
         Ok(())
+    }
+
+    /// Record the error of a message Proxy refused, which is forwarded as a message PostgreSQL
+    /// rejects, so the client gets `response` in place of PostgreSQL's error.
+    pub fn refuse(&mut self, response: BytesMut) {
+        let generation = self.sync_generation();
+        let _ = self
+            .refusals
+            .write()
+            .map(|mut refusals| refusals.push_back((generation, response)));
+    }
+
+    /// The error to send the client in place of the `ErrorResponse` PostgreSQL is answering the
+    /// current batch with, if Proxy refused a message in it.
+    pub fn take_refusal(&mut self) -> Option<BytesMut> {
+        let answering = self.ready_generation();
+        let mut refusals = self.refusals.write().ok()?;
+        while refusals
+            .front()
+            .is_some_and(|(generation, _)| *generation < answering)
+        {
+            refusals.pop_front();
+        }
+        if refusals
+            .front()
+            .is_some_and(|(generation, _)| *generation == answering)
+        {
+            refusals.pop_front().map(|(_, response)| response)
+        } else {
+            None
+        }
     }
 
     /// Check that `portal` can be executed under `settings`.
@@ -1064,6 +1102,14 @@ where
         let _ = self.pending_deallocations.write().map(|mut pending| {
             while pending.front().is_some_and(|p| p.generation < answered) {
                 pending.pop_front();
+            }
+        });
+        let _ = self.refusals.write().map(|mut refusals| {
+            while refusals
+                .front()
+                .is_some_and(|(generation, _)| *generation < answered)
+            {
+                refusals.pop_front();
             }
         });
         if let Ok(mut settings) = self.settings.lock() {

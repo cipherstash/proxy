@@ -186,6 +186,12 @@ where
             if code == u8::from(BackendCode::ReadyForQuery) {
                 self.context.ready_for_query(transaction_status(&bytes));
             }
+            // PostgreSQL rejected the message Proxy forwarded in place of one it refused
+            if code == u8::from(BackendCode::ErrorResponse) {
+                if let Some(refusal) = self.context.take_refusal() {
+                    bytes = refusal;
+                }
+            }
             self.write_with_flush(bytes).await?;
 
             // The frontend starts a session and enqueues an execute for every
@@ -250,6 +256,10 @@ where
             BackendCode::ErrorResponse => {
                 if let Some(b) = self.error_response_handler(&bytes)? {
                     bytes = b
+                }
+                // PostgreSQL rejected the message Proxy forwarded in place of one it refused
+                if let Some(refusal) = self.context.take_refusal() {
+                    bytes = refusal;
                 }
 
                 match self.flush().await {
