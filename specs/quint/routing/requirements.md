@@ -40,6 +40,7 @@ Out:
 - `DEALLOCATE`, unnamed statements, portals as separate objects, Describe, Sync and pipelining.
 - Configuration-disabled mapping and an empty encrypt config as whole-connection passthrough.
 - Legacy EQL v2 columns (`UnmappableEncryptedColumn`).
+- Values already stored in a column when DDL changes its type: converting existing data is the migration's job, not routing's.
 
 ## Actors and failure model
 
@@ -66,7 +67,7 @@ Out:
 |---|---|---|---|---|
 | S1 | Proxy never forwards plaintext for a column that its schema said was encrypted when it routed the statement, unless mapping was disabled. | Safety | Core promise of refuse-by-default routing. | Intended. Violated as built (F3); holds with the D2 candidate fix. |
 | S2 | While encrypted columns are configured, Proxy never forwards plaintext for a column whose table it cannot resolve. | Safety | CIP-5102. | Intended and implemented on #484. |
-| S3 | No encrypted column holds plaintext, except plaintext written with mapping disabled. | Safety | The end-to-end promise. | Holds with a stable schema on Proxy alone once D2 is fixed; with concurrent DDL it rests on A4 (F1). |
+| S3 | No write stores plaintext in a column that is encrypted at the time of the write, except a write made with mapping disabled. Values already in a column when DDL later makes it encrypted are out of scope. | Safety | The end-to-end promise. | Holds with a stable schema on Proxy alone once D2 is fixed; with concurrent DDL it rests on A4 (F1). |
 | S4 | Proxy never forwards plaintext for a column that its schema says is encrypted at the moment it sends the write. | Safety | Stronger than S1: also covers routes that went stale. | Unresolved (D1). Violated by F1. |
 
 ## Findings

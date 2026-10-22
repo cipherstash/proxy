@@ -432,8 +432,9 @@ module routing {
   val noPlaintextToUnresolvable: bool =
     lastSent.forall(w => plainSafe(w) or not(w.routedView == VUnknown and w.routedEncConfigured))
 
-  /// S3: no encrypted column holds a plaintext value, except one written
-  /// with mapping disabled on purpose.
+  /// S3: no write stores plaintext in a column that is encrypted when the
+  /// write happens, except one made with mapping disabled on purpose. Values
+  /// already in a column when DDL later makes it encrypted are not tracked.
   val noPlaintextAtRest: bool =
     atRest.forall(r => r.payload == Cipher or r.unsafe)
 

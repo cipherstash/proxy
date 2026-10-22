@@ -32,7 +32,8 @@ A pass means the property holds for this finite instance, not for any number of 
 | `concurrentDdlNoDomainCheck` | S3 `noPlaintextAtRest` | violated (F1) | — | — |
 | `uncheckedWrites` | S1 `noPlaintextToKnownEncrypted` | violated (F2) | — | — |
 
-`check.sh tlc` fails if a property that should hold is violated, and also if an expected counterexample disappears, so a behaviour change that fixes a finding has to update `requirements.md` in the same change.
+`check.sh tlc` fails if a property that should hold is violated, and also if an expected counterexample disappears, so a model change that fixes a finding has to update `requirements.md` in the same change.
+Changes to Proxy's Rust code do not affect these results; there is no adapter between the model and the implementation.
 
 The S3 pass in `asBuiltNoUnsafe` and `bindRechecks` is with PostgreSQL's domain check switched off: there, Proxy's routing alone keeps plaintext out of encrypted columns.
 The S3 pass in `concurrentDdl` relies on the domain check; `concurrentDdlNoDomainCheck` shows it does.

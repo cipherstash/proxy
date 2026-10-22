@@ -38,7 +38,9 @@ The first `quint verify` downloads the Apalache distribution, which bundles TLC,
 Decide first whether a change is a requirements change or an implementation change.
 A requirements change updates `requirements.md` and the model together, and needs review of the property it changes.
 Never weaken a property to make a check pass.
-When Proxy's behaviour changes so that a recorded finding no longer reproduces, `check.sh tlc` fails until the finding is moved out of the expected violations.
+Nothing connects these checks to Proxy's Rust code yet, so changing Proxy alone never changes their results.
+When Proxy's behaviour changes, update the model by hand to match.
+If that model change means a recorded finding no longer reproduces, `check.sh tlc` fails until the finding is moved out of the expected violations.
 
 ## Tooling notes
 
