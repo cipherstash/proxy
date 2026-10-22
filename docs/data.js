@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792626659332,
+  "lastUpdate": 1792628927057,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28011,6 +28011,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.747514,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "635d4dc289fb12f4b64ed1ca8667cf2d71a2698b",
+          "message": "Consolidate prepared statement state and fail closed on unknown statements",
+          "timestamp": "2026-10-21T06:18:43Z",
+          "url": "https://github.com/cipherstash/proxy/pull/476/commits/635d4dc289fb12f4b64ed1ca8667cf2d71a2698b"
+        },
+        "date": 1792628925474,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.563371,
             "unit": "Number"
           }
         ]
