@@ -39,7 +39,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 use tracing::{debug, error, warn};
 
 type DescribeQueue = Queue<Describe>;
@@ -82,6 +82,8 @@ where
     /// answered yet. Shared by the frontend, which queues commands, and the backend, which
     /// applies them as PostgreSQL answers.
     settings: Arc<Mutex<SettingsState>>,
+    /// Notified on every `ReadyForQuery`, see [`Context::settings_barrier`]
+    batch_answered: Arc<Notify>,
     session_id_counter: Arc<AtomicU64>,
     sync_generation: Arc<AtomicU64>,
     ready_generation: Arc<AtomicU64>,
@@ -137,6 +139,9 @@ struct SettingsState {
     /// [`SettingsState::projected`], kept while it stays valid, so a long pipeline does not
     /// replay every pending command for each message
     projected: Option<ConnectionSettings>,
+    /// Generation of the last batch with a command that may change the settings, see
+    /// [`Context::settings_barrier`]
+    barrier: Option<u64>,
 }
 
 impl SettingsState {
@@ -156,6 +161,9 @@ impl SettingsState {
     }
 
     fn push(&mut self, pending: PendingSettings) {
+        if pending.command.may_change_settings() {
+            self.barrier = Some(pending.generation);
+        }
         if let Some(projected) = &mut self.projected {
             projected.project(&pending.command);
         }
@@ -357,6 +365,7 @@ where
             encryption,
             reload_sender,
             settings: Arc::new(Mutex::new(SettingsState::default())),
+            batch_answered: Arc::new(Notify::new()),
             session_id_counter: Arc::new(AtomicU64::new(1)),
             // The StartupMessage is answered by the first ReadyForQuery
             sync_generation: Arc::new(AtomicU64::new(1)),
@@ -1126,6 +1135,39 @@ where
         if transaction_status == b'I' {
             self.discard_portals_before(answered);
         }
+        self.batch_answered.notify_waiters();
+    }
+
+    /// Wait until PostgreSQL has answered every batch sent so far that may change the settings.
+    ///
+    /// Within a batch, a statement runs only if the statements before it succeed, so it can be
+    /// mapped under the settings projected from them. A later batch runs whether or not they
+    /// succeed, and after a `SET LOCAL` in the batch has ended, so it is mapped under the
+    /// settings PostgreSQL confirms.
+    pub async fn settings_barrier(&self) {
+        loop {
+            let answered = self.batch_answered.notified();
+            tokio::pin!(answered);
+            answered.as_mut().enable();
+            if !self.settings_in_flight() {
+                return;
+            }
+            debug!(target: CONTEXT, client_id = self.client_id, msg = "Waiting for settings");
+            answered.await;
+        }
+    }
+
+    /// A batch that may change the settings has been sent and not answered yet
+    fn settings_in_flight(&self) -> bool {
+        // A poisoned lock still waits, so Proxy fails closed
+        let barrier = self
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .barrier;
+        barrier.is_some_and(|generation| {
+            generation < self.sync_generation() && generation >= self.ready_generation()
+        })
     }
 
     fn discard_portals_before(&mut self, generation: u64) {

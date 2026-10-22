@@ -470,6 +470,7 @@ The parameter follows PostgreSQL's rules for settings in transactions: a change 
 `SET LOCAL CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true` disables mapping for the rest of the current transaction only.
 `RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`, `RESET ALL` and `DISCARD ALL` turn mapping back on.
 A prepared statement is refused once mapping has been turned on or off since it was prepared; prepare it again under the new setting.
+A query or batch the client pipelines after one that changes the setting is held until PostgreSQL has answered the earlier one, so it runs under the setting PostgreSQL confirmed.
 
 > [!IMPORTANT]
 > Extra care is required when using `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.

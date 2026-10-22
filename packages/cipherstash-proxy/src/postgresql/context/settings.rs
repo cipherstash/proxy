@@ -231,6 +231,17 @@ impl SettingsCommand {
     }
 
     /// The command tag PostgreSQL confirms the command with when it succeeds
+    /// Whether running the command, or failing to, may change the settings.
+    ///
+    /// `BEGIN` and `SAVEPOINT` only mark where a later rollback returns to, and `RELEASE` keeps
+    /// the settings as they are.
+    pub fn may_change_settings(&self) -> bool {
+        !matches!(
+            self,
+            Self::Other | Self::Begin | Self::Savepoint(_) | Self::Release(_)
+        )
+    }
+
     pub fn success_tag(&self) -> &'static str {
         if matches!(self, Self::Rollback | Self::RollbackTo(_)) {
             "ROLLBACK"

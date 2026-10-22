@@ -102,7 +102,28 @@ impl Connection {
     /// The client sends `message`
     async fn client(&mut self, message: BytesMut) {
         self.client.write_all(&message).await.unwrap();
-        self.frontend.rewrite().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), self.frontend.rewrite())
+            .await
+            .expect("the frontend is waiting for PostgreSQL")
+            .unwrap();
+    }
+
+    /// The client sends `message`, which the frontend holds until PostgreSQL sends `responses`
+    async fn client_after(&mut self, message: BytesMut, responses: Vec<BytesMut>) {
+        self.client.write_all(&message).await.unwrap();
+        let rewrite = self.frontend.rewrite();
+        tokio::pin!(rewrite);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut rewrite)
+                .await
+                .is_err(),
+            "the frontend did not wait for PostgreSQL"
+        );
+        for response in responses {
+            self.server.write_all(&response).await.unwrap();
+            self.backend.rewrite().await.unwrap();
+        }
+        rewrite.await.unwrap();
     }
 
     /// PostgreSQL sends `message`
@@ -593,9 +614,12 @@ mod settings_reset {
 
         // The next client's SET is sent before PostgreSQL confirms the reset
         connection.client(query("DISCARD ALL")).await;
-        connection.client(query(KEYSET_ID)).await;
-        connection.server(command_complete("DISCARD ALL")).await;
-        connection.server(ready(b'I')).await;
+        connection
+            .client_after(
+                query(KEYSET_ID),
+                vec![command_complete("DISCARD ALL"), ready(b'I')],
+            )
+            .await;
         connection.server(command_complete("SET")).await;
         connection.server(ready(b'I')).await;
 
@@ -612,12 +636,16 @@ mod settings_reset {
         connection.client(execute("")).await;
         connection.client(sync()).await;
         connection
-            .client(query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"))
+            .client_after(
+                query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"),
+                vec![
+                    parse_complete(),
+                    bind_complete(),
+                    command_complete("RESET"),
+                    ready(b'I'),
+                ],
+            )
             .await;
-        connection.server(parse_complete()).await;
-        connection.server(bind_complete()).await;
-        connection.server(command_complete("RESET")).await;
-        connection.server(ready(b'I')).await;
         connection.server(command_complete("SET")).await;
         connection.server(ready(b'I')).await;
 
@@ -735,11 +763,14 @@ mod settings_reset {
 
         // PostgreSQL runs the reset, then the prepared SET
         connection.client(query("RESET ALL")).await;
-        connection.client(bind("", "set_keyset")).await;
+        connection
+            .client_after(
+                bind("", "set_keyset"),
+                vec![command_complete("RESET"), ready(b'I')],
+            )
+            .await;
         connection.client(execute("")).await;
         connection.client(sync()).await;
-        connection.server(command_complete("RESET")).await;
-        connection.server(ready(b'I')).await;
         connection.server(bind_complete()).await;
         connection.server(command_complete("SET")).await;
         connection.server(ready(b'I')).await;
@@ -832,9 +863,12 @@ mod settings_reset {
         connection
             .client(query("RESET CIPHERSTASH.UNSAFE_DISABLE_MAPPING"))
             .await;
-        connection.client(query(OTHER_KEYSET_ID)).await;
-        connection.server(command_complete("RESET")).await;
-        connection.server(ready(b'I')).await;
+        connection
+            .client_after(
+                query(OTHER_KEYSET_ID),
+                vec![command_complete("RESET"), ready(b'I')],
+            )
+            .await;
         connection.server(command_complete("SET")).await;
         connection.server(ready(b'I')).await;
 
@@ -966,7 +1000,7 @@ mod settings_transactions {
 
     impl Connection {
         /// Send a simple Query and reply with `tag` and a `ReadyForQuery` with `status`
-        async fn simple_in(&mut self, sql: &str, tag: &str, status: u8) {
+        pub(super) async fn simple_in(&mut self, sql: &str, tag: &str, status: u8) {
             self.client(query(sql)).await;
             self.server(command_complete(tag)).await;
             self.server(ready(status)).await;
@@ -1283,7 +1317,7 @@ mod settings_transactions {
     }
 
     #[tokio::test]
-    async fn statements_sent_before_a_change_is_confirmed_use_the_change() {
+    async fn statements_sent_after_a_change_wait_for_it() {
         // With a default keyset, a keyset SET is refused while mapping is enabled and ignored
         // while it is disabled
         let mut connection = Connection::started().await;
@@ -1291,7 +1325,12 @@ mod settings_transactions {
             .client(query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true"))
             .await;
         assert!(!connection.context.unsafe_disable_mapping());
-        connection.client(query(&set_keyset(KEYSET_A))).await;
+        connection
+            .client_after(
+                query(&set_keyset(KEYSET_A)),
+                vec![command_complete("SET"), ready(b'I')],
+            )
+            .await;
         assert_eq!(connection.errors_sent_to_client(), 0);
 
         // Once the transaction that disabled mapping rolls back, the keyset SET is refused
@@ -1301,9 +1340,12 @@ mod settings_transactions {
             .simple_in("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET", b'T')
             .await;
         connection.client(query("ROLLBACK")).await;
-        connection.client(query(&set_keyset(KEYSET_A))).await;
-        connection.server(command_complete("ROLLBACK")).await;
-        connection.server(ready(b'I')).await;
+        connection
+            .client_after(
+                query(&set_keyset(KEYSET_A)),
+                vec![command_complete("ROLLBACK"), ready(b'I')],
+            )
+            .await;
         connection.rejected(b'I').await;
         assert_eq!(connection.errors_sent_to_client(), 1);
     }
@@ -1456,6 +1498,134 @@ mod settings_transactions {
             .projected_settings()
             .unsafe_disable_mapping());
         assert_eq!(connection.context.state_sizes().pending_settings, 0);
+    }
+}
+
+/// A statement is mapped under the settings it runs with: once a batch that may change the
+/// settings has been sent, Proxy waits for PostgreSQL to answer it before it maps a statement
+/// from a later batch, as the change may fail or end with the batch.
+mod settings_barrier {
+    use super::*;
+
+    const DISABLE_MAPPING: &str = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
+
+    /// A started connection to a Proxy with no default keyset
+    async fn connection() -> Connection {
+        let mut config = TandemConfig::for_testing();
+        config.encrypt.default_keyset_id = None;
+        let mut connection = Connection::with_config(config);
+        connection.server(ready(b'I')).await;
+        connection
+    }
+
+    impl Connection {
+        /// Bind statement `name` to the unnamed portal, Execute and Sync, with PostgreSQL's
+        /// responses
+        async fn run_prepared(&mut self, name: &str, tag: &str) {
+            self.client(bind("", name)).await;
+            self.client(execute("")).await;
+            self.client(sync()).await;
+            self.server(bind_complete()).await;
+            self.server(command_complete(tag)).await;
+            self.server(ready(b'I')).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_set_in_a_query_that_fails_does_not_apply_to_the_next_batch() {
+        let mut connection = connection().await;
+        connection.client(query(DISABLE_MAPPING)).await;
+
+        connection
+            .client_after(parse("s", "SELECT 1"), vec![error(), ready(b'I')])
+            .await;
+        connection.client(sync()).await;
+        connection.server(parse_complete()).await;
+        connection.server(ready(b'I')).await;
+        assert!(!connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
+
+        // `s` was prepared with mapping enabled, as it is now
+        connection.errors_sent_to_client();
+        connection.run_prepared("s", "SELECT 1").await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_set_local_in_an_implicit_transaction_ends_before_the_next_batch() {
+        let mut connection = connection().await;
+        connection
+            .client(parse(
+                "",
+                "SET LOCAL CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            ))
+            .await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        connection
+            .client_after(
+                query("SELECT 1"),
+                vec![
+                    parse_complete(),
+                    bind_complete(),
+                    command_complete("SET"),
+                    ready(b'I'),
+                ],
+            )
+            .await;
+        assert!(!connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
+    async fn a_query_waits_for_a_rollback_sent_before_it() {
+        let mut connection = connection().await;
+        connection.simple_in("BEGIN", "BEGIN", b'T').await;
+        connection.simple_in(DISABLE_MAPPING, "SET", b'T').await;
+        connection.client(query("ROLLBACK")).await;
+
+        connection
+            .client_after(
+                query("SELECT 1"),
+                vec![command_complete("ROLLBACK"), ready(b'I')],
+            )
+            .await;
+        assert!(!connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
+    }
+
+    #[tokio::test]
+    async fn a_batch_that_cannot_change_the_settings_is_not_waited_for() {
+        let mut connection = connection().await;
+        connection.client(query("BEGIN")).await;
+        connection.client(query("SELECT 1")).await;
+        connection.client(parse("", "SAVEPOINT a")).await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        connection.client(parse("s", "SELECT 1")).await;
+    }
+
+    #[tokio::test]
+    async fn messages_in_the_batch_that_changes_the_settings_are_not_held() {
+        let mut connection = connection().await;
+        connection.client(parse("", DISABLE_MAPPING)).await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(parse("s", "SELECT 1")).await;
+        connection.client(sync()).await;
+        assert!(connection
+            .context
+            .projected_settings()
+            .unsafe_disable_mapping());
     }
 }
 

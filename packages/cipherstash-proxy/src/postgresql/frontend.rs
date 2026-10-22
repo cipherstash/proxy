@@ -202,6 +202,12 @@ where
             self.error_state = None;
         }
 
+        // A statement from a later batch than one that may change the settings is mapped once
+        // PostgreSQL has answered that batch
+        if matches!(code, Code::Query | Code::Parse | Code::Bind | Code::Execute) {
+            self.context.settings_barrier().await;
+        }
+
         match code {
             Code::Query => {
                 let result = self.query_handler(&bytes).await;
