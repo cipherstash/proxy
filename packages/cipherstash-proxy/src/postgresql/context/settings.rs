@@ -230,18 +230,29 @@ impl SettingsCommand {
         Ok(command)
     }
 
-    /// The command tag PostgreSQL confirms the command with when it succeeds
-    /// Whether running the command, or failing to, may change the settings.
+    /// Whether running the command after `settings` may change the effective settings, the
+    /// keyset and whether mapping is disabled.
     ///
     /// `BEGIN` and `SAVEPOINT` only mark where a later rollback returns to, and `RELEASE` keeps
-    /// the settings as they are.
-    pub fn may_change_settings(&self) -> bool {
-        !matches!(
+    /// the settings as they are. A `COMMIT` may also roll back, if a statement PostgreSQL has
+    /// not answered yet fails the transaction.
+    pub fn may_change_effective(&self, settings: &ConnectionSettings) -> bool {
+        if matches!(
             self,
             Self::Other | Self::Begin | Self::Savepoint(_) | Self::Release(_)
-        )
+        ) {
+            return false;
+        }
+        let before = EffectiveSettings::new(settings);
+        let changes = |tag| {
+            let mut after = settings.clone();
+            after.command_succeeded(self, tag);
+            EffectiveSettings::new(&after) != before
+        };
+        changes(self.success_tag()) || (matches!(self, Self::Commit) && changes("ROLLBACK"))
     }
 
+    /// The command tag PostgreSQL confirms the command with when it succeeds
     pub fn success_tag(&self) -> &'static str {
         if matches!(self, Self::Rollback | Self::RollbackTo(_)) {
             "ROLLBACK"

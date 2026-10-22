@@ -161,11 +161,13 @@ impl SettingsState {
     }
 
     fn push(&mut self, pending: PendingSettings) {
-        if pending.command.may_change_settings() {
-            self.barrier = Some(pending.generation);
-        }
-        if let Some(projected) = &mut self.projected {
+        if !matches!(pending.command, SettingsCommand::Other) {
+            let mut projected = self.projected();
+            if pending.command.may_change_effective(&projected) {
+                self.barrier = Some(pending.generation);
+            }
             projected.project(&pending.command);
+            self.projected = Some(projected);
         }
         self.pending.push_back(pending);
     }
