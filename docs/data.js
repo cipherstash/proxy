@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792628927057,
+  "lastUpdate": 1792629091074,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28036,6 +28036,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.563371,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc71a5c3a32dff69b7dc675a38b13440f26fe62e",
+          "message": "Merge pull request #478 from cipherstash/claude/project-thread-6p3srz\n\ntest(proxy): cover CIPHERSTASH settings in rolled-back transactions (CIP-5058)",
+          "timestamp": "2026-10-22T11:25:31+11:00",
+          "tree_id": "e3c8d25a45a8ce0a607d1ae2604bea862bdb1996",
+          "url": "https://github.com/cipherstash/proxy/commit/fc71a5c3a32dff69b7dc675a38b13440f26fe62e"
+        },
+        "date": 1792629089575,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.60066,
             "unit": "Number"
           }
         ]
