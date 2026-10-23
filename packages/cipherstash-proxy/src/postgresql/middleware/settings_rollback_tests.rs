@@ -202,6 +202,103 @@ impl Client {
             .unwrap();
     }
 
+    /// Runs `sql` as a simple Query, or through Parse, Bind, Execute and Sync of the
+    /// unnamed statement
+    async fn run(&mut self, extended: bool, sql: &str, tag: &str, status: TransactionStatus) {
+        if extended {
+            self.pipeline(&[(sql, Some(tag))], status).await;
+        } else {
+            self.command(sql, tag, status).await;
+        }
+    }
+
+    /// Sends `statements` as one extended-protocol batch, each through Parse, Bind and
+    /// Execute of the unnamed statement, followed by one Sync. A `None` tag is an
+    /// Execute PostgreSQL rejects, after which it skips the rest of the batch.
+    ///
+    /// Like the driver, this reads PostgreSQL's replies only when an Execute leaves a
+    /// settings change in flight, and otherwise keeps sending the batch.
+    async fn pipeline(&mut self, statements: &[(&str, Option<&str>)], status: TransactionStatus) {
+        let mut replies = Vec::new();
+        let mut failed = false;
+        for (sql, tag) in statements {
+            let parse = operation_id();
+            self.frontend
+                .intercept(
+                    parse,
+                    FrontendMessage::Parse(pg_proto::Parse {
+                        statement: Bytes::new(),
+                        query: Bytes::copy_from_slice(sql.as_bytes()),
+                        parameter_types: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
+            let bind = operation_id();
+            self.frontend
+                .intercept(
+                    bind,
+                    FrontendMessage::Bind(pg_proto::Bind {
+                        portal: Bytes::new(),
+                        statement: Bytes::new(),
+                        parameter_formats: Vec::new(),
+                        parameters: Vec::new(),
+                        result_formats: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
+            let execute = operation_id();
+            self.frontend
+                .intercept(
+                    execute,
+                    FrontendMessage::Execute(pg_proto::Execute {
+                        portal: Bytes::new(),
+                        max_rows: 0,
+                    }),
+                )
+                .await
+                .unwrap();
+            if !failed {
+                replies.push((parse, BackendMessage::ParseComplete));
+                replies.push((bind, BackendMessage::BindComplete));
+                replies.push((
+                    execute,
+                    match tag {
+                        Some(tag) => {
+                            BackendMessage::CommandComplete(Bytes::copy_from_slice(tag.as_bytes()))
+                        }
+                        None => BackendMessage::ErrorResponse(
+                            crate::postgresql::diagnostics::invalid_sql_statement(
+                                "rejected".to_owned(),
+                            ),
+                        ),
+                    },
+                ));
+                failed = tag.is_none();
+            }
+            if self.context.settings_in_flight().unwrap() {
+                self.reply(&mut replies).await;
+            }
+        }
+        let sync = operation_id();
+        self.frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        replies.push((sync, BackendMessage::ReadyForQuery(status)));
+        self.reply(&mut replies).await;
+    }
+
+    async fn reply(&mut self, replies: &mut Vec<(crate::postgresql::OperationId, BackendMessage)>) {
+        for (operation, message) in replies.drain(..) {
+            self.backend
+                .intercept(Some(operation), message)
+                .await
+                .unwrap();
+        }
+    }
+
     async fn sync(&mut self, status: TransactionStatus) {
         let operation = operation_id();
         self.frontend
@@ -696,4 +793,175 @@ async fn failed_pipelined_execute_with_mapping_disabled_does_not_suppress_next_q
         )
         .await
         .unwrap();
+}
+
+/// Rolls back, either the whole transaction or to a savepoint taken after BEGIN, every
+/// change in `changes` made over `original` settings, and checks the next encrypted
+/// INSERT uses the keyset selected before the transaction.
+async fn rollback_restores_original_keyset(
+    extended: bool,
+    to_savepoint: bool,
+    changes: &[(&str, &str)],
+) {
+    use TransactionStatus::{Idle, InTransaction};
+    let mut client = Client::new();
+    client
+        .run(
+            extended,
+            "SET CIPHERSTASH.KEYSET_NAME = 'original'",
+            "SET",
+            Idle,
+        )
+        .await;
+    client.run(extended, "BEGIN", "BEGIN", InTransaction).await;
+    if to_savepoint {
+        client
+            .run(
+                extended,
+                "SAVEPOINT before_change",
+                "SAVEPOINT",
+                InTransaction,
+            )
+            .await;
+    }
+    for (sql, tag) in changes {
+        client.run(extended, sql, tag, InTransaction).await;
+    }
+    assert_ne!(
+        (
+            client.context.keyset_identifier().unwrap(),
+            client.context.unsafe_disable_mapping().unwrap()
+        ),
+        (named("original"), false),
+        "{changes:?} changed nothing"
+    );
+    if to_savepoint {
+        client
+            .run(
+                extended,
+                "ROLLBACK TO before_change",
+                "ROLLBACK",
+                InTransaction,
+            )
+            .await;
+    } else {
+        client.run(extended, "ROLLBACK", "ROLLBACK", Idle).await;
+    }
+    client.encrypted_insert_uses(named("original")).await;
+}
+
+#[tokio::test]
+async fn rolled_back_keyset_name_reset_restores_the_selected_keyset() {
+    for extended in [false, true] {
+        for to_savepoint in [false, true] {
+            for reset in [
+                ("RESET CIPHERSTASH.KEYSET_NAME", "RESET"),
+                ("SET CIPHERSTASH.KEYSET_NAME TO DEFAULT", "SET"),
+            ] {
+                rollback_restores_original_keyset(extended, to_savepoint, &[reset]).await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn rolled_back_extended_protocol_set_and_reset_restore_settings() {
+    for to_savepoint in [false, true] {
+        for changes in [
+            &[("SET CIPHERSTASH.KEYSET_NAME = 'other'", "SET")][..],
+            &[("SET LOCAL CIPHERSTASH.KEYSET_NAME = 'other'", "SET")],
+            &[("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")],
+            &[("RESET CIPHERSTASH.KEYSET_ID", "RESET")],
+            &[("RESET ALL", "RESET")],
+            &[
+                ("SET CIPHERSTASH.KEYSET_NAME = 'other'", "SET"),
+                ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET"),
+                ("RESET CIPHERSTASH.KEYSET_NAME", "RESET"),
+            ],
+        ] {
+            rollback_restores_original_keyset(true, to_savepoint, changes).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn pipelined_batch_that_changes_settings_and_rolls_back_restores_them() {
+    use TransactionStatus::{Idle, InTransaction};
+    let changes = [
+        ("SET CIPHERSTASH.KEYSET_NAME = 'other'", Some("SET")),
+        ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", Some("SET")),
+    ];
+    let full_rollback = [
+        &[("BEGIN", Some("BEGIN"))][..],
+        &changes,
+        &[("ROLLBACK", Some("ROLLBACK"))],
+    ]
+    .concat();
+    let savepoint_rollback = [
+        &[("BEGIN", Some("BEGIN")), ("SAVEPOINT s", Some("SAVEPOINT"))][..],
+        &changes,
+        &[("ROLLBACK TO s", Some("ROLLBACK"))],
+    ]
+    .concat();
+    // The batch's implicit transaction is rolled back when a later statement fails
+    let implicit_abort = [&changes[..], &[("SELECT 1 / 0", None)]].concat();
+    for (batch, status) in [
+        (full_rollback, Idle),
+        (savepoint_rollback, InTransaction),
+        (implicit_abort, Idle),
+    ] {
+        let mut client = Client::new();
+        client
+            .command("SET CIPHERSTASH.KEYSET_NAME = 'original'", "SET", Idle)
+            .await;
+        client.pipeline(&batch, status).await;
+        client.encrypted_insert_uses(named("original")).await;
+    }
+}
+
+/// On PostgreSQL 14 to 17, `DISCARD ALL` is accepted only as the first Execute of an
+/// extended-protocol batch, and is committed at once. A later failure in the batch
+/// rolls back only what follows it.
+#[tokio::test]
+async fn discard_all_that_opens_a_pipeline_is_kept_when_a_later_statement_fails() {
+    let mut client = Client::new();
+    client
+        .command(
+            "SET CIPHERSTASH.KEYSET_NAME = 'original'",
+            "SET",
+            TransactionStatus::Idle,
+        )
+        .await;
+    client
+        .pipeline(
+            &[
+                ("DISCARD ALL", Some("DISCARD ALL")),
+                ("SET CIPHERSTASH.KEYSET_NAME = 'after'", Some("SET")),
+                ("SELECT 1 / 0", None),
+            ],
+            TransactionStatus::Idle,
+        )
+        .await;
+    client.encrypted_insert_uses(None).await;
+}
+
+/// PostgreSQL rejects `DISCARD ALL` after the first Execute of a batch with
+/// "DISCARD ALL cannot be executed within a pipeline"
+#[tokio::test]
+async fn discard_all_rejected_later_in_a_pipeline_keeps_settings() {
+    let mut client = Client::new();
+    client
+        .command(
+            "SET CIPHERSTASH.KEYSET_NAME = 'original'",
+            "SET",
+            TransactionStatus::Idle,
+        )
+        .await;
+    client
+        .pipeline(
+            &[("SELECT 1", Some("SELECT 1")), ("DISCARD ALL", None)],
+            TransactionStatus::Idle,
+        )
+        .await;
+    client.encrypted_insert_uses(named("original")).await;
 }

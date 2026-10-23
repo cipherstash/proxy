@@ -1,12 +1,14 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, execute_query, query_with_client, random_id,
-        simple_query_with_client, trace, PROXY,
+        assert_db_error, clear, connect_with_tls, execute_query, query_direct_by,
+        query_with_client, random_id, simple_query_with_client, trace, PROXY,
     };
+    use cipherstash_client::eql::EqlCiphertextV3;
     use serde::Deserialize;
     use serde_json::Value;
     use tokio_postgres::types::{FromSql, ToSql};
+    use uuid::Uuid;
 
     #[derive(Clone, Debug, ToSql, FromSql, PartialEq, Deserialize)]
     #[postgres(name = "eql_v3_text_search")]
@@ -215,7 +217,8 @@ mod tests {
 
     ///
     /// Tests that a change to `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` in a rolled-back transaction is
-    /// undone, as PostgreSQL undoes it. Runs with `default_keyset_id` configured.
+    /// undone, as PostgreSQL undoes it, and that encrypted writes still use the default keyset.
+    /// Runs with `default_keyset_id` configured, and asserts it.
     /// Test both extended and simple query protocols
     ///
     #[tokio::test]
@@ -223,6 +226,16 @@ mod tests {
         trace();
 
         clear().await;
+
+        // Proxy runs with `default_keyset_id` configured, so it refuses to select a keyset
+        let other = connect_with_tls(*PROXY).await;
+        assert_db_error(
+            other
+                .simple_query("SET CIPHERSTASH.KEYSET_NAME = 'tenant-1'")
+                .await,
+            "FATAL",
+            "Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unexpected-set-keyset",
+        );
 
         let id = random_id();
         let encrypted_text = "hello".to_string();
@@ -288,6 +301,53 @@ mod tests {
                 .simple_query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false")
                 .await
                 .unwrap();
+
+            // With mapping enabled, an encrypted write after a rolled-back reset
+            // still uses the default keyset
+            client.simple_query("BEGIN").await.unwrap();
+            client.simple_query(reset).await.unwrap();
+            client.simple_query("ROLLBACK").await.unwrap();
+            client.execute("BEGIN", &[]).await.unwrap();
+            client.execute(reset, &[]).await.unwrap();
+            client.execute("ROLLBACK", &[]).await.unwrap();
+
+            let id = random_id();
+            client.execute(sql, &[&id, &encrypted_text]).await.unwrap();
+            assert_eq!(
+                stored_keyset_id(id).await,
+                Some(default_keyset_id()),
+                "{reset}"
+            );
+            client
+                .execute("DELETE FROM encrypted WHERE id = $1", &[&id])
+                .await
+                .unwrap();
+        }
+    }
+
+    /// The keyset Proxy is configured to encrypt with when none is selected
+    fn default_keyset_id() -> Uuid {
+        std::env::var("CS_DEFAULT_KEYSET_ID")
+            .or_else(|_| std::env::var("CS_ENCRYPT__DEFAULT_KEYSET_ID"))
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    /// The keyset of the `encrypted_text` ciphertext stored for `id`, read from PostgreSQL
+    /// directly
+    async fn stored_keyset_id(id: i64) -> Option<Uuid> {
+        let rows = query_direct_by::<Value>(
+            "SELECT encrypted_text::jsonb FROM encrypted WHERE id = $1",
+            &id,
+        )
+        .await;
+        let [row] = rows.as_slice() else {
+            panic!("expected one row for {id}, got {rows:?}");
+        };
+        match serde_json::from_value(row.clone()).unwrap() {
+            EqlCiphertextV3::Encrypted(payload) => payload.ciphertext.keyset_id,
+            EqlCiphertextV3::SteVec(_) => panic!("expected a scalar ciphertext, got {row}"),
         }
     }
 }
