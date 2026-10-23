@@ -139,4 +139,14 @@ impl TypeError {
             _ => None,
         }
     }
+
+    /// Returns the table name when this error means a statement names a table
+    /// the schema cannot resolve.
+    pub fn as_table_not_found(&self) -> Option<&str> {
+        match self {
+            TypeError::SchemaError(err) => err.as_table_not_found(),
+            TypeError::ScopeError(err) => err.as_table_not_found(),
+            _ => None,
+        }
+    }
 }

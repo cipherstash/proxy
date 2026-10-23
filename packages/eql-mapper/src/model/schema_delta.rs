@@ -75,7 +75,8 @@ impl SchemaWithEdits {
     fn get_overlay_mut(&mut self, table_name: &ObjectName) -> &mut Overlay {
         let key = self.canonical_key(table_name);
         let overlay = {
-            let schema_table = self.schema.resolve_table(&key);
+            // As in `resolve_table`, look the table up by the caller's name.
+            let schema_table = self.schema.resolve_table(table_name);
             match schema_table {
                 Ok(schema_table) => Overlay::Table(OverlayTable::from(&*schema_table)),
                 Err(_) => Overlay::Table(OverlayTable::new(key.clone())),
@@ -92,7 +93,10 @@ impl SchemaWithEdits {
                 Overlay::Dropped => Err(SchemaError::TableNotFound(name.to_string())),
                 Overlay::Table(overlay_table) => Ok(Arc::new(overlay_table.into())),
             },
-            None => self.schema.resolve_table(&key),
+            // The caller's name, not the overlay key: the key drops a
+            // qualifier naming this schema, which would let `public.users`
+            // resolve to a `users` loaded from another schema.
+            None => self.schema.resolve_table(name),
         }
     }
 
@@ -217,7 +221,15 @@ impl OverlayTable {
 impl From<&Table> for OverlayTable {
     fn from(value: &Table) -> Self {
         Self {
-            name: ObjectName(vec![ObjectNamePart::Identifier(value.name.clone())]),
+            name: ObjectName(
+                value
+                    .schema
+                    .iter()
+                    .chain([&value.name])
+                    .cloned()
+                    .map(ObjectNamePart::Identifier)
+                    .collect(),
+            ),
             columns: value.columns.iter().map(|col| (**col).clone()).collect(),
         }
     }
@@ -227,8 +239,13 @@ impl From<&OverlayTable> for Table {
     fn from(value: &OverlayTable) -> Self {
         let ObjectName(parts) = &value.name;
         let ObjectNamePart::Identifier(ident) = parts.last().unwrap();
+        let schema = match parts.as_slice() {
+            [ObjectNamePart::Identifier(schema), _] => Some(schema.clone()),
+            _ => None,
+        };
 
         Self {
+            schema,
             name: ident.clone(),
             columns: value.columns.iter().cloned().map(Arc::new).collect(),
         }
@@ -457,6 +474,22 @@ mod test {
         assert!(resolver
             .resolve_table_column(&object_name("secrets"), &id("secret"))
             .is_ok());
+    }
+
+    #[test]
+    fn qualifier_naming_this_schema_does_not_resolve_a_table_loaded_from_another() {
+        let mut schema = crate::Schema::new("public");
+        schema.add_table(crate::Table::in_schema(
+            Ident::new("app"),
+            Ident::new("users"),
+        ));
+        let resolver = Arc::new(TableResolver::new_editable(Arc::new(schema)));
+
+        assert!(resolver.resolve_table(&qualified("app", "users")).is_ok());
+        assert_eq!(
+            resolver.resolve_table(&qualified("public", "users")),
+            Err(SchemaError::TableNotFound("public.users".into()))
+        );
     }
 
     #[test]

@@ -8,7 +8,8 @@ use crate::{
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -70,6 +71,81 @@ pub fn requires_type_check(statement: &Statement) -> bool {
     )
 }
 
+/// Returns whether the [`Statement`] writes rows: an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one nested
+/// in a `PREPARE`, an `EXPLAIN` or a data-modifying CTE.
+pub fn writes_data(statement: &Statement) -> bool {
+    struct FindWrite;
+
+    impl<'ast> Visitor<'ast> for FindWrite {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(
+                    Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Merge { .. },
+                ) => ControlFlow::Break(Break::Finished),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    statement.accept(&mut FindWrite).is_break()
+}
+
+/// Returns the tables the [`Statement`] writes to, found as [`writes_data`] finds its writes, or `None` when a write
+/// target is not a plain table name (a table function or a subquery, say).
+pub fn write_targets(statement: &Statement) -> Option<Vec<ast::ObjectName>> {
+    #[derive(Default)]
+    struct FindTargets {
+        names: Vec<ast::ObjectName>,
+        unnamed: bool,
+    }
+
+    impl FindTargets {
+        fn relation(&mut self, relation: &ast::TableFactor) {
+            match relation {
+                ast::TableFactor::Table { name, .. } => self.names.push(name.clone()),
+                _ => self.unnamed = true,
+            }
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for FindTargets {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(Statement::Insert(insert)) => match &insert.table {
+                    ast::TableObject::TableName(name) => self.names.push(name.clone()),
+                    _ => self.unnamed = true,
+                },
+                Some(Statement::Update { table, .. }) => self.relation(&table.relation),
+                Some(Statement::Delete(delete)) if !delete.tables.is_empty() => {
+                    self.names.extend(delete.tables.iter().cloned())
+                }
+                Some(Statement::Delete(delete)) => match &delete.from {
+                    ast::FromTable::WithFromKeyword(tables)
+                    | ast::FromTable::WithoutKeyword(tables) => {
+                        for table in tables {
+                            self.relation(&table.relation);
+                        }
+                    }
+                },
+                Some(Statement::Merge { table, .. }) => self.relation(table),
+                _ => {}
+            }
+            ControlFlow::Continue(())
+        }
+    }
+
+    let mut targets = FindTargets::default();
+    let _ = statement.accept(&mut targets);
+    (!targets.unnamed).then_some(targets.names)
+}
+
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {
@@ -116,6 +192,23 @@ impl EqlMapperError {
             EqlMapperError::Import(ImportError::TypeError(err)) => {
                 err.as_unmappable_encrypted_column()
             }
+            _ => None,
+        }
+    }
+
+    /// Returns the table name when this error means the statement names a
+    /// table the schema cannot resolve: one that is not loaded, a name that is
+    /// qualified by another schema, or a name more than one table uses.
+    ///
+    /// A caller must not treat such a statement as one that touches nothing
+    /// encrypted, because the type checker never saw the table's columns.
+    pub fn as_table_not_found(&self) -> Option<&str> {
+        match self {
+            EqlMapperError::Type(err) => err.as_table_not_found(),
+            EqlMapperError::Scope(err) => err.as_table_not_found(),
+            EqlMapperError::Import(ImportError::SchemaError(err)) => err.as_table_not_found(),
+            EqlMapperError::Import(ImportError::ScopeError(err)) => err.as_table_not_found(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => err.as_table_not_found(),
             _ => None,
         }
     }
