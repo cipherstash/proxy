@@ -44,6 +44,16 @@ impl TableResolver {
         }
     }
 
+    /// Resolves a table in the loaded schema, ignoring any edits made since it was loaded.
+    pub fn resolve_loaded_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
+        match self {
+            TableResolver::ViaSchema(schema) => schema.resolve_table(name),
+            TableResolver::ViaSchemaWithEdits(schema_with_edits) => {
+                schema_with_edits.read().unwrap().resolve_loaded_table(name)
+            }
+        }
+    }
+
     pub fn resolve_table_columns(
         &self,
         table_name: &ObjectName,
