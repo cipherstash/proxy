@@ -369,6 +369,9 @@ impl<S: EncryptionService> Frontend<S> {
         {
             return Err(MappingError::DependentStatementAfterDdl.into());
         }
+        // So a write later in this batch to a native table it creates is not
+        // refused as a write to an unresolvable table.
+        self.context.note_native_tables(&parsed_statements);
         if parsed_statements
             .iter()
             .any(eql_mapper::requires_type_check)
@@ -385,9 +388,10 @@ impl<S: EncryptionService> Frontend<S> {
 
         let mut portal = Portal::passthrough(Some(session_id));
         let mut encrypted = false;
+        let mut mapped = false;
         let mut parse_duration_recorded = false;
 
-        for statement in &parsed_statements {
+        for (index, statement) in parsed_statements.iter().enumerate() {
             if self.context.unsafe_disable_mapping()? {
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
@@ -412,6 +416,13 @@ impl<S: EncryptionService> Frontend<S> {
                     // fallback altogether.
                     if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                         return Err(err);
+                    }
+                    // The fallback forwards the whole Query as the client wrote
+                    // it, so it must not carry another statement that needs
+                    // mapping: that statement's values would reach the database
+                    // unencrypted.
+                    if mapped || self.any_requires_mapping(&parsed_statements[index + 1..])? {
+                        return Err(err);
                     } else {
                         self.context.register_query(
                             operation,
@@ -430,6 +441,7 @@ impl<S: EncryptionService> Frontend<S> {
                         client_id = self.context.client_id,
                         msg = "Encryptable Statement",
                     );
+                    mapped = true;
 
                     let mut transformed = false;
                     if typed_statement.requires_transform() {
@@ -1216,6 +1228,30 @@ impl<S: EncryptionService> Frontend<S> {
         Ok(())
     }
 
+    /// Whether any of `statements` touches an encrypted column. A statement
+    /// that must be refused returns its refusal; one that fails type checking
+    /// for another reason counts as not touching one.
+    fn any_requires_mapping(&self, statements: &[ast::Statement]) -> Result<bool, Error> {
+        for statement in statements {
+            if !eql_mapper::requires_type_check(statement) {
+                continue;
+            }
+            match self.type_check(statement) {
+                Ok(typed_statement) => {
+                    if self
+                        .to_encryptable_statement(&typed_statement, vec![])?
+                        .is_some()
+                    {
+                        return Ok(true);
+                    }
+                }
+                Err(err) if err.must_fail_closed() => return Err(err),
+                Err(_) => {}
+            }
+        }
+        Ok(false)
+    }
+
     fn type_check<'a>(
         &self,
         statement: &'a ast::Statement,
@@ -1246,6 +1282,26 @@ impl<S: EncryptionService> Frontend<S> {
                     table: table.to_string(),
                     column: column.to_string(),
                     column_type: column_type.to_string(),
+                }
+                .into())
+            }
+            // The type checker never saw the table's columns, so a write to it
+            // could put plaintext in an encrypted column.
+            Err(err)
+                if err.as_table_not_found().is_some()
+                    && eql_mapper::writes_data(statement)
+                    && self.context.has_encrypted_columns()
+                    && !self.context.writes_only_native_tables(statement) =>
+            {
+                let table = err.as_table_not_found().unwrap();
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Statement refused: it writes data and refers to a table that is not in the loaded database schema, so Proxy cannot tell whether it writes to an encrypted column.",
+                    table,
+                );
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
+                Err(MappingError::UnresolvableTable {
+                    table: table.to_string(),
                 }
                 .into())
             }
@@ -3568,5 +3624,487 @@ mod settings_reset_tests {
         )
         .await;
         assert_eq!(frontend.context.keyset_identifier().unwrap(), None);
+    }
+}
+
+/// A statement Proxy cannot type check is forwarded as written when
+/// mapping errors are off. These pin when that fallback is refused instead.
+#[cfg(test)]
+mod unresolvable_table_tests {
+    use super::Frontend;
+    use crate::config::TandemConfig;
+    use crate::error::{Error, MappingError};
+    use crate::postgresql::context::{Context, KeysetIdentifier};
+    use crate::postgresql::test_operation_id as operation_id;
+    use crate::postgresql::Column;
+    use crate::proxy::{EncryptConfig, EncryptionService};
+    use bytes::Bytes;
+    use cipherstash_client::encryption::Plaintext;
+    use cipherstash_client::eql::{EncryptedPayloadV3, EQL_SCHEMA_VERSION_V3};
+    use cipherstash_client::zerokms::EncryptedRecord;
+    use pg_proto::{FrontendMessage, FrontendMiddlewareOutput, Parse};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    /// Encrypts every value as a stub ciphertext and counts the values.
+    #[derive(Clone, Default)]
+    struct Counter {
+        encrypted: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl EncryptionService for Counter {
+        async fn encrypt(
+            &self,
+            _: Option<KeysetIdentifier>,
+            plaintexts: Vec<Option<Plaintext>>,
+            _: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+            self.encrypted.fetch_add(plaintexts.len(), Ordering::SeqCst);
+            Ok(plaintexts
+                .iter()
+                .map(|_| Some(crate::EqlOutput::Store(ciphertext())))
+                .collect())
+        }
+        async fn decrypt(
+            &self,
+            _: Option<KeysetIdentifier>,
+            _: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+        async fn decrypt_inbound_eql(
+            &self,
+            _: Option<KeysetIdentifier>,
+            _: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn ciphertext() -> crate::EqlCiphertext {
+        crate::EqlCiphertext::Encrypted(EncryptedPayloadV3 {
+            version: EQL_SCHEMA_VERSION_V3,
+            identifier: crate::Identifier::new("encrypted", "secret"),
+            ciphertext: EncryptedRecord {
+                iv: Default::default(),
+                ciphertext: vec![1; 16],
+                tag: vec![2; 16],
+                descriptor: "encrypted/secret".into(),
+                keyset_id: Some(uuid::Uuid::nil()),
+                decryption_policy: None,
+            },
+            hmac_256: None,
+            bloom_filter: None,
+            ore_block_u64_8_256: None,
+            ope_cllw: None,
+        })
+    }
+
+    /// A connection whose schema has `encrypted (id, secret)` with `secret`
+    /// encrypted, and an `encrypted` encrypt config only when `encrypted` is set.
+    fn client(config: TandemConfig, encrypted: bool) -> (Frontend<Counter>, Counter) {
+        let mut schema = eql_mapper::Schema::new("public");
+        let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
+        table.add_column(Arc::new(eql_mapper::Column::native(
+            sqltk::parser::ast::Ident::new("id"),
+        )));
+        let secret = sqltk::parser::ast::Ident::new("secret");
+        table.add_column(Arc::new(if encrypted {
+            eql_mapper::Column::eql(
+                secret,
+                eql_mapper::EqlTraits::none(),
+                eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+            )
+        } else {
+            eql_mapper::Column::native(secret)
+        }));
+        schema.add_table(table);
+        let mut encryption = EncryptConfig::new();
+        if encrypted {
+            encryption.insert(
+                crate::Identifier::new("encrypted", "secret"),
+                cipherstash_client::schema::ColumnConfig::build("secret".to_owned())
+                    .casts_as(cipherstash_client::schema::ColumnType::Text),
+            );
+        }
+        let counter = Counter::default();
+        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(config),
+            Arc::new(encryption),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            counter.clone(),
+            sender,
+        );
+        (Frontend::new(context), counter)
+    }
+
+    fn encrypted_client() -> (Frontend<Counter>, Counter) {
+        client(TandemConfig::for_testing(), true)
+    }
+
+    /// Sends a simple Query and returns the SQL Proxy forwards for it.
+    async fn query(frontend: &mut Frontend<Counter>, sql: &str) -> String {
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(Bytes::copy_from_slice(sql.as_bytes())),
+            )
+            .await
+            .unwrap();
+        match output {
+            FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            | FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query)) => {
+                String::from_utf8_lossy(&query).into_owned()
+            }
+            other => panic!("expected a forwarded query, got {other:?}"),
+        }
+    }
+
+    fn unresolvable(table: &str) -> String {
+        MappingError::UnresolvableTable {
+            table: table.to_owned(),
+        }
+        .to_string()
+    }
+
+    fn assert_refused(forwarded: &str, table: &str) {
+        // The message is quoted once in the DO block's body, then again as
+        // the DO block's literal.
+        assert!(
+            forwarded.contains("RAISE EXCEPTION")
+                && forwarded.contains(&unresolvable(table).replace('\'', "''''")),
+            "expected a refusal naming {table}, forwarded: {forwarded}"
+        );
+        assert!(
+            !forwarded.contains("plaintext"),
+            "the plaintext reached PostgreSQL: {forwarded}"
+        );
+    }
+
+    const WRITES: [(&str, &str); 6] = [
+        (
+            "INSERT INTO accounts (secret) VALUES ('plaintext')",
+            "accounts",
+        ),
+        (
+            "UPDATE accounts SET secret = 'plaintext' WHERE id = 1",
+            "accounts",
+        ),
+        ("DELETE FROM accounts WHERE secret = 'plaintext'", "accounts"),
+        (
+            "INSERT INTO archive.encrypted (secret) VALUES ('plaintext')",
+            "archive.encrypted",
+        ),
+        (
+            "INSERT INTO encrypted (id, secret) SELECT id, 'plaintext' FROM accounts",
+            "accounts",
+        ),
+        (
+            "MERGE INTO accounts USING encrypted ON accounts.id = encrypted.id WHEN NOT MATCHED THEN INSERT (secret) VALUES ('plaintext')",
+            "accounts",
+        ),
+    ];
+
+    #[tokio::test]
+    async fn simple_write_on_an_unresolvable_table_is_refused() {
+        for (sql, table) in WRITES {
+            let (mut frontend, _) = encrypted_client();
+            assert_refused(&query(&mut frontend, sql).await, table);
+        }
+    }
+
+    #[tokio::test]
+    async fn extended_write_on_an_unresolvable_table_is_refused() {
+        for (sql, table) in WRITES {
+            let (mut frontend, _) = encrypted_client();
+            let result = frontend
+                .parse_handler(
+                    operation_id(),
+                    Parse {
+                        statement: Bytes::from_static(b"s"),
+                        query: Bytes::copy_from_slice(sql.as_bytes()),
+                        parameter_types: Vec::new(),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    &result,
+                    Err(Error::Mapping(MappingError::UnresolvableTable { table: refused }))
+                        if refused == table
+                ),
+                "{sql}: {result:?}"
+            );
+        }
+    }
+
+    /// The schema middleware does not model a native temporary table, but
+    /// guarantees it holds no encrypted column and shadows no encrypted table,
+    /// so a write to one is not refused (the Go pgx integration test).
+    #[tokio::test]
+    async fn write_to_a_native_temporary_table_is_forwarded() {
+        let (mut frontend, _) = encrypted_client();
+        let sql = "CREATE TEMPORARY TABLE t (name text); INSERT INTO t (name) VALUES ('Ada')";
+        assert_eq!(query(&mut frontend, sql).await, sql);
+
+        let (mut frontend, _) = encrypted_client();
+        let sql = "CREATE TEMPORARY TABLE t (name text)";
+        assert_eq!(query(&mut frontend, sql).await, sql);
+        for sql in [
+            "INSERT INTO t (name) VALUES ('Ada')",
+            "INSERT INTO pg_temp.t (name) VALUES ('Ada')",
+            "UPDATE T SET name = 'Ada'",
+        ] {
+            assert_eq!(query(&mut frontend, sql).await, sql);
+        }
+    }
+
+    #[tokio::test]
+    async fn extended_write_to_a_native_temporary_table_is_forwarded() {
+        let (mut frontend, _) = encrypted_client();
+        for (name, sql) in [
+            (&b"create"[..], "CREATE TEMPORARY TABLE t (name text)"),
+            (&b"insert"[..], "INSERT INTO t (name) VALUES ($1)"),
+        ] {
+            let result = frontend
+                .parse_handler(
+                    operation_id(),
+                    Parse {
+                        statement: Bytes::copy_from_slice(name),
+                        query: Bytes::copy_from_slice(sql.as_bytes()),
+                        parameter_types: Vec::new(),
+                    },
+                )
+                .await;
+            assert!(result.is_ok(), "{sql}: {result:?}");
+        }
+    }
+
+    /// A table created by encryption-neutral DDL earlier in the same Query is
+    /// native, though the schema has not modelled it yet.
+    #[tokio::test]
+    async fn write_to_a_table_created_earlier_in_the_query_is_forwarded() {
+        let (mut frontend, _) = encrypted_client();
+        let sql = "CREATE TABLE n (id bigint); INSERT INTO n (id) VALUES (1)";
+        let forwarded =
+            tokio::time::timeout(std::time::Duration::from_secs(5), query(&mut frontend, sql))
+                .await
+                .unwrap();
+        assert_eq!(forwarded, sql);
+    }
+
+    /// The exemption is for writes whose targets are all native tables, not
+    /// for any write that merely reads one.
+    #[tokio::test]
+    async fn native_temporary_table_does_not_excuse_an_encrypted_target() {
+        let (mut frontend, _) = encrypted_client();
+        let forwarded = query(
+            &mut frontend,
+            "CREATE TEMPORARY TABLE t (name text); INSERT INTO encrypted (secret) SELECT 'plaintext' FROM t",
+        )
+        .await;
+        assert!(
+            forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+            "{forwarded}"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_temporary_table_does_not_excuse_another_table() {
+        for sql in [
+            "CREATE TEMPORARY TABLE t (name text); INSERT INTO accounts (secret) VALUES ('plaintext')",
+            "CREATE TEMPORARY TABLE t (name text); INSERT INTO public.t (name) VALUES ('plaintext')",
+        ] {
+            let (mut frontend, _) = encrypted_client();
+            let forwarded = query(&mut frontend, sql).await;
+            assert!(
+                forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+                "{sql}: {forwarded}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn refusal_holds_when_mapping_errors_are_enabled() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        let development = config.development.as_mut().unwrap();
+        development.disable_mapping = false;
+        development.enable_mapping_errors = true;
+        let (mut frontend, _) = client(config, true);
+        assert_refused(
+            &query(
+                &mut frontend,
+                "INSERT INTO accounts (secret) VALUES ('plaintext')",
+            )
+            .await,
+            "accounts",
+        );
+    }
+
+    #[tokio::test]
+    async fn write_on_an_unresolvable_table_is_forwarded_without_encrypted_columns() {
+        let (mut frontend, _) = client(TandemConfig::for_testing(), false);
+        let sql = "INSERT INTO accounts (secret) VALUES ('plaintext')";
+        assert_eq!(query(&mut frontend, sql).await, sql);
+    }
+
+    /// Read-only statements keep the passthrough.
+    #[tokio::test]
+    async fn read_on_an_unresolvable_table_is_forwarded() {
+        let (mut frontend, _) = encrypted_client();
+        let sql = "SELECT * FROM pg_catalog.pg_type WHERE typname = 'text'";
+        assert_eq!(query(&mut frontend, sql).await, sql);
+    }
+
+    /// The loader leaves an encrypted column with no configuration when
+    /// same-named tables declare it with different domains, so a qualified
+    /// write is refused rather than encrypted with the other table's config.
+    #[tokio::test]
+    async fn write_to_a_column_with_no_config_is_refused() {
+        let mut schema = eql_mapper::Schema::new("public");
+        for table_schema in ["app", "public"] {
+            let mut table = eql_mapper::Table::in_schema(
+                sqltk::parser::ast::Ident::new(table_schema),
+                sqltk::parser::ast::Ident::new("users"),
+            );
+            table.add_column(Arc::new(eql_mapper::Column::eql(
+                sqltk::parser::ast::Ident::new("email"),
+                eql_mapper::EqlTraits::none(),
+                eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+            )));
+            schema.add_table(table);
+        }
+        // Another encrypted column, so encrypted columns are configured.
+        let mut encryption = EncryptConfig::new();
+        encryption.insert(
+            crate::Identifier::new("encrypted", "secret"),
+            cipherstash_client::schema::ColumnConfig::build("secret".to_owned())
+                .casts_as(cipherstash_client::schema::ColumnType::Text),
+        );
+        let counter = Counter::default();
+        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(encryption),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            counter.clone(),
+            sender,
+        );
+        let mut frontend = Frontend::new(context);
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(Bytes::from_static(
+                    b"INSERT INTO app.users (email) VALUES ('plaintext')",
+                )),
+            )
+            .await;
+        let forwarded = match output {
+            Ok(FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query)))
+            | Ok(FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query))) => {
+                String::from_utf8_lossy(&query).into_owned()
+            }
+            other => panic!("expected a forwarded query, got {other:?}"),
+        };
+        assert!(
+            forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+            "{forwarded}"
+        );
+        assert_eq!(counter.encrypted.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn write_is_refused_when_only_columns_with_no_config_are_encrypted() {
+        let mut schema = eql_mapper::Schema::new("public");
+        for table_schema in ["app", "public"] {
+            let mut table = eql_mapper::Table::in_schema(
+                sqltk::parser::ast::Ident::new(table_schema),
+                sqltk::parser::ast::Ident::new("users"),
+            );
+            table.add_column(Arc::new(eql_mapper::Column::eql(
+                sqltk::parser::ast::Ident::new("email"),
+                eql_mapper::EqlTraits::none(),
+                eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+            )));
+            schema.add_table(table);
+        }
+        // The loader dropped the conflicting column's config, leaving none.
+        let counter = Counter::default();
+        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(EncryptConfig::new()),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            counter.clone(),
+            sender,
+        );
+        let mut frontend = Frontend::new(context);
+        let forwarded = query(
+            &mut frontend,
+            "INSERT INTO users (email) VALUES ('plaintext')",
+        )
+        .await;
+        assert_refused(&forwarded, "users");
+        assert_eq!(counter.encrypted.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn schema_qualified_write_is_encrypted() {
+        let (mut frontend, counter) = encrypted_client();
+        let forwarded = query(
+            &mut frontend,
+            "INSERT INTO public.encrypted (secret) VALUES ('plaintext')",
+        )
+        .await;
+        assert_eq!(counter.encrypted.load(Ordering::SeqCst), 1);
+        assert!(!forwarded.contains("plaintext"), "{forwarded}");
+    }
+
+    /// A Query that falls back to passthrough is forwarded whole, as written,
+    /// so the fallback must not carry another statement that needs encrypting.
+    #[tokio::test]
+    async fn passthrough_fallback_does_not_carry_an_encrypted_statement() {
+        for sql in [
+            "SELECT * FROM unknown_view; INSERT INTO encrypted (secret) VALUES ('plaintext')",
+            "INSERT INTO encrypted (secret) VALUES ('plaintext'); SELECT * FROM unknown_view",
+        ] {
+            let (mut frontend, _) = encrypted_client();
+            let forwarded = query(&mut frontend, sql).await;
+            assert!(
+                forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+                "{sql}: {forwarded}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn passthrough_fallback_does_not_carry_a_refused_statement() {
+        let (mut frontend, _) = encrypted_client();
+        assert_refused(
+            &query(
+                &mut frontend,
+                "SELECT * FROM unknown_view; INSERT INTO accounts (secret) VALUES ('plaintext')",
+            )
+            .await,
+            "accounts",
+        );
+    }
+
+    #[tokio::test]
+    async fn passthrough_fallback_still_serves_a_query_with_nothing_encrypted() {
+        let (mut frontend, _) = encrypted_client();
+        let sql = "SELECT * FROM unknown_view; SELECT id FROM encrypted";
+        assert_eq!(query(&mut frontend, sql).await, sql);
     }
 }

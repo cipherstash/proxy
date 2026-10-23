@@ -54,9 +54,12 @@ _Avoid_: session (`start_session`, `SessionId` and the
 `..._statements_session_duration_seconds` metric all use this sense and are misnamed).
 
 **Passthrough**:
-Traffic forwarded without encryption or rewriting. Three independent conditions produce
+Traffic forwarded without encryption or rewriting. Four independent conditions produce
 it and they are not interchangeable: no encrypt config is loaded, mapping is disabled by
-configuration, or `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` was issued on this connection.
+configuration, `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` was issued on this connection, or
+the **type-check fallback** forwarded a statement EQL Mapper could not type check while
+mapping errors are off. The fallback never applies to a refusal, and never to a simple
+Query with another statement that needs mapping.
 Name the condition rather than saying "passthrough" alone.
 
 ### Encryption

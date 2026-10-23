@@ -73,9 +73,11 @@ impl Error {
             self,
             // Forwarding a statement that references a legacy EQL v2 column
             // stores plaintext in a column its operator believes is encrypted
-            // (CIP-3688). No configuration may turn that back on.
+            // (CIP-3688). No configuration may turn that back on. Nor may a
+            // write to a table Proxy cannot resolve be forwarded.
             Error::Mapping(
                 MappingError::UnmappableEncryptedColumn { .. }
+                    | MappingError::UnresolvableTable { .. }
                     | MappingError::DependentStatementAfterDdl
                     | MappingError::DependentStatementAfterSettings
                     | MappingError::PreparedSettingsChanged
@@ -152,6 +154,9 @@ pub enum MappingError {
 
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
     StatementCouldNotBeTypeChecked(String),
+
+    #[error("Statement refers to table '{table}', which is not in the database schema Proxy has loaded, so Proxy cannot tell whether it writes to an encrypted column. For help visit {}#mapping-unresolvable-table", ERROR_DOC_BASE_URL)]
+    UnresolvableTable { table: String },
 
     #[error("Column '{table}.{column}' is declared as '{column_type}', a legacy EQL v2 type that this version of CipherStash Proxy cannot encrypt or decrypt. Statements referencing '{table}' are refused so that plaintext is never written to the column. Migrate '{table}.{column}' to an EQL v3 domain type. For help visit {}#mapping-unmappable-encrypted-column", ERROR_DOC_BASE_URL)]
     UnmappableEncryptedColumn {
