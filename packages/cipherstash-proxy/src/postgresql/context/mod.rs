@@ -1732,6 +1732,30 @@ where
         Ok(())
     }
 
+    /// Records the native tables a simple-query batch creates, so the batch's
+    /// later statements can write to them.
+    pub fn note_native_tables(&self, statements: &[sqltk::parser::ast::Statement]) {
+        self.schema_middleware.note_native_tables(statements);
+    }
+
+    /// Whether every table `statement` writes to is a native table this
+    /// connection created that the schema may not model yet.
+    pub fn writes_only_native_tables(&self, statement: &sqltk::parser::ast::Statement) -> bool {
+        eql_mapper::write_targets(statement).is_some_and(|targets| {
+            !targets.is_empty()
+                && targets
+                    .iter()
+                    .all(|target| self.schema_middleware.is_native_table(target))
+        })
+    }
+
+    /// Whether any column is encrypted. A column can be encrypted without
+    /// encrypt config, when same-named tables disagree on its domain.
+    pub fn has_encrypted_columns(&self) -> bool {
+        !self.schema_middleware.encrypt_config().is_empty()
+            || self.schema_middleware.schema_has_encrypted_columns()
+    }
+
     pub fn is_passthrough(&self) -> bool {
         self.schema_middleware.encrypt_config().is_empty() || self.config.mapping_disabled()
     }

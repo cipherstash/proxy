@@ -348,6 +348,16 @@ pub enum ScopeError {
     NoCurrentScope,
 }
 
+impl ScopeError {
+    /// See [`TypeError::as_table_not_found`].
+    pub fn as_table_not_found(&self) -> Option<&str> {
+        match self {
+            ScopeError::TypeError(err) => err.as_table_not_found(),
+            _ => None,
+        }
+    }
+}
+
 impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
     type Error = ScopeError;
 

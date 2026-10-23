@@ -72,7 +72,7 @@ use sqltk::parser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, DataType, DropBehavior, Ident,
     ObjectName, ObjectNamePart, ObjectType, Statement,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, RwLock,
@@ -158,6 +158,12 @@ pub struct SchemaMiddleware {
     local_unmodelled: Arc<AtomicBool>,
     transaction_active: Arc<AtomicBool>,
     savepoints: Arc<RwLock<Vec<Savepoint>>>,
+    /// Catalog spellings of the native tables this connection has sent to
+    /// PostgreSQL to create and the schema may not model yet: temporary tables,
+    /// and tables created earlier in the same batch. Recorded when the
+    /// statement is sent, so a later statement in the same batch or pipeline
+    /// sees it too.
+    native_tables: Arc<RwLock<HashSet<String>>>,
 }
 
 impl SchemaMiddleware {
@@ -190,12 +196,19 @@ impl SchemaMiddleware {
             local_unmodelled: Arc::new(AtomicBool::new(false)),
             transaction_active: Arc::new(AtomicBool::new(false)),
             savepoints: Arc::new(RwLock::new(Vec::new())),
+            native_tables: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
     /// Returns the resolver for the connection's current effective schema.
     pub fn resolver(&self) -> Arc<TableResolver> {
         self.resolver.read().unwrap().clone()
+    }
+
+    /// Whether the loaded schema has any encrypted column, whether or not the
+    /// encrypt config names it.
+    pub fn schema_has_encrypted_columns(&self) -> bool {
+        self.base.read().unwrap().has_encrypted_columns()
     }
 
     /// Returns encryption metadata aligned with the current effective schema.
@@ -270,8 +283,47 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Records the native tables `statements` create.
+    ///
+    /// A native table is created by DDL that cannot change encryption: it has
+    /// no encrypted column and cannot shadow an encrypted table, so a write to
+    /// it writes no encrypted column even before the schema models it. A
+    /// temporary table qualifies when [`Self::is_schema_ddl`] ignores it.
+    pub fn note_native_tables(&self, statements: &[Statement]) {
+        let mut tables = self.native_tables.write().unwrap();
+        for statement in statements {
+            if let Statement::CreateTable(create) = statement {
+                let native = if create.temporary {
+                    !self.is_schema_ddl(statement)
+                } else {
+                    !self.ddl_may_change_encryption(statement)
+                };
+                if native {
+                    tables.insert(postgres_object_name(&create.name));
+                }
+            }
+        }
+    }
+
+    /// Whether `name` names a native table this connection created: either
+    /// bare, or qualified with `pg_temp`.
+    pub fn is_native_table(&self, name: &ObjectName) -> bool {
+        let in_temporary_schema = match name.0.as_slice() {
+            [_] => true,
+            [ObjectNamePart::Identifier(schema), _] => postgres_identifier(schema) == "pg_temp",
+            _ => false,
+        };
+        in_temporary_schema
+            && self
+                .native_tables
+                .read()
+                .unwrap()
+                .contains(&postgres_object_name(name))
+    }
+
     /// Records schema intent for a named prepared statement.
     pub fn prepare(&self, name: Name, statement: Statement) {
+        self.note_native_tables(std::slice::from_ref(&statement));
         self.prepared.write().unwrap().insert(
             name,
             Intent {
@@ -319,6 +371,7 @@ impl SchemaMiddleware {
 
     /// Records every statement and readiness boundary in a simple-query message.
     pub fn simple_query(&self, statements: &[Statement]) {
+        self.note_native_tables(statements);
         self.transaction_active.store(true, Ordering::Release);
         let mut executions = self.executions.write().unwrap();
         for statement in statements {

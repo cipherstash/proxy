@@ -20,11 +20,10 @@ WHERE
     t.table_type = 'BASE TABLE'
     -- Only the schemas this connection resolves unqualified names in.
     --
-    -- Both this schema map and the encrypt config are keyed on the bare table
-    -- name, so without this a same-named table in ANY other schema — another
-    -- tenant's, a staging copy, a leftover eql_v2 — overwrites the served one,
-    -- and a column can pick up the wrong domain config or lose its encryption
-    -- mapping entirely.
+    -- The schema map records each table's schema, but the encrypt config is
+    -- keyed on the bare table name, so a same-named table in another schema
+    -- (another tenant's, a staging copy, a leftover eql_v2) would share or
+    -- conflict with the served table's column config.
     --
     -- `false` excludes the implicitly-searched pg_catalog, leaving exactly the
     -- schemas an unqualified `users` could mean.
@@ -32,9 +31,9 @@ WHERE
 GROUP BY
     t.table_schema, t.table_name
 ORDER BY
-    -- Search-path order, so the first row for a name is the one PostgreSQL
-    -- itself would resolve to. Consumers keep the first and ignore later
-    -- duplicates.
+    -- Search-path order, so rows for a name come in the order PostgreSQL
+    -- would resolve them. Consumers keep every row: a bare name found in two
+    -- schemas stays ambiguous, and qualified names resolve to their schema.
     array_position(current_schemas(false)::text[], t.table_schema::text),
     t.table_name;
 

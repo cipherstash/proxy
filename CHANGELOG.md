@@ -37,6 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Schema-qualified table names**: Proxy now resolves a schema-qualified name such as `public.users` to the table in that schema, so statements that use one are encrypted instead of failing type checking. This includes a table whose name is also used in another schema on the search path. Proxy keys encryption configuration by the unqualified table name, so when same-named tables in different schemas declare a column with different EQL domains, statements on that column are refused rather than encrypted with the other table's configuration. Same-named tables that declare the same domain share one configuration and key descriptor, so their ciphertexts and search terms are interchangeable.
+
 - **Prepared statement recovery and settings isolation**: failed or discarded protocol messages no longer replace encryption metadata for statements PostgreSQL retained. Pipelined close-and-reprepare recovers immediately, and refused operations use names that remain unpredictable within PostgreSQL's lookup limit. Unsupported keyset values fail explicitly, and stale prepared statements signal driver cache invalidation.
 
 - **Ordinary transaction and COPY traffic**: transaction and reset batches that do not change effective CipherStash settings remain usable, and COPY input can progress while transaction outcomes are pending. Settings tracking avoids unnecessary transaction barriers and repeated SQL tree copies.
@@ -68,6 +70,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`SET LOCAL CIPHERSTASH.*` is no longer promoted to the whole connection**: Proxy ignored the `LOCAL` modifier and kept the value for the rest of the connection. It now ends with the transaction. Applications that relied on a `SET LOCAL` keyset persisting after `COMMIT` must use `SET` instead.
 
 - **Bind to a statement Proxy did not see prepared**: Proxy now refuses a Bind that names a prepared statement it has no Parse for on the connection, with PostgreSQL's own `26000` error, and the connection stays open. Proxy keeps encryption details only for statements that touch encrypted columns, so before this change it could not tell an unknown statement from a plaintext one and sent the bound values as they were. This includes statements created with SQL `PREPARE` and then bound through the extended protocol; prepare them with Parse instead. The check does not apply while mapping is disabled. See [Unknown prepared statement](docs/errors.md#mapping-unknown-prepared-statement).
+
+- **Writes to a table Proxy cannot resolve**: when encrypted columns are configured, Proxy now refuses an `INSERT`, `UPDATE`, `DELETE` or `MERGE` that refers to a table missing from the database schema it has loaded, whether or not `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set. Previously such a statement failed type checking and was forwarded as written, so its values could reach PostgreSQL in plaintext. A simple query is also no longer forwarded as written when one statement fails type checking and another needs encrypting. See [Unresolvable table](docs/errors.md#mapping-unresolvable-table).
+
+  Compatibility note: while encrypted columns are configured, Proxy now refuses writes to tables in schemas outside the search path it loads, to views and foreign tables (Proxy loads only base tables), and writes that use a bare table name found in more than one schema on that search path. Before upgrading, check that applications do not write to such tables through Proxy, or qualify the table name with its schema.
 
 - **Short encryption results**: Proxy now refuses a statement when the encryption service returns fewer values than it was given, instead of sending the unmatched parameters unencrypted. See [Encryption result count mismatch](docs/errors.md#encrypt-result-count-mismatch).
 

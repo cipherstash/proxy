@@ -17,6 +17,7 @@
   - [Prepared settings changed](#mapping-prepared-settings-changed)
   - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
+  - [Unresolvable table](#mapping-unresolvable-table)
   - [Unknown prepared statement](#mapping-unknown-prepared-statement)
   - [Internal Error](#mapping-internal-error)
 
@@ -401,6 +402,45 @@ you run against it — for example `eql_v3_text_search` for searchable text, or
 re-encrypted as part of that migration; it cannot be reinterpreted in place.
 
 If the column is no longer used, dropping it also resolves the error.
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unresolvable table <a id='mapping-unresolvable-table'></a>
+
+A statement that writes data refers to a table that is not in the database schema CipherStash Proxy has loaded.
+Proxy cannot tell whether the statement writes to an encrypted column, so it refuses the statement rather than forward its values unencrypted.
+
+### Error message
+
+```
+Statement refers to table 'users', which is not in the database schema Proxy has loaded, so Proxy cannot tell whether it writes to an encrypted column.
+```
+
+### Notes
+
+The refusal applies to `INSERT`, `UPDATE`, `DELETE` and `MERGE`, including one inside `PREPARE`, `EXPLAIN` or a `WITH` clause, when any column is encrypted.
+It applies wherever the statement names the table, so `INSERT INTO users ... SELECT ... FROM other` is refused when `other` cannot be resolved.
+Read-only statements are not refused.
+When no columns are encrypted, Proxy forwards these statements.
+
+Unlike a type-check failure, this refusal is not subject to the `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` passthrough.
+
+Proxy loads the tables in the schemas on its database connection's search path.
+A schema-qualified name such as `public.users` resolves only to a table loaded from that schema.
+A bare table name used in more than one schema on the search path cannot be resolved, because the client's search path can differ from Proxy's.
+Encryption configuration is keyed by the unqualified table name, so when same-named tables in different schemas declare a column with different EQL domains, Proxy loads no configuration for that column and refuses statements on it.
+When they declare the same domain, both tables share one configuration and one key descriptor, so they are not cryptographically separate: a ciphertext copied from one table to the other still decrypts, and equal values produce equal search terms in both.
+A table in a schema that is not on the search path, or one created on another connection since Proxy last loaded the schema, cannot be resolved.
+
+### How to fix
+
+Check that the table exists and that its name is spelled as PostgreSQL resolves it.
+If the table name is used in more than one schema, qualify it with its schema, as in `public.users`.
+If the table is in a schema outside the search path, add that schema to the search path of the database user Proxy connects as, then restart Proxy or wait for it to reload the schema.
+If the table was created on another connection, retry once Proxy has reloaded the database schema.
 
 
 
