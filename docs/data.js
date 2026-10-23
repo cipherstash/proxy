@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792715831907,
+  "lastUpdate": 1792715867647,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28319,6 +28319,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.498676,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3304f2873e320cdbb52291ca668b5461f2f97755",
+          "message": "Merge pull request #482 from cipherstash/claude/project-thread-xb3ruh\n\nPropagate settings parse errors from SettingsCommand::from_statement",
+          "timestamp": "2026-10-23T11:28:52+11:00",
+          "tree_id": "0c5f4a0f51e02b230618d315515c6c8a446cd7a0",
+          "url": "https://github.com/cipherstash/proxy/commit/3304f2873e320cdbb52291ca668b5461f2f97755"
+        },
+        "date": 1792715865734,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.915355,
             "unit": "Number"
           }
         ]
