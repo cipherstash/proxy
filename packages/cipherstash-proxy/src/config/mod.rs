@@ -8,7 +8,7 @@ pub use database::DatabaseConfig;
 pub use log::{LogConfig, LogFormat, LogLevel, LogOutput};
 use serde::Deserialize;
 pub use server::ServerConfig;
-pub use tandem::TandemConfig;
+pub use tandem::{InboundTls, TandemConfig};
 pub use tls::TlsConfig;
 use vitaminc_protected::Protected;
 

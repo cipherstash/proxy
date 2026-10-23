@@ -4,6 +4,7 @@ use crate::{
     tls, DatabaseConfig,
 };
 use socket2::{SockRef, TcpKeepalive};
+use std::io::IsTerminal;
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -102,15 +103,46 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     Ok(client)
 }
 
-pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
-    let address = &server.to_socket_address();
+pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool) -> TcpListener {
+    let address = server.to_socket_address();
     let mut retry_count = 0;
 
     loop {
-        match TcpListener::bind(address).await {
+        match TcpListener::bind(&address).await {
             Ok(listener) => {
-                info!(msg = "Server waiting for connections", address);
+                report_listening(&listener);
                 return listener;
+            }
+            // The port is still in use after retrying, but it's only the default
+            // (not explicitly set), so fall back to an OS-assigned port and
+            // report it rather than failing.
+            Err(err)
+                if err.kind() == std::io::ErrorKind::AddrInUse
+                    && allow_random_fallback
+                    && retry_count > MAX_RETRY_COUNT =>
+            {
+                match TcpListener::bind(format!("{}:0", server.host)).await {
+                    Ok(listener) => {
+                        if std::io::stderr().is_terminal() {
+                            eprintln!(
+                                "Port {} is already in use; listening on an OS-assigned port instead.",
+                                server.port
+                            );
+                        }
+                        warn!(
+                            msg =
+                                "Default port is already in use; listening on an OS-assigned port",
+                            port = server.port,
+                            address = ?listener.local_addr().ok()
+                        );
+                        report_listening(&listener);
+                        return listener;
+                    }
+                    Err(err) => {
+                        error!(msg = "Error binding connection", error = err.to_string());
+                        std::process::exit(exitcode::CONFIG);
+                    }
+                }
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
@@ -128,5 +160,71 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
         time::sleep(Duration::from_millis(sleep_duration_ms)).await;
 
         retry_count += 1;
+    }
+}
+
+/// Report the address the proxy is listening on. In a terminal it is also
+/// printed, so the listening address (including an OS-assigned fallback port)
+/// is visible even when logging is quiet. Without a terminal the log line is
+/// enough, and plain text would break a structured log stream.
+fn report_listening(listener: &TcpListener) {
+    match listener.local_addr() {
+        Ok(addr) => {
+            if std::io::stdout().is_terminal() {
+                println!("CipherStash Proxy listening on {addr}");
+            }
+            info!(msg = "Server waiting for connections", address = %addr);
+        }
+        Err(_) => {
+            info!(msg = "Server waiting for connections");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bind_falls_back_to_random_port_when_default_in_use() {
+        // Occupy a port, then ask bind_with_retry to bind the same one.
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+
+        let server = ServerConfig {
+            host: "127.0.0.1".to_string(),
+            port: occupied_port,
+            ..ServerConfig::default()
+        };
+
+        // With fallback allowed, it binds a different OS-assigned port.
+        let listener = bind_with_retry(&server, true).await;
+        let bound_port = listener.local_addr().unwrap().port();
+
+        assert_ne!(bound_port, occupied_port);
+        assert_ne!(bound_port, 0);
+    }
+
+    #[tokio::test]
+    /// The random-port fallback only applies once the retries are exhausted,
+    /// so a port that frees up during the retries is still bound.
+    async fn bind_retries_default_port_before_falling_back() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+
+        let server = ServerConfig {
+            host: "127.0.0.1".to_string(),
+            port: occupied_port,
+            ..ServerConfig::default()
+        };
+
+        tokio::spawn(async move {
+            time::sleep(Duration::from_millis(150)).await;
+            drop(occupied);
+        });
+
+        let listener = bind_with_retry(&server, true).await;
+
+        assert_eq!(listener.local_addr().unwrap().port(), occupied_port);
     }
 }

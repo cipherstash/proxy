@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Connection flags**: `--database-url` sets the database host, port, user, password and name from one PostgreSQL connection string, and `--db-port` (`-P`) and `--db-password` (`-W`) join the existing `--db-*` flags, which override matching parts of the URL. A URL sets only the parts it contains. Connection strings with any other option, such as `sslmode`, or with a Unix socket host or multiple hosts, are rejected, because Proxy cannot apply them. A password on the command line is exposed in shell history and the process list, so prefer `CS_DATABASE__PASSWORD`.
+
+- **Inbound TLS flags**: `--tls` requires TLS from clients, as `CS_SERVER__REQUIRE_TLS=true` does, and fails startup if TLS is not configured. `--no-tls` forces a plaintext listener and overrides `CS_SERVER__REQUIRE_TLS`.
+
 - **Application-generated EQL values in statements**: SQL literals and bound parameters may now carry EQL v3 storage payloads or query-only SEM operands produced by an application. Proxy authenticates every stored ciphertext, requires its authenticated descriptor to name the inferred destination column, and independently re-derives every SEM term before forwarding it without double encryption. Query-only operands contain no ciphertext to authenticate, so Proxy instead validates their version, identifier, term shape, column capabilities, and syntactic query role; they are rejected in storage positions. This includes bare SteVec selector hashes matching `^[0-9a-f]{32}$`: in JSON selector query positions a match is treated as already hashed, while a non-match remains plaintext and is encrypted normally. A matching plaintext selector is inherently ambiguous and is intentionally treated as already hashed. Invalid payloads fail closed with one generic, transaction-aborting error so validation details cannot be used as an oracle.
 
   Compatibility note: on every encrypted column type, Proxy reserves three JSON object shapes for application-generated EQL: storage payloads with top-level `v` and `i` plus at least one of `c`, `h`, or `sv`; scalar query payloads with `v` and `i` plus at least one of `hm`, `bf`, `ob`, or `op`; and SteVec query payloads whose only top-level key is `sv`. An object matching one of these shapes is validated as EQL rather than encrypted as plaintext, and there is no opt-out. Query-only shapes are rejected in storage positions. Before upgrading, audit plaintext application writes for these key combinations; [Invalid encrypted value](docs/errors.md#encrypt-invalid-inbound-eql-payload) includes a `jsonb` scan predicate.
@@ -17,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`SET LOCAL CIPHERSTASH.KEYSET_ID`, `KEYSET_NAME` and `UNSAFE_DISABLE_MAPPING`**: the setting lasts until the end of the current transaction, as `SET LOCAL` does in PostgreSQL. This is the safe way to select a tenant's keyset behind a connection pooler.
 
 ### Changed
+
+- **Quiet by default in a terminal**: when run in a terminal with no `--log-level`, `CS_LOG__LEVEL` or configuration file, Proxy now logs errors only and prints its listen address. Pass `--debug` for debug logging. Other log settings from the environment, such as `CS_LOG__OUTPUT` and per-target levels like `CS_LOG__MAPPER_LEVEL`, still apply. Without a terminal, such as in a container run without `-t`, logging is unchanged.
+
+- **Default port fallback**: if the default listen port is still in use after Proxy's bind retries, Proxy listens on an OS-assigned port and prints it. A port set with `CS_SERVER__PORT` or a configuration file is never replaced.
+
+- **Database errors logged at debug level**: errors that PostgreSQL returns to a client are now logged concisely at `debug` level (`CS_LOG__PROTOCOL_LEVEL=debug` shows them), instead of in full at `error` level. Errors that Proxy itself generates are still logged.
 
 - **Minimum supported Rust version**: building Proxy from source now requires Rust 1.89.0 or later, declared as `rust-version` in `Cargo.toml` so Cargo reports an older compiler clearly instead of failing deep in a dependency. CI builds the production binary on Rust 1.89.0 to keep that minimum from rising by accident. Development, tests, and release binaries use the Rust version pinned in `rust-toolchain.toml` (currently 1.99.0). See [Supported Rust versions](DEVELOPMENT.md#supported-rust-versions).
 
@@ -36,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
+
+- **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
 - **Prepared statement recovery and settings isolation**: failed or discarded protocol messages no longer replace encryption metadata for statements PostgreSQL retained. Pipelined close-and-reprepare recovers immediately, and refused operations use names that remain unpredictable within PostgreSQL's lookup limit. Unsupported keyset values fail explicitly, and stale prepared statements signal driver cache invalidation.
 

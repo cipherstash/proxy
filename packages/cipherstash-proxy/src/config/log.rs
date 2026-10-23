@@ -96,6 +96,39 @@ impl Default for LogConfig {
 }
 
 impl LogConfig {
+    /// The log config to use at startup.
+    ///
+    /// `explicit_level` is true when a level was set with `--log-level` or
+    /// `CS_LOG__LEVEL`, and `interactive` when stdout is a terminal.
+    pub fn for_startup(
+        &self,
+        explicit_level: bool,
+        config_file_present: bool,
+        debug: bool,
+        interactive: bool,
+    ) -> Self {
+        if explicit_level {
+            self.clone()
+        } else if debug {
+            self.with_default_level(LogLevel::Debug)
+        } else if config_file_present || !interactive {
+            self.clone()
+        } else {
+            self.with_default_level(LogLevel::Error)
+        }
+    }
+
+    /// This config with `level` as the default level, used when no log level
+    /// was set explicitly.
+    /// Every other setting, and any per-target level that was set, is kept.
+    pub fn with_default_level(&self, level: LogLevel) -> Self {
+        LogConfig {
+            level,
+            targets: self.targets.with_default_level(level),
+            ..self.clone()
+        }
+    }
+
     pub fn with_level(level: LogLevel) -> Self {
         LogConfig {
             format: LogConfig::default_log_format(),
@@ -193,5 +226,70 @@ mod tests {
                 assert!(matches!(config.unwrap_err(), Error::Config(_)));
             });
         });
+    }
+
+    #[test]
+    /// The quiet default replaces only the level: settings and explicit
+    /// per-target levels from env or config are kept.
+    fn with_default_level_keeps_loaded_settings() {
+        use crate::config::LogConfig;
+        let mut loaded = LogConfig {
+            output: LogOutput::Stderr,
+            format: LogFormat::Structured,
+            slow_statements: true,
+            ..Default::default()
+        };
+        loaded.targets.mapper_level = LogLevel::Debug;
+
+        let config = loaded.with_default_level(LogLevel::Error);
+
+        assert_eq!(config.level, LogLevel::Error);
+        assert_eq!(config.output, LogOutput::Stderr);
+        assert_eq!(config.format, LogFormat::Structured);
+        assert!(config.slow_statements);
+        assert_eq!(config.targets.mapper_level, LogLevel::Debug);
+        assert_eq!(config.targets.protocol_level, LogLevel::Error);
+    }
+
+    #[test]
+    /// Containers run without a terminal, an explicit level or a config file,
+    /// so the quiet default must not apply there.
+    fn startup_keeps_loaded_level_when_not_interactive() {
+        use crate::config::LogConfig;
+        let config = LogConfig::default().for_startup(false, false, false, false);
+
+        assert_eq!(config.level, LogConfig::default_log_level());
+        assert_eq!(
+            config.targets.protocol_level,
+            LogConfig::default_log_level()
+        );
+    }
+
+    #[test]
+    fn startup_is_quiet_when_interactive() {
+        use crate::config::LogConfig;
+        let config = LogConfig::default().for_startup(false, false, false, true);
+
+        assert_eq!(config.level, LogLevel::Error);
+    }
+
+    #[test]
+    /// `--debug` is an explicit flag for this run, so it outranks a config
+    /// file that sets no level.
+    fn startup_debug_outranks_config_file() {
+        use crate::config::LogConfig;
+        let config = LogConfig::default().for_startup(false, true, true, true);
+
+        assert_eq!(config.level, LogLevel::Debug);
+    }
+
+    #[test]
+    fn startup_explicit_level_outranks_debug() {
+        use crate::config::LogConfig;
+        let loaded = LogConfig::with_level(LogLevel::Warn);
+
+        let config = loaded.for_startup(true, false, true, true);
+
+        assert_eq!(config.level, LogLevel::Warn);
     }
 }

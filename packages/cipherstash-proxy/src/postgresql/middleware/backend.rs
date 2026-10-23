@@ -17,7 +17,7 @@ use crate::EqlCiphertext;
 use metrics::{counter, histogram};
 use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, DiagnosticResponse};
 use std::time::Instant;
-use tracing::{debug, error, info};
+use tracing::debug;
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -404,17 +404,24 @@ impl<S: EncryptionService> Backend<S> {
     ///
     /// # Logging and Monitoring
     ///
-    /// All errors are logged at ERROR level for debugging and recorded in
-    /// monitoring systems. This helps track both application-level issues
-    /// and proxy-specific problems.
-    ///
-    /// # Returns
-    ///
-    /// Always returns `Some(bytes)` containing the original error response
-    /// to forward to the client unchanged.
+    /// A database error forwarded to the client is normal proxy operation, and
+    /// the client surfaces it, so it is logged concisely at DEBUG level.
+    /// Errors that Proxy itself generates are logged by the frontend.
     fn error_response_handler(&mut self, response: &pg_proto::DiagnosticResponse) {
-        error!(msg = "PostgreSQL Error", fields = ?response.fields);
-        info!(msg = "PostgreSQL Errors originate in the database");
+        let field = |code: u8| {
+            response
+                .fields
+                .iter()
+                .find(|field| field.code == code)
+                .map(|field| String::from_utf8_lossy(&field.value))
+        };
+        debug!(
+            target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "Database returned an error",
+            code = %field(b'C').unwrap_or_default(),
+            error = %field(b'M').unwrap_or_default(),
+        );
     }
 
     ///
