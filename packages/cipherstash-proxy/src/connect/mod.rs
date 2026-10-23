@@ -132,7 +132,8 @@ pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool)
                         warn!(
                             msg =
                                 "Default port is already in use; listening on an OS-assigned port",
-                            port = server.port
+                            port = server.port,
+                            address = ?listener.local_addr().ok()
                         );
                         report_listening(&listener);
                         return listener;

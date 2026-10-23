@@ -504,10 +504,13 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
         }
     };
 
-    let port = match pg.get_ports() {
-        [] => None,
-        [port] => Some(*port),
-        _ => {
+    // tokio-postgres fills in 5432 for a URL host without a port, which would
+    // replace the configured port, so skip the ports it filled in.
+    let ports = pg.get_ports();
+    let port = match ports.get(defaulted_port_count(url).min(ports.len())..) {
+        Some([]) | None => None,
+        Some([port]) => Some(*port),
+        Some(_) => {
             return Err(invalid(
                 "multiple ports are not supported. Use a single port",
             ))
@@ -529,8 +532,8 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
     if let Some(host) = &host {
         applied.host(host);
     }
-    if let Some(port) = port {
-        applied.port(port);
+    for port in ports {
+        applied.port(*port);
     }
     if applied != pg {
         return Err(invalid(
@@ -552,9 +555,7 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
         env::set_var("CS_DATABASE__HOST", host);
     }
 
-    // tokio-postgres fills in 5432 for a URL without a port, which would
-    // replace the configured port.
-    if let Some(port) = port.filter(|_| url_has_port(url)) {
+    if let Some(port) = port {
         env::set_var("CS_DATABASE__PORT", port.to_string());
     }
 
@@ -573,24 +574,33 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Whether a connection string names a port. A `postgres://` URL names one
-/// in its authority, after the host; a key=value string only has ports it
-/// sets.
-fn url_has_port(url: &str) -> bool {
+/// The number of ports tokio-postgres filled in with 5432 when it parsed
+/// `url`: one for each host in a `postgres://` URL's authority that has no
+/// port, or an empty one. A key=value string only has the ports it sets.
+fn defaulted_port_count(url: &str) -> usize {
     let Some(rest) = url
         .strip_prefix("postgres://")
         .or_else(|| url.strip_prefix("postgresql://"))
     else {
-        return true;
+        return 0;
     };
-    let authority = rest.split(['/', '?']).next().unwrap_or_default();
-    let host_and_port = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host_and_port)| host_and_port);
-    match host_and_port.rsplit_once(']') {
-        Some((_, after_ipv6_host)) => after_ipv6_host.starts_with(':'),
-        None => host_and_port.contains(':'),
+    // Like tokio-postgres, take the credentials up to the first `@`, so an
+    // unencoded `/` in the password does not end the authority.
+    let rest = rest.split_once('@').map_or(rest, |(_, rest)| rest);
+    let hosts = rest.split(['/', '?']).next().unwrap_or_default();
+    if hosts.is_empty() {
+        return 0;
     }
+    hosts
+        .split(',')
+        .filter(|host| {
+            let port = match host.rsplit_once(']') {
+                Some((_, after_ipv6_host)) => after_ipv6_host.strip_prefix(':'),
+                None => host.split_once(':').map(|(_, port)| port),
+            };
+            port.is_none_or(str::is_empty)
+        })
+        .count()
 }
 
 /// Expected string is in the forms:
@@ -1504,6 +1514,39 @@ mod tests {
                 "sslmode=disable: {err}"
             );
             assert!(!err.contains("CS_DATABASE__WITH_TLS_VERIFICATION"));
+        });
+    }
+
+    #[test]
+    /// tokio-postgres takes the password up to the first `@`, so a `/` in an
+    /// unencoded password must not end the authority early.
+    fn database_url_with_slash_in_password_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice:pa/ss@db1.example.com/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+            assert_eq!(std::env::var("CS_DATABASE__PASSWORD").unwrap(), "pa/ss");
+        });
+    }
+
+    #[test]
+    fn database_url_with_empty_port_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db1.example.com:/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+        });
+    }
+
+    #[test]
+    fn database_url_port_parameter_sets_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db1.example.com/orders?port=6543").unwrap();
+
+            assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "6543");
         });
     }
 }
