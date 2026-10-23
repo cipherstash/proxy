@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792722038038,
+  "lastUpdate": 1792727191912,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28548,6 +28548,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 34.492111,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "98c4460d85c29a63ed37b357d9bce7af8cd19cd9",
+          "message": "Merge pull request #486 from cipherstash/claude/project-thread-2yjn9s\n\nfix(proxy): refuse writes to a table Proxy cannot resolve",
+          "timestamp": "2026-10-23T14:41:10+11:00",
+          "tree_id": "14e4de90e0a928858a39e5044a22db0888c09dca",
+          "url": "https://github.com/cipherstash/proxy/commit/98c4460d85c29a63ed37b357d9bce7af8cd19cd9"
+        },
+        "date": 1792727190443,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.501753,
             "unit": "Number"
           }
         ]
