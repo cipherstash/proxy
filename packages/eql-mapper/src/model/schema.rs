@@ -109,18 +109,35 @@ pub enum SchemaError {
     #[error("Table not found: {}", _0)]
     TableNotFound(String),
 
-    #[error("Column: {} not found for table: {}", _0, _1)]
+    #[error(
+        "Table name is ambiguous: {} names both a temporary and a permanent table",
+        _0
+    )]
+    AmbiguousTable(String),
+
+    #[error("Column: {} not found for table: {}", _1, _0)]
     ColumnNotFound(String, String),
 }
 
 impl SchemaError {
-    /// Returns the table name when this error means a table could not be resolved.
-    pub fn as_table_not_found(&self) -> Option<&str> {
+    /// Returns why a table could not be resolved, when that is what this
+    /// error means.
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
         match self {
-            SchemaError::TableNotFound(table) => Some(table),
+            SchemaError::TableNotFound(table) => Some(UnresolvedTable::NotFound(table)),
+            SchemaError::AmbiguousTable(table) => Some(UnresolvedTable::Ambiguous(table)),
             SchemaError::ColumnNotFound(..) => None,
         }
     }
+}
+
+/// A table name that does not resolve to exactly one table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnresolvedTable<'a> {
+    /// No table has this name.
+    NotFound(&'a str),
+    /// A temporary table and a permanent table both have this bare name.
+    Ambiguous(&'a str),
 }
 
 impl Schema {
@@ -448,4 +465,24 @@ macro_rules! schema {
             schema
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_not_found_names_the_column_then_the_table() {
+        let mut schema = Schema::new("public");
+        schema.add_table(Table::new(Ident::new("users")));
+
+        let err = schema
+            .resolve_table_column(
+                &ObjectName::from(vec![Ident::new("users")]),
+                &Ident::new("email"),
+            )
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "Column: email not found for table: users");
+    }
 }

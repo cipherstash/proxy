@@ -2,7 +2,7 @@
 use crate::inference::unifier::{ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
-use crate::model::IdentCase;
+use crate::model::{IdentCase, UnresolvedTable};
 use crate::unifier::{Projection, Value};
 use crate::Relation;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart, Query, Statement};
@@ -349,10 +349,18 @@ pub enum ScopeError {
 }
 
 impl ScopeError {
-    /// See [`TypeError::as_table_not_found`].
-    pub fn as_table_not_found(&self) -> Option<&str> {
+    /// See [`TypeError::is_unsatisfied_bounds`].
+    pub fn is_unsatisfied_bounds(&self) -> bool {
         match self {
-            ScopeError::TypeError(err) => err.as_table_not_found(),
+            ScopeError::TypeError(err) => err.is_unsatisfied_bounds(),
+            _ => false,
+        }
+    }
+
+    /// See [`TypeError::as_unresolved_table`].
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
+        match self {
+            ScopeError::TypeError(err) => err.as_unresolved_table(),
             _ => None,
         }
     }

@@ -37,7 +37,9 @@ def test_encrypted_column_not_defined_in_schema():
                 sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES (%s, %s)"
 
 
-                with pytest.raises(psycopg.Error, match=r'relation ".*" does not exist'):
+                # EQL Mapper cannot type check a write to a column it does not
+                # know, so Proxy refuses it rather than forward the values as written.
+                with pytest.raises(psycopg.Error, match='#mapping-statement-could-not-be-type-checked'):
                     cursor.execute(sql, [id, val])
 
 
