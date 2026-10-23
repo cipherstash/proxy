@@ -1346,9 +1346,10 @@ where
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable.into())
     }
 
-    /// Returns the resolver for this connection's effective schema snapshot.
+    /// Returns the resolver for this connection's effective schema snapshot,
+    /// with its native temporary tables.
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
-        self.schema_middleware.resolver()
+        self.schema_middleware.effective_resolver()
     }
 
     /// Records schema intent for a parsed prepared statement.
@@ -1732,21 +1733,14 @@ where
         Ok(())
     }
 
-    /// Records the native tables a simple-query batch creates, so the batch's
-    /// later statements can write to them.
-    pub fn note_native_tables(&self, statements: &[sqltk::parser::ast::Statement]) {
-        self.schema_middleware.note_native_tables(statements);
-    }
-
-    /// Whether every table `statement` writes to is a native table this
-    /// connection created that the schema may not model yet.
-    pub fn writes_only_native_tables(&self, statement: &sqltk::parser::ast::Statement) -> bool {
-        eql_mapper::write_targets(statement).is_some_and(|targets| {
-            !targets.is_empty()
-                && targets
-                    .iter()
-                    .all(|target| self.schema_middleware.is_native_table(target))
-        })
+    /// The resolver to type check each statement of a simple-query batch with,
+    /// which sees the encryption-neutral schema changes of the statements
+    /// before it.
+    pub fn batch_table_resolvers(
+        &self,
+        statements: &[sqltk::parser::ast::Statement],
+    ) -> Vec<Arc<TableResolver>> {
+        self.schema_middleware.batch_resolvers(statements)
     }
 
     /// Whether any column is encrypted. A column can be encrypted without

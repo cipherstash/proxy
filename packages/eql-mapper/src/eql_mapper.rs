@@ -3,7 +3,7 @@ use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
     DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    TypeRegistry, UnresolvedTable,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -95,57 +95,6 @@ pub fn writes_data(statement: &Statement) -> bool {
     statement.accept(&mut FindWrite).is_break()
 }
 
-/// Returns the tables the [`Statement`] writes to, found as [`writes_data`] finds its writes, or `None` when a write
-/// target is not a plain table name (a table function or a subquery, say).
-pub fn write_targets(statement: &Statement) -> Option<Vec<ast::ObjectName>> {
-    #[derive(Default)]
-    struct FindTargets {
-        names: Vec<ast::ObjectName>,
-        unnamed: bool,
-    }
-
-    impl FindTargets {
-        fn relation(&mut self, relation: &ast::TableFactor) {
-            match relation {
-                ast::TableFactor::Table { name, .. } => self.names.push(name.clone()),
-                _ => self.unnamed = true,
-            }
-        }
-    }
-
-    impl<'ast> Visitor<'ast> for FindTargets {
-        type Error = Infallible;
-
-        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-            match node.downcast_ref::<Statement>() {
-                Some(Statement::Insert(insert)) => match &insert.table {
-                    ast::TableObject::TableName(name) => self.names.push(name.clone()),
-                    _ => self.unnamed = true,
-                },
-                Some(Statement::Update { table, .. }) => self.relation(&table.relation),
-                Some(Statement::Delete(delete)) if !delete.tables.is_empty() => {
-                    self.names.extend(delete.tables.iter().cloned())
-                }
-                Some(Statement::Delete(delete)) => match &delete.from {
-                    ast::FromTable::WithFromKeyword(tables)
-                    | ast::FromTable::WithoutKeyword(tables) => {
-                        for table in tables {
-                            self.relation(&table.relation);
-                        }
-                    }
-                },
-                Some(Statement::Merge { table, .. }) => self.relation(table),
-                _ => {}
-            }
-            ControlFlow::Continue(())
-        }
-    }
-
-    let mut targets = FindTargets::default();
-    let _ = statement.accept(&mut targets);
-    (!targets.unnamed).then_some(targets.names)
-}
-
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {
@@ -196,19 +145,32 @@ impl EqlMapperError {
         }
     }
 
-    /// Returns the table name when this error means the statement names a
+    /// Whether the statement uses an operation that an encrypted value's EQL
+    /// type does not support. The type checker understood the statement, so
+    /// this is not a gap in its coverage.
+    pub fn is_unsatisfied_bounds(&self) -> bool {
+        match self {
+            EqlMapperError::Type(err) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Scope(err) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Import(ImportError::ScopeError(err)) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => err.is_unsatisfied_bounds(),
+            _ => false,
+        }
+    }
+
+    /// Returns why, when this error means the statement names a
     /// table the schema cannot resolve: one that is not loaded, a name that is
     /// qualified by another schema, or a name more than one table uses.
     ///
     /// A caller must not treat such a statement as one that touches nothing
     /// encrypted, because the type checker never saw the table's columns.
-    pub fn as_table_not_found(&self) -> Option<&str> {
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
         match self {
-            EqlMapperError::Type(err) => err.as_table_not_found(),
-            EqlMapperError::Scope(err) => err.as_table_not_found(),
-            EqlMapperError::Import(ImportError::SchemaError(err)) => err.as_table_not_found(),
-            EqlMapperError::Import(ImportError::ScopeError(err)) => err.as_table_not_found(),
-            EqlMapperError::Import(ImportError::TypeError(err)) => err.as_table_not_found(),
+            EqlMapperError::Type(err) => err.as_unresolved_table(),
+            EqlMapperError::Scope(err) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::SchemaError(err)) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::ScopeError(err)) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => err.as_unresolved_table(),
             _ => None,
         }
     }

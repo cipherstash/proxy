@@ -41,7 +41,9 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError};
+    use super::{
+        test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError, UnresolvedTable,
+    };
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -540,10 +542,10 @@ mod test {
         let statement = parse(sql);
         match type_check(schema, &statement) {
             Ok(_) => panic!("statement type checked but names an unknown table: {sql}"),
-            Err(err) => err
-                .as_table_not_found()
-                .unwrap_or_else(|| panic!("failed for another reason ({err}): {sql}"))
-                .to_owned(),
+            Err(err) => match err.as_unresolved_table() {
+                Some(UnresolvedTable::NotFound(table)) => table.to_owned(),
+                _ => panic!("failed for another reason ({err}): {sql}"),
+            },
         }
     }
 
@@ -676,37 +678,6 @@ mod test {
         ] {
             assert!(!crate::writes_data(&parse(sql)), "{sql}");
         }
-    }
-
-    #[test]
-    fn write_targets_names_each_table_written() {
-        let names = |sql: &str| {
-            crate::write_targets(&parse(sql)).map(|names| {
-                names
-                    .iter()
-                    .map(|name| name.to_string())
-                    .collect::<Vec<_>>()
-            })
-        };
-        assert_eq!(
-            names("INSERT INTO t (id) SELECT id FROM users"),
-            Some(vec!["t".to_owned()])
-        );
-        assert_eq!(
-            names("UPDATE public.t SET id = 1"),
-            Some(vec!["public.t".to_owned()])
-        );
-        assert_eq!(
-            names("DELETE FROM t USING users"),
-            Some(vec!["t".to_owned()])
-        );
-        assert_eq!(
-            names(
-                "WITH moved AS (DELETE FROM users RETURNING id) INSERT INTO t SELECT id FROM moved"
-            ),
-            Some(vec!["users".to_owned(), "t".to_owned()])
-        );
-        assert_eq!(names("SELECT id FROM users"), Some(vec![]));
     }
 
     #[test]
