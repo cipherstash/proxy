@@ -2624,7 +2624,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonLike + Contain),
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
                 }
             }
         });
@@ -2635,14 +2635,18 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
+                if matches!(op, "@>" | "<@") {
+                    let literal = typed.literal_values()[0].1;
+                    assert!(typed.query_operands.contains_literal(literal));
+                }
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(
                     &statement,
                     vec![ast::Value::SingleQuotedString("medications".to_owned())],
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
-                            "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v3.query_json) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v3.query_json) AS meds FROM patients".to_string(),
                             // -> / ->> field access: functionalised to eql_v3."->"/"->>",
                             // with the field selector passed as encrypted text.
                             "->" => "SELECT id, eql_v3.\"->\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
@@ -2664,7 +2668,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonLike + Contain),
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
                 }
             }
         });
@@ -2685,7 +2689,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonLike + Contain),
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
                 }
             }
         });
@@ -2775,7 +2779,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonLike + Contain),
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
                 }
             }
         });
@@ -2795,12 +2799,14 @@ mod test {
             "Expected @> to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
 
-        // CRITICAL: Verify the parameter is cast to enable GIN index usage
-        // The cast ::JSONB::public.eql_v3_text_search is required for GIN indexes to work
+        // A containment needle is a term-only query operand. It must use the
+        // query_json domain so no source ciphertext is required.
         assert!(
-            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
-            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
+            sql.contains("::JSONB::eql_v3.query_json")
+                || sql.contains("::jsonb::eql_v3.query_json"),
+            "Expected parameter to be cast as ::JSONB::eql_v3.query_json, got: {sql}"
         );
+        assert!(transformed.params.outputs()[0].query_operand);
     }
 
     #[test]
@@ -2809,7 +2815,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonLike + Contain),
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
                 }
             }
         });
@@ -2829,11 +2835,13 @@ mod test {
             "Expected <@ to be transformed to eql_v3.jsonb_contained_by, got: {sql}"
         );
 
-        // CRITICAL: Verify the parameter is cast to enable GIN index usage
+        // The contained value is also a term-only query operand.
         assert!(
-            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
-            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
+            sql.contains("::JSONB::eql_v3.query_json")
+                || sql.contains("::jsonb::eql_v3.query_json"),
+            "Expected parameter to be cast as ::JSONB::eql_v3.query_json, got: {sql}"
         );
+        assert!(transformed.params.outputs()[0].query_operand);
     }
 
     #[test]

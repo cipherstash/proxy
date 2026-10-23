@@ -64,9 +64,9 @@ pub(crate) fn query_operand_domain(eql_term: &EqlTerm) -> Option<(String, String
 /// own domain, carrying the ciphertext plus every search term the column
 /// indexes.
 ///
-/// This is what an `INSERT` value, an `UPDATE` assignment and a containment
-/// needle all need — as opposed to a predicate operand, which needs only the
-/// terms of [`query_operand_domain`].
+/// This is what an `INSERT` value or an `UPDATE` assignment needs — as opposed
+/// to a predicate operand, which needs only the terms of
+/// [`query_operand_domain`].
 ///
 /// Returns `None` for a JSON selector, which is bare text in every position.
 pub(crate) fn full_payload_domain(eql_term: &EqlTerm) -> Option<(String, String)> {

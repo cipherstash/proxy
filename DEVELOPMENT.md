@@ -5,6 +5,11 @@
 >  - [mise](https://mise.jdx.dev/) — see the [installing mise](#installing-mise) instructions
 >  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/) and ensure that your Docker daemon is running. On *macOS* and *Linux* you can do this by running Docker Desktop.  See: [Docker Desktop docs](https://docs.docker.com/get-started/introduction/get-docker-desktop/). If you have installed Docker without Docker Desktop then you will need to launch `dockerd` manually.
 
+> [!NOTE]
+> On macOS, if development fails with `Too many open files`, raise the limit
+> for the current shell with `ulimit -n 10240`. Add the command to your shell
+> profile if you need the setting to persist.
+
 Local development quickstart:
 
 ```shell
@@ -131,6 +136,43 @@ Install development and testing dependencies (including `cargo-binstall`):
 ```shell
 mise install
 ```
+
+### Supported Rust versions
+
+CI uses three Rust toolchains:
+
+| Toolchain | Declared in | What CI runs on it |
+|---|---|---|
+| **Pinned** (currently 1.99.0) | `rust-toolchain.toml` | Formatting, Clippy, unit and integration tests across the full PostgreSQL matrix, burn-in, benchmarks, and release binaries (`mise run build:binary`). |
+| **Latest stable** | floating `stable` channel | `Lint (Rust stable)`: formatting and Clippy only. |
+| **Minimum supported (MSRV)** (currently 1.89.0) | `rust-version` under `[workspace.package]` in `Cargo.toml` | `Build (Rust MSRV)`: builds the production binary with `cargo build --locked --release --package cipherstash-proxy`. |
+
+The MSRV build and stable lint jobs need no PostgreSQL or credentials. Locally, rustup selects the pinned toolchain automatically from `rust-toolchain.toml`.
+
+Rust 1.88 cannot build Proxy: a transitive dependency (`stack-profile`, via `cipherstash-client`) uses `std::fs::File::lock`, which stabilized in 1.89, without declaring that requirement.
+
+To run those checks locally:
+
+```shell
+cargo +stable clippy --all --no-deps --all-targets --all-features -- -D warnings
+
+rustup toolchain install 1.89.0 --profile minimal
+cargo +1.89.0 build --locked --release --package cipherstash-proxy
+```
+
+#### Bumping the pinned toolchain
+
+When `Lint (Rust stable)` fails after a new Rust release, fix the new warnings and update `channel` in `rust-toolchain.toml` to that release in the same pull request. The full matrix then confirms the new pin.
+
+#### Raising the MSRV
+
+The MSRV only goes up deliberately. If `Build (Rust MSRV)` fails because a change, or a dependency update in `Cargo.lock`, needs a newer compiler, either avoid the newer requirement (for example, keep the older dependency version) or raise the MSRV in the same pull request:
+
+1. Update `rust-version` in the root `Cargo.toml`. CI picks up the new value automatically.
+2. Update the current MSRV and the reason for it in this section.
+3. Add a `### Changed` entry to the `[Unreleased]` section of `CHANGELOG.md` naming the new minimum and why it changed, because it affects anyone building Proxy from source.
+
+Lowering the MSRV requires confirming that `Build (Rust MSRV)` passes on the lower version first.
 
 ### PostgreSQL
 
@@ -407,6 +449,28 @@ The integration tests have several runtime dependencies:
 
 The `Multitenant` Integration tests require different configuration from the baseline.
 The `CS_DEFAULT_KEYSET_ID` value must not be set for the multitenant `SET KEYSET_*` commands to work.
+
+##### Connection pooler compatibility matrix
+
+`mise run test:poolers` builds Proxy from source, checks the Rust compatibility matrix, and requires the complete Go pgx suite to pass on eight supported direct/session-mode configurations.
+It needs Docker and the integration credentials, and uses the containers defined in `tests/docker-compose.yml` and `tests/docker-compose.poolers.yml`.
+A dedicated PostgreSQL 17 CI job runs the same gate.
+
+The task changes your local containers:
+
+- It starts the `postgres` container with `mise run postgres:up` and leaves it running.
+- It rebuilds the `cipherstash/proxy:latest` image from the current source.
+- It replaces the dev `proxy` container from `tests/docker-compose.yml` with one configured for the matrix, and starts `proxy-mt`, the PgBouncer and PgCat containers, and one `proxy-via-<pooler>` container per pooler.
+- On exit it removes all of those containers, including the dev `proxy` container, unless `POOLERS_KEEP_RUNNING=1` is set.
+
+Stop `proxy-tls` (and anything else listening on port 6432) before running the task, and run `mise run proxy:up` again afterwards if you need the dev Proxy.
+
+The default `POOLERS_GOLANG=supported` rejects `POOLERS_TEST_FILTER` and `POOLERS_SKIP_BUILD`.
+For local diagnosis, use `POOLERS_GOLANG=off` for the Rust matrix only, or `POOLERS_GOLANG=informational` to collect Go results across unsupported configurations too.
+Only those diagnostic modes permit filters or `POOLERS_SKIP_BUILD=1`; CI requires supported mode.
+Logs and Go test evidence remain in `target/pooler-results`, configurable with `POOLERS_RESULTS_DIR`.
+Run `python3 tests/tasks/test/pooler_gate_test.py` to check the gate's failure handling without Docker.
+See [Connection poolers](docs/reference/connection-poolers.md) for the support boundaries.
 
 ##### Language-specific integration tests
 
@@ -797,4 +861,3 @@ git push origin :refs/tags/v2.1.9
 # Create the release again
 mise run release v2.1.9
 ```
-

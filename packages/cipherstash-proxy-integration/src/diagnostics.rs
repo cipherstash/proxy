@@ -1,11 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, PROXY, PROXY_METRICS_PORT};
+    use crate::common::{clear, connect_with_tls_and_task, PROXY, PROXY_METRICS_PORT};
 
     /// Maximum number of retry attempts for fetching metrics.
-    /// 5 retries with 200ms delay gives ~1 second total wait time,
-    /// sufficient for Prometheus scrape interval in CI environments.
-    const METRICS_FETCH_MAX_RETRIES: u32 = 5;
+    /// 25 retries with 200ms delay gives ~5 seconds total wait time.
+    const METRICS_FETCH_MAX_RETRIES: u32 = 25;
 
     /// Delay between retry attempts in milliseconds.
     /// 200ms provides a reasonable balance between responsiveness and allowing
@@ -13,9 +12,14 @@ mod tests {
     const METRICS_FETCH_RETRY_DELAY_MS: u64 = 200;
 
     /// Fetch metrics with retry logic to handle CI timing variability.
-    async fn fetch_metrics_with_retry(max_retries: u32, delay_ms: u64) -> String {
-        let url = format!("http://localhost:{}/metrics", *PROXY_METRICS_PORT);
+    async fn fetch_metrics_with_retry(
+        max_retries: u32,
+        delay_ms: u64,
+        expected: &[&str],
+    ) -> String {
+        let url = format!("http://127.0.0.1:{}/metrics", *PROXY_METRICS_PORT);
         let mut last_error = None;
+        let mut last_body = None;
 
         for attempt in 0..max_retries {
             if attempt > 0 {
@@ -24,23 +28,26 @@ mod tests {
 
             match reqwest::get(&url).await {
                 Ok(response) => match response.text().await {
-                    Ok(body) => return body,
+                    Ok(body) if expected.iter().all(|value| body.contains(value)) => return body,
+                    Ok(body) => last_body = Some(body),
                     Err(e) => last_error = Some(format!("Failed to read response: {}", e)),
                 },
                 Err(e) => last_error = Some(format!("Failed to fetch metrics: {}", e)),
             }
         }
 
-        panic!(
-            "Failed to fetch metrics after {} retries: {}",
-            max_retries,
-            last_error.unwrap_or_else(|| "unknown error".to_string())
-        );
+        last_body.unwrap_or_else(|| {
+            panic!(
+                "Failed to fetch metrics after {} retries: {}",
+                max_retries,
+                last_error.unwrap_or_else(|| "unknown error".to_string())
+            )
+        })
     }
 
     #[tokio::test]
     async fn metrics_include_statement_labels() {
-        let client = connect_with_tls(*PROXY).await;
+        let (client, connection_task) = connect_with_tls_and_task(*PROXY).await;
 
         clear().await;
 
@@ -59,14 +66,30 @@ mod tests {
             .await
             .unwrap();
 
+        // Closing the client gives the background connection driver a
+        // deterministic completion boundary before the metrics scrape.
+        drop(client);
+        connection_task
+            .await
+            .expect("PostgreSQL connection task should finish");
+
         // Fetch metrics with retry logic for CI robustness
-        let body =
-            fetch_metrics_with_retry(METRICS_FETCH_MAX_RETRIES, METRICS_FETCH_RETRY_DELAY_MS).await;
+        let body = fetch_metrics_with_retry(
+            METRICS_FETCH_MAX_RETRIES,
+            METRICS_FETCH_RETRY_DELAY_MS,
+            &[
+                "statement_type=\"insert\"",
+                "statement_type=\"select\"",
+                "multi_statement=\"false\"",
+            ],
+        )
+        .await;
 
         // Assert that the metrics include the expected labels
         assert!(
             body.contains("statement_type=\"insert\""),
-            "Metrics should include insert statement_type label"
+            "Metrics should include insert statement_type label. Found: {}",
+            body
         );
         assert!(
             body.contains("statement_type=\"select\""),
@@ -80,7 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn slow_statement_metrics_and_logs() {
-        let client = connect_with_tls(*PROXY).await;
+        let (client, connection_task) = connect_with_tls_and_task(*PROXY).await;
 
         clear().await;
 
@@ -88,9 +111,23 @@ mod tests {
         // We use pg_sleep(2.1) to ensure it's considered slow
         client.query("SELECT pg_sleep(2.1)", &[]).await.unwrap();
 
+        // Ensure the completed statement has been observed by the proxy's
+        // connection driver before polling its metrics endpoint.
+        drop(client);
+        connection_task
+            .await
+            .expect("PostgreSQL connection task should finish");
+
         // Fetch metrics with retry logic
-        let body =
-            fetch_metrics_with_retry(METRICS_FETCH_MAX_RETRIES, METRICS_FETCH_RETRY_DELAY_MS).await;
+        let body = fetch_metrics_with_retry(
+            METRICS_FETCH_MAX_RETRIES,
+            METRICS_FETCH_RETRY_DELAY_MS,
+            &[
+                "cipherstash_proxy_slow_statements_total",
+                "cipherstash_proxy_statements_session_duration_seconds",
+            ],
+        )
+        .await;
 
         // Assert that the slow statements counter is present and non-zero
         assert!(

@@ -1,28 +1,52 @@
-mod backend;
 mod column_mapper;
 mod context;
 mod data;
+mod diagnostics;
+mod driver;
 mod error_handler;
 mod format_code;
-mod frontend;
-mod handler;
-mod message_buffer;
-mod messages;
+mod inbound_eql;
+mod middleware;
 mod parser;
-mod protocol;
-mod startup;
+mod rewrite;
 
 pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;
-pub use handler::handler;
+pub use driver::handler;
+pub(crate) use rewrite::Name;
 
-pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
+/// Proxy-owned identity for correlating PostgreSQL protocol operations.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct OperationId(OperationIdInner);
 
-pub const SSL_REQUEST: i32 = 80877103;
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum OperationIdInner {
+    Protocol(pg_proto::OperationId),
+    #[cfg(test)]
+    Test(u64),
+}
 
-pub const CANCEL_REQUEST: i32 = 80877102;
+impl From<pg_proto::OperationId> for OperationId {
+    fn from(id: pg_proto::OperationId) -> Self {
+        Self(OperationIdInner::Protocol(id))
+    }
+}
 
-pub const SSL_RESPONSE_NO: u8 = b'N';
+#[cfg(test)]
+pub(crate) fn test_operation_id() -> OperationId {
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const SSL_RESPONSE_YES: u8 = b'S';
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    OperationId(OperationIdInner::Test(
+        NEXT_ID.fetch_add(1, Ordering::Relaxed),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_operation_ids_are_distinct() {
+        assert_ne!(super::test_operation_id(), super::test_operation_id());
+    }
+}

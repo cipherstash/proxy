@@ -1,12 +1,12 @@
 use crate::{postgresql::Column, Identifier};
-use bytes::BytesMut;
 use cipherstash_client::{encryption, schema::ColumnType};
 use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
-use std::{io, time::Duration};
+use std::{fmt, io, time::Duration};
 use thiserror::Error;
 
-const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
+pub(crate) const ERROR_DOC_BASE_URL: &str =
+    "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 const ERROR_DOC_CONFIG_URL: &str =
     "https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy";
 
@@ -55,7 +55,7 @@ pub enum Error {
     Unknown,
 
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<BytesMut>),
+    Send(#[from] tokio::sync::mpsc::error::SendError<pg_proto::BackendMessage>),
 }
 
 impl Error {
@@ -74,13 +74,34 @@ impl Error {
             // Forwarding a statement that references a legacy EQL v2 column
             // stores plaintext in a column its operator believes is encrypted
             // (CIP-3688). No configuration may turn that back on.
-            Error::Mapping(MappingError::UnmappableEncryptedColumn { .. })
+            Error::Mapping(
+                MappingError::UnmappableEncryptedColumn { .. }
+                    | MappingError::DependentStatementAfterDdl
+                    | MappingError::DependentStatementAfterSettings
+                    | MappingError::PreparedSettingsChanged
+                    | MappingError::UnmodelledDdl
+            ) | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
         )
     }
 }
 
 #[derive(Error, Debug)]
 pub enum ContextError {
+    #[error("Operation has no in-flight Execute state")]
+    OperationWithoutExecute,
+
+    #[error("Connection protocol state is unavailable")]
+    ProtocolStateUnavailable,
+
+    #[error("Operation could not be found in connection protocol state")]
+    UnknownOperation,
+
+    #[error("Operation has no in-flight Describe state")]
+    UnknownDescribe,
+
+    #[error("Prepared statement has no metrics template")]
+    StatementMetricsUnavailable,
+
     #[error("Portal could not be found in context")]
     UnknownPortal,
 }
@@ -99,6 +120,19 @@ pub enum ZeroKMSError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
+    #[error("A simple-query batch cannot change CipherStash settings before a statement that needs mapping. Send the setting and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-settings", ERROR_DOC_BASE_URL)]
+    DependentStatementAfterSettings,
+
+    #[error("The prepared statement or bound values no longer match confirmed connection state. Close the statement and prepare and bind it again before retrying. For help visit {}#mapping-prepared-settings-changed", ERROR_DOC_BASE_URL)]
+    PreparedSettingsChanged,
+    /// A simple-query batch would map against encryption metadata changed earlier in the batch.
+    #[error("A simple-query batch cannot contain a schema-dependent statement after DDL that may change encryption metadata. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
+    DependentStatementAfterDdl,
+
+    /// Confirmed DDL cannot be represented safely by the transaction overlay.
+    #[error("A successful schema change on this connection cannot be modelled safely. Roll back to a savepoint set before the change, or roll back the transaction. If the change created a connection-local object such as a temporary table, rollback does not clear this state; open a new connection. For help visit {}#mapping-unmodelled-ddl", ERROR_DOC_BASE_URL)]
+    UnmodelledDdl,
+
     #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",
     _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
     InvalidParameter(Box<Column>),
@@ -219,8 +253,8 @@ pub enum ConfigError {
     #[error("Database schema could not be loaded")]
     SchemaCouldNotBeLoaded,
 
-    #[error("Client must connect with Transport Layer Security (TLS)")]
-    TlsRequired,
+    #[error("Server requires Transport Layer Security (TLS), but no [tls] certificate and private key are configured. For help visit {}#config-missing-or-invalid-tls", ERROR_DOC_BASE_URL)]
+    TlsConfigurationRequired,
 
     #[error(transparent)]
     TlsConfigError(#[from] TlsConfigError),
@@ -255,6 +289,15 @@ pub enum TlsConfigError {
 
 #[derive(Error, Debug)]
 pub enum EncryptError {
+    /// Deliberately contains no payload or validation detail: inbound EQL
+    /// payloads are attacker-controlled and detailed responses can become an
+    /// oracle.
+    #[error(
+        "Invalid encrypted value. For help visit {}#encrypt-invalid-inbound-eql-payload",
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidInboundEqlPayload,
+
     #[error(transparent)]
     CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
@@ -316,6 +359,15 @@ pub enum EncryptError {
         ERROR_DOC_BASE_URL
     )]
     KeysetIdCouldNotBeParsed { id: String },
+
+    #[error("Setting '{setting}' requires exactly one value. Use a quoted UUID for KEYSET_ID, a keyset name (quoted, unquoted, or numeric) for KEYSET_NAME, or DEFAULT to reset. For help visit {}#encrypt-invalid-keyset-setting-value", ERROR_DOC_BASE_URL)]
+    InvalidKeysetSettingValue { setting: String },
+
+    #[error("Setting 'CIPHERSTASH.UNSAFE_DISABLE_MAPPING' requires exactly one boolean value, such as true, false, on, off, yes, no, 1 or 0, or DEFAULT to reset. For help visit {}#encrypt-invalid-mapping-setting-value", ERROR_DOC_BASE_URL)]
+    InvalidMappingSettingValue,
+
+    #[error("Setting '{setting}' is not a CipherStash setting. Use CIPHERSTASH.KEYSET_ID, CIPHERSTASH.KEYSET_NAME or CIPHERSTASH.UNSAFE_DISABLE_MAPPING. For help visit {}#encrypt-unknown-cipherstash-setting", ERROR_DOC_BASE_URL)]
+    UnknownCipherStashSetting { setting: String },
 
     #[error(
         "Keyset Id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
@@ -474,6 +526,21 @@ pub enum ProtocolError {
     #[error("Client authentication failed. Check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
     ClientAuthenticationFailed,
 
+    #[error("A buffered PostgreSQL DataRow was not associated with an operation")]
+    HeldDataRowMissingOperation,
+
+    #[error("Buffered PostgreSQL DataRows crossed Execute operation boundaries")]
+    HeldDataRowOperationMismatch,
+
+    #[error("A buffered PostgreSQL response was not a DataRow")]
+    HeldBackendMessageNotDataRow,
+
+    #[error("Buffered PostgreSQL DataRows were not associated with an encrypted portal")]
+    HeldDataRowsNotEncrypted,
+
+    #[error("Expected {expected} DataRow columns, received {received}")]
+    DataRowColumnCountMismatch { expected: usize, received: usize },
+
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterFormatCodesMismatch { expected: usize, received: usize },
 
@@ -601,6 +668,39 @@ impl From<chrono::ParseError> for Error {
     }
 }
 
+/// Renders an error and its full `source()` chain on one line: `a: b: c`.
+///
+/// Use this wherever an error is logged. `Display` on its own is not enough:
+/// by convention an error's `Display` describes only that error, and the cause
+/// is reached through `source()`. `tokio_postgres::Error` follows that
+/// convention from 0.7.18, so `err.to_string()` logs a bare `db error` and
+/// drops the server's message.
+///
+/// Recording the error as a `dyn Error` field does not help either: the
+/// `Structured` (JSON) log format renders only `Display`, and it is the default
+/// whenever stdout is not a terminal.
+///
+/// A cause whose text the rendered message already ends with is skipped, so an
+/// error that embeds its cause in `Display` (`"...: {0}"` with `#[from]`) is not
+/// printed twice.
+pub struct ErrorChain<'a>(pub &'a (dyn std::error::Error + 'static));
+
+impl fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut rendered = self.0.to_string();
+        let mut source = self.0.source();
+        while let Some(cause) = source {
+            let cause_text = cause.to_string();
+            if !rendered.ends_with(&cause_text) {
+                rendered.push_str(": ");
+                rendered.push_str(&cause_text);
+            }
+            source = cause.source();
+        }
+        f.write_str(&rendered)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +719,58 @@ mod tests {
             duration: Duration::from_millis(5000),
         };
         assert_eq!(error.to_string(), "Connection timed out after 5000 ms");
+    }
+
+    #[derive(Debug, Error)]
+    #[error("{message}")]
+    struct Leaf {
+        message: &'static str,
+    }
+
+    #[derive(Debug, Error)]
+    #[error("{message}")]
+    struct Wrapper {
+        message: &'static str,
+        #[source]
+        source: Leaf,
+    }
+
+    #[test]
+    fn error_chain_renders_an_error_without_a_source() {
+        let error = Leaf {
+            message: "db error",
+        };
+
+        assert_eq!(ErrorChain(&error).to_string(), "db error");
+    }
+
+    #[test]
+    fn error_chain_appends_each_cause() {
+        let error = Wrapper {
+            message: "db error",
+            source: Leaf {
+                message: "ERROR: permission denied for table encrypted",
+            },
+        };
+
+        assert_eq!(
+            ErrorChain(&error).to_string(),
+            "db error: ERROR: permission denied for table encrypted"
+        );
+    }
+
+    #[test]
+    fn error_chain_skips_a_cause_already_in_the_message() {
+        let error = Wrapper {
+            message: "Invalid encryption configuration: bad column",
+            source: Leaf {
+                message: "bad column",
+            },
+        };
+
+        assert_eq!(
+            ErrorChain(&error).to_string(),
+            "Invalid encryption configuration: bad column"
+        );
     }
 }

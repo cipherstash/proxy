@@ -1,4 +1,6 @@
-mod from_domain;
-mod manager;
+/// Immutable encryption-policy snapshots.
+mod config;
+/// Derives encryption metadata from EQL domain declarations.
+pub(crate) mod from_domain;
 
-pub use manager::{EncryptConfig, EncryptConfigManager};
+pub use config::EncryptConfig;

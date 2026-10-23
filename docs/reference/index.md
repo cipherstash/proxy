@@ -16,6 +16,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
 - [Command line interface](#command-line-interface)
 - [Multitenant operation](#multitenant-operation)
 - [Disabling encrypted mapping](#disabling-encrypted-mapping)
+- [Connection poolers](connection-poolers.md)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
 - [Troubleshooting ZeroKMS connections](#troubleshooting-zerokms-connections)
@@ -110,10 +111,12 @@ password = "password"
 
 # Connection timeout in ms
 # Sets how long to hold an open idle connection
-# In production environments this should be greater than the idle timeout of any connection pool in the application.
+# In production environments this should be greater than the idle timeout of any connection pool in the application,
+# including a pooler in front of Proxy. See docs/reference/connection-poolers.md
+# `0` disables the timeout.
 #
 # Optional
-# No Default (NO TIMEOUT)
+# Default: `120000` (2 minutes)
 # Env: CS_DATABASE__CONNECTION_TIMEOUT
 connection_timeout = "300000"
 
@@ -447,12 +450,33 @@ SET CIPHERSTASH.KEYSET_NAME = '<keyset-name>';
 SET CIPHERSTASH.KEYSET_NAME = 'tenant-1';
 ```
 
+#### SET LOCAL
+
+`SET LOCAL CIPHERSTASH.KEYSET_ID` and `SET LOCAL CIPHERSTASH.KEYSET_NAME` select a keyset for the current transaction only, as `SET LOCAL` does in PostgreSQL.
+When the transaction ends, the connection returns to the keyset it had before (if any).
+
+```sql
+BEGIN;
+SET LOCAL CIPHERSTASH.KEYSET_NAME = 'tenant-1';
+-- statements for tenant-1
+COMMIT;
+```
+
+Outside an explicit transaction block, `SET LOCAL` lasts only for the statement's own implicit transaction, so it has no lasting effect.
+
 ### Usage notes
 
 - The `SET CIPHERSTASH.KEYSET` commands must be executed before performing any encryption operations
-- The keyset remains active for the duration of the connection, or until a subsequent `SET CIPHERSTASH.KEYSET`
+- A keyset set with `SET` or `SET SESSION` remains active for the duration of the connection, until a subsequent `SET CIPHERSTASH.KEYSET`, or until `DISCARD ALL`
+- A keyset set with `SET LOCAL` remains active until the end of the current transaction
 - If a default keyset is configured in the Proxy, these commands cannot be used, and will return an error
-- The active keyset is connection-scoped and does not affect other connections
+- The active keyset is scoped to the connection between the client and Proxy
+
+> [!IMPORTANT]
+> **Behind a connection pooler, use `SET LOCAL`.**
+> A pooler in front of Proxy shares Proxy connections between application clients.
+> In transaction mode, a keyset selected with a session-level `SET` stays on the shared connection and applies to the next client's transactions: one tenant's keyset would be used for another tenant's queries.
+> See [Connection poolers](connection-poolers.md).
 
 
 ## Disabling encrypted mapping
@@ -466,7 +490,12 @@ For example, you are doing a data transformation with complex logic, and you are
 
 A `SET` command can be used to change the `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` configuration parameter.
 
-The parameter is always scoped to the connection `SESSION` - mapping is only ever disabled for the client connection the `SET` command was issued on.
+The parameter is scoped to the client's connection to Proxy: `SET` and `SET SESSION` last until the connection closes, it is set again, or `DISCARD ALL`; `SET LOCAL` lasts until the end of the current transaction.
+
+Behind a connection pooler, the client's connection to Proxy may be shared with other application clients.
+In transaction mode (and with PgCat in any mode), a session-level `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true` applies to other clients too.
+Use `SET LOCAL` inside a transaction instead.
+See [Connection poolers](connection-poolers.md).
 
 > [!IMPORTANT]
 > Extra care is required when using `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.

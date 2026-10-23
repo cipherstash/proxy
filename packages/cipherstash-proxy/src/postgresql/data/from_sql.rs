@@ -1,7 +1,7 @@
 use crate::{
     error::{Error, MappingError},
     log::ENCODING,
-    postgresql::{format_code::FormatCode, messages::bind::BindParam},
+    postgresql::{format_code::FormatCode, rewrite::bind::BindParam},
 };
 use bigdecimal::BigDecimal;
 use bytes::BytesMut;
@@ -603,7 +603,7 @@ fn decimal_from_sql(
 #[cfg(test)]
 mod binary_json_value_tests {
     use super::*;
-    use crate::postgresql::{format_code::FormatCode, messages::bind::BindParam};
+    use crate::postgresql::{format_code::FormatCode, rewrite::bind::BindParam};
     use bytes::BytesMut;
 
     fn binary_param(bytes: &[u8]) -> BindParam {
@@ -733,7 +733,7 @@ mod tests {
         config::LogConfig,
         log,
         postgresql::{
-            data::bind_param_from_sql, format_code::FormatCode, messages::bind::BindParam, Column,
+            data::bind_param_from_sql, format_code::FormatCode, rewrite::bind::BindParam, Column,
         },
         Identifier,
     };

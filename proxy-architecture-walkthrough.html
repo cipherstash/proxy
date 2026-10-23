@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CIP-3933 — Execution Lifecycle Walkthrough</title>
+  <style>
+    :root { color-scheme: light; --bg:#f5f6f8; --panel:#fff; --ink:#172033; --muted:#5f6b7c; --line:#68778e; --blue:#2468d3; --cyan:#087f78; --amber:#a45f00; --red:#bc3247; --green:#1d8158; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at top,#fff 0,#f5f6f8 42rem); color:var(--ink); font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif; }
+    html { scroll-behavior:smooth; }
+    body { scroll-padding-top:28px; }
+    main { width:min(1440px,calc(100% - 32px)); margin:0 auto; padding:36px 0 96px; display:grid; grid-template-columns:230px minmax(0,1180px); gap:44px; align-items:start; }
+    article { min-width:0; }
+    nav { position:sticky; top:24px; padding:18px; border:1px solid #d6dce5; border-radius:16px; background:rgba(255,255,255,.92); backdrop-filter:blur(12px); box-shadow:0 12px 36px #17203312; }
+    nav strong { display:block; margin-bottom:10px; color:var(--cyan); font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; }
+    nav a { display:block; padding:7px 9px; border-left:2px solid #d6dce5; color:var(--muted); text-decoration:none; font-size:.88rem; }
+    nav a:hover, nav a:focus { border-color:var(--cyan); color:var(--ink); }
+    header { margin-bottom:40px; }
+    h1 { margin:0 0 8px; font-size:clamp(2rem,5vw,4rem); line-height:1.05; letter-spacing:-.04em; }
+    h2 { margin:56px 0 18px; font-size:1.65rem; }
+    h3 { margin:0 0 7px; font-size:1rem; }
+    p { color:var(--muted); max-width:78ch; }
+    code { color:var(--cyan); }
+    .meta { color:var(--cyan); font-weight:650; }
+    .diagram { overflow-x:auto; padding:20px; border:1px solid #d6dce5; border-radius:18px; background:#fff; box-shadow:0 20px 60px #17203316; }
+    svg { display:block; min-width:920px; width:100%; height:auto; }
+    .box { fill:#f2f5f9; stroke:#68778e; stroke-width:2; rx:12; }
+    .adapter { fill:#e5efff; stroke:#2468d3; }
+    .state { fill:#e2f5f1; stroke:#087f78; }
+    .external { fill:#fff0d8; stroke:#a45f00; }
+    .danger { fill:#fde8ec; stroke:#bc3247; }
+    .label { fill:#172033; font:600 15px system-ui,sans-serif; text-anchor:middle; dominant-baseline:middle; }
+    .small { fill:#5f6b7c; font:13px system-ui,sans-serif; text-anchor:middle; }
+    .arrow { fill:none; stroke:#8391ae; stroke-width:2; marker-end:url(#arrow); }
+    .arrow-blue { stroke:#65a7ff; }
+    .arrow-cyan { stroke:#59d8d1; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+    .finding { padding:18px 19px; border:1px solid #d6dce5; border-radius:14px; background:#fff; }
+    .finding p { margin:0; font-size:.94rem; }
+    .high { border-left:4px solid var(--red); } .medium { border-left:4px solid var(--amber); } .positive { border-left:4px solid var(--green); }
+    .verdict { padding:22px; border:1px solid #74b89f; border-radius:16px; background:#e8f6f0; color:#175d47; }
+    .hero-summary { font-size:1.15rem; color:#3c4b61; }
+    .facts { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:28px 0 8px; }
+    .fact { padding:15px 16px; border:1px solid #d6dce5; border-radius:13px; background:#fff; }
+    .fact b { display:block; color:var(--ink); font-size:1.35rem; }
+    .fact span { color:var(--muted); font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; }
+    .callout { margin:20px 0; padding:18px 20px; border-left:4px solid var(--blue); border-radius:8px 14px 14px 8px; background:#eaf1fc; color:#30455f; }
+    .reading-order { counter-reset:read; display:grid; gap:12px; }
+    .reading-step { position:relative; padding:16px 18px 16px 62px; border:1px solid #d6dce5; border-radius:14px; background:#fff; }
+    .reading-step::before { counter-increment:read; content:counter(read); position:absolute; left:18px; top:17px; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:#e5efff; color:var(--blue); font-weight:750; }
+    .reading-step h3 { margin-bottom:3px; }
+    .reading-step p { margin:0; }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:20px 0; }
+    .flow span { padding:9px 12px; border:1px solid #aab7c8; border-radius:9px; background:#fff; font:600 .88rem ui-monospace,SFMono-Regular,monospace; }
+    .flow i { color:var(--cyan); font-style:normal; }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border:1px solid #d6dce5; border-radius:14px; background:#fff; }
+    th,td { padding:13px 15px; border-bottom:1px solid #d6dce5; text-align:left; vertical-align:top; }
+    th { color:var(--cyan); font-size:.78rem; letter-spacing:.06em; text-transform:uppercase; }
+    caption { padding:11px 15px; border:1px solid #d6dce5; border-bottom:0; color:var(--muted); background:#fff; text-align:left; font-size:.88rem; }
+    td { color:var(--muted); }
+    td:first-child { color:var(--ink); font-family:ui-monospace,SFMono-Regular,monospace; font-size:.88rem; }
+    tr:last-child td { border-bottom:0; }
+    .tag { display:inline-block; margin:2px 4px 2px 0; padding:3px 8px; border:1px solid #9db6d6; border-radius:999px; color:#315a8b; background:#f4f8fd; font-size:.76rem; }
+    section { scroll-margin-top:24px; }
+    footer { margin-top:48px; padding-top:20px; border-top:1px solid #d6dce5; color:var(--muted); font-size:.9rem; }
+    @media (max-width:900px) { main { grid-template-columns:1fr; } nav { position:static; columns:2; } nav strong { column-span:all; } .facts { grid-template-columns:repeat(2,1fr); } }
+    @media (max-width:560px) { .facts { grid-template-columns:1fr; } nav { columns:1; } }
+  </style>
+</head>
+<body>
+<main>
+  <nav aria-label="Walkthrough contents">
+    <strong>Walkthrough</strong>
+    <a href="#overview">Start here</a>
+    <a href="#reading-order">Reading order</a>
+    <a href="#change-map">Change map</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#execution-before">Lifecycle before</a>
+    <a href="#execution-after">Lifecycle after</a>
+    <a href="#invariants">Invariants</a>
+    <a href="#hotspots">Review hotspots</a>
+    <a href="#validation">Validation</a>
+    <a href="#boundary">Boundary</a>
+  </nav>
+  <article>
+  <header>
+    <div class="meta">CIP-3933 · Standalone PR walkthrough · fixed snapshot</div>
+    <h1>Execution lifecycle<br>belongs to Context</h1>
+    <p class="hero-summary">A guided review of <code>cip-3933-execution-lifecycle</code>: why Proxy moves correlated PostgreSQL metadata behind one connection-local seam, how execution occurrences now survive suspension and resume, and where to concentrate review effort.</p>
+    <div class="facts">
+      <div class="fact"><b>1</b><span>focused refactor</span></div>
+      <div class="fact"><b>12</b><span>code and contract files</span></div>
+      <div class="fact"><b>+2,410</b><span>additions</span></div>
+      <div class="fact"><b>−495</b><span>deletions</span></div>
+    </div>
+    <p>Code snapshot: merge base <a href="https://github.com/cipherstash/my-little-proxy/commit/195344ec12da6ab6ddf8158264cf3f66002a0074"><code>195344ec12da6ab6ddf8158264cf3f66002a0074</code></a> through implementation head <a href="https://github.com/cipherstash/my-little-proxy/commit/fddd09ddf56ee66ba5d813457df01f068d5c6a3e"><code>fddd09ddf56ee66ba5d813457df01f068d5c6a3e</code></a>. The walkthrough itself was added in the following documentation commit, so its figures intentionally exclude its own file. See the <a href="https://github.com/cipherstash/my-little-proxy/compare/195344ec12da6ab6ddf8158264cf3f66002a0074...fddd09ddf56ee66ba5d813457df01f068d5c6a3e">pinned implementation comparison</a> and <a href="https://linear.app/cipherstash/issue/CIP-3933">CIP-3933</a>.</p>
+    <div class="callout"><strong>Publishing status:</strong> this is the standalone source walkthrough in the Proxy branch. It follows the information architecture of the Suite PR-walkthrough project, but it is not yet an Astro/MDX content entry and is not linked from that site’s index.</div>
+  </header>
+
+  <section id="overview">
+    <h2>Start here</h2>
+    <div class="verdict"><strong>The design move:</strong> Frontend and Backend still interpret PostgreSQL messages, but they no longer coordinate related state by reaching into separate maps. <code>Context</code> now applies each connection-local lifecycle transition atomically and returns the effects the adapters need.</div>
+    <p>This is not a new wire protocol and not a schema-lifecycle rewrite. It is an ownership refactor that makes existing behavior explicit, then fixes edge cases that could not be represented cleanly before: suspended execution, repeated portal execution, terminal error replacement, and statement metrics scoped to an execution occurrence. Stale terminal and Describe responses remain deliberately tolerated by Backend and are called out below.</p>
+    <div class="flow" aria-label="Responsibility flow"><span>pg-proto orders messages</span><i>→</i><span>adapters interpret</span><i>→</i><span>Context transitions metadata</span><i>→</i><span>effects run outside lock</span></div>
+  </section>
+
+  <section id="reading-order">
+    <h2>Suggested reading order</h2>
+    <div class="reading-order">
+      <div class="reading-step"><h3>Read the contract first</h3><p>Start with <a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/docs/adr/0002-context-owns-protocol-metadata-transitions.md">ADR 0002</a> and the <a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/CONTEXT.md">Proxy glossary</a>. They define the intended seam and settle “statement metrics scope” as one execution occurrence. Treat tolerated untracked responses as an adapter exception to inspect.</p></div>
+      <div class="reading-step"><h3>Understand the state model</h3><p>In <code>context/mod.rs</code>, review <code>ConnectionProtocolState</code>, <code>ExecuteContext</code>, and the transition/effect split before reading individual methods.</p></div>
+      <div class="reading-step"><h3>Trace one extended execution</h3><p>Follow Parse → Bind → Execute → PortalSuspended → Execute → CommandComplete through Frontend, Context, and Backend.</p></div>
+      <div class="reading-step"><h3>Trace terminal and simple-query paths</h3><p>Check ErrorResponse replacement and the “complete at ReadyForQuery” state used by simple Query.</p></div>
+      <div class="reading-step"><h3>Finish at the boundaries</h3><p>Confirm pg-proto preserves backpressure, Schema middleware still owns transaction schema, and the one added integration regression keeps a connection usable after a multi-statement simple Query.</p></div>
+    </div>
+  </section>
+
+  <section id="change-map">
+    <h2>Change map</h2>
+    <table>
+      <caption>Files and concerns in the fixed snapshot</caption>
+      <thead><tr><th scope="col">Area</th><th scope="col">Role in this change</th><th scope="col">What to review</th></tr></thead>
+      <tbody>
+        <tr><td>context/mod.rs</td><td>New connection-local protocol state model and atomic transitions.</td><td><span class="tag">ownership</span><span class="tag">locking</span><span class="tag">metrics</span><span class="tag">tests</span></td></tr>
+        <tr><td>middleware/frontend.rs</td><td>Turns client messages into Context transitions.</td><td><span class="tag">Parse</span><span class="tag">Bind</span><span class="tag">Execute</span><span class="tag">simple Query</span></td></tr>
+        <tr><td>middleware/backend.rs</td><td>Turns database responses into completion, suspension, or failure transitions.</td><td><span class="tag">correlation</span><span class="tag">replacement</span><span class="tag">readiness</span></td></tr>
+        <tr><td>driver.rs</td><td>Adjacent cancellation cleanup: an RAII guard detaches the connection’s cancellation key on every exit path. Review separately from lifecycle ownership.</td><td><span class="tag">adjacent change</span><span class="tag">cancellation</span><span class="tag">cleanup</span></td></tr>
+        <tr><td>postgresql/mod.rs</td><td>Adds a Proxy-owned <code>OperationId</code> wrapper and test-only identity generator used to exercise Context transitions without pg-proto internals.</td><td><span class="tag">test seam</span><span class="tag">identity</span></td></tr>
+        <tr><td>error.rs · config/tandem.rs</td><td>Adds explicit state-unavailable/config behavior needed by the seam.</td><td><span class="tag">customer error</span><span class="tag">compatibility</span></td></tr>
+        <tr><td>schema_change.rs</td><td>Adds one integration regression: a multi-statement simple Query leaves the connection usable. The detailed lifecycle matrix remains unit coverage.</td><td><span class="tag">integration</span><span class="tag">simple Query</span></td></tr>
+        <tr><td>CONTEXT.md · ADR · CHANGELOG</td><td>Records language, architectural ownership, and user-visible consequences.</td><td><span class="tag">contract</span><span class="tag">scope</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="architecture">
+  <h2>Architecture step-through</h2>
+  <p>The two diagrams below are the original architecture audit, preserved in this walkthrough. Read them as an ownership comparison: the external message path barely changes; the metadata seam does.</p>
+
+  <h3>Before: distributed lifecycle orchestration</h3>
+  <div class="diagram">
+    <svg viewBox="0 0 1080 690" role="img" aria-label="Before architecture diagram">
+      <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8391ae"/></marker></defs>
+      <rect class="box external" x="35" y="225" width="150" height="70"/><text class="label" x="110" y="260">Client app</text>
+      <rect class="box" x="235" y="225" width="140" height="70"/><text class="label" x="305" y="260">Driver</text>
+      <rect class="box adapter" x="430" y="95" width="170" height="70"/><text class="label" x="515" y="130">Frontend adapter</text>
+      <rect class="box adapter" x="430" y="355" width="170" height="70"/><text class="label" x="515" y="390">Backend adapter</text>
+      <rect class="box external" x="670" y="225" width="170" height="70"/><text class="label" x="755" y="260">PostgreSQL</text>
+      <rect class="box state" x="890" y="35" width="155" height="62"/><text class="label" x="967" y="66">Statements</text>
+      <rect class="box state" x="890" y="135" width="155" height="62"/><text class="label" x="967" y="166">Portals</text>
+      <rect class="box state" x="890" y="235" width="155" height="62"/><text class="label" x="967" y="266">Operations</text>
+      <rect class="box state" x="890" y="335" width="155" height="62"/><text class="label" x="967" y="366">Statement scopes</text>
+      <rect class="box state" x="890" y="435" width="155" height="62"/><text class="label" x="967" y="466">Metrics</text>
+      <text class="small" x="967" y="530">Five independent locks</text>
+      <rect class="box" x="420" y="580" width="190" height="62"/><text class="label" x="515" y="604">Schema middleware</text><text class="small" x="515" y="626">transactional schema state</text>
+      <rect class="box external" x="670" y="580" width="170" height="62"/><text class="label" x="755" y="604">ZeroKMS</text><text class="small" x="755" y="626">encryption adapter</text>
+      <path class="arrow" d="M185 260H235"/><path class="arrow arrow-blue" d="M375 245C405 220 405 150 430 140"/><path class="arrow arrow-blue" d="M430 380C405 370 405 300 375 275"/>
+      <path class="arrow" d="M600 130C650 140 650 220 690 235"/><path class="arrow" d="M840 280C650 335 650 380 600 390"/>
+      <path class="arrow arrow-cyan" d="M600 110C750 75 820 66 890 66"/><path class="arrow arrow-cyan" d="M600 125C760 120 820 166 890 166"/><path class="arrow arrow-cyan" d="M600 145C760 180 820 245 890 260"/>
+      <path class="arrow arrow-cyan" d="M600 370C760 330 820 350 890 366"/><path class="arrow arrow-cyan" d="M600 405C760 455 820 466 890 466"/>
+      <path class="arrow" d="M490 425V580"/><path class="arrow" d="M550 425C600 510 680 550 720 580"/>
+    </svg>
+  </div>
+  <p>Context already owned the maps, but Frontend and Backend jointly orchestrated lifecycle changes across their independent locks. A single logical event—such as completing an execution—required several reads and writes, making atomic correlation difficult. Missing or poisoned state was commonly treated as absent. Schema middleware separately owned transactional schema state, and Context invoked the ZeroKMS encryption adapter.</p>
+
+  <h3 style="margin-top:40px">After: Context becomes the connection seam</h3>
+  <div class="diagram">
+    <svg viewBox="0 0 1080 740" role="img" aria-label="After architecture diagram">
+      <defs><marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8391ae"/></marker></defs>
+      <style>.a2{marker-end:url(#arrow2)}</style>
+      <rect class="box external" x="30" y="270" width="145" height="68"/><text class="label" x="102" y="304">Client app</text>
+      <rect class="box" x="220" y="270" width="130" height="68"/><text class="label" x="285" y="304">Driver</text>
+      <rect class="box adapter" x="405" y="125" width="170" height="68"/><text class="label" x="490" y="159">Frontend adapter</text>
+      <rect class="box adapter" x="405" y="415" width="170" height="68"/><text class="label" x="490" y="449">Backend adapter</text>
+      <rect class="box external" x="645" y="270" width="155" height="68"/><text class="label" x="722" y="304">PostgreSQL</text>
+      <rect x="830" y="35" width="220" height="550" rx="20" fill="#101d2e" stroke="#59d8d1" stroke-width="2"/>
+      <text class="label" x="940" y="66">Context</text><text class="small" x="940" y="89">connection seam</text>
+      <rect class="box adapter" x="855" y="115" width="170" height="65"/><text class="label" x="940" y="140">Atomic lifecycle</text><text class="small" x="940" y="162">transitions</text>
+      <rect class="box state" x="855" y="215" width="170" height="65"/><text class="label" x="940" y="240">ConnectionProtocol</text><text class="small" x="940" y="262">State · one lock</text>
+      <rect class="box" x="855" y="315" width="170" height="48"/><text class="label" x="940" y="333">Operations</text><text class="small" x="940" y="352">portal correlation</text>
+      <rect class="box" x="855" y="378" width="170" height="48"/><text class="label" x="940" y="402">Statements · portals</text>
+      <rect class="box" x="855" y="441" width="170" height="48"/><text class="label" x="940" y="465">Suspended executes</text>
+      <rect class="box" x="855" y="504" width="170" height="48"/><text class="label" x="940" y="528">Metrics scopes</text>
+      <path class="arrow a2" d="M175 304H220"/><path class="arrow arrow-blue a2" d="M350 286C380 255 380 175 405 165"/><path class="arrow arrow-blue a2" d="M405 440C380 430 380 350 350 322"/>
+      <path class="arrow a2" d="M575 160C625 175 625 255 665 275"/><path class="arrow a2" d="M800 325C625 380 625 435 575 449"/>
+      <path class="arrow arrow-cyan a2" d="M575 140C700 95 770 120 855 140"/><path class="arrow arrow-cyan a2" d="M575 460C700 505 770 185 855 160"/>
+      <path class="arrow arrow-cyan a2" d="M940 180V215"/><path class="arrow arrow-cyan a2" d="M940 280V315"/><path class="arrow arrow-cyan a2" d="M940 280C1015 290 1035 330 1025 339"/><path class="arrow arrow-cyan a2" d="M940 280C830 330 830 450 855 465"/><path class="arrow arrow-cyan a2" d="M940 280C1040 340 1040 500 1025 528"/>
+      <rect class="box" x="430" y="640" width="200" height="62"/><text class="label" x="530" y="664">Schema middleware</text><text class="small" x="530" y="686">owns transaction schema</text>
+      <rect class="box external" x="680" y="640" width="170" height="62"/><text class="label" x="765" y="664">ZeroKMS</text><text class="small" x="765" y="686">encryption adapter</text>
+      <path class="arrow a2" d="M880 585C820 615 650 620 610 640"/><path class="arrow a2" d="M950 585C920 615 840 625 815 640"/>
+    </svg>
+  </div>
+  <p>Frontend and Backend remain wire-protocol adapters. Context now owns correlated CipherStash metadata and applies transitions under one lock. <code>pg-proto</code> retains protocol ordering and backpressure; Schema middleware retains transactional schema state.</p>
+  </section>
+
+  <section id="execution-before">
+  <h2>Execution lifecycle before the refactor</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 1080 440" role="img" aria-label="Execution lifecycle before the refactor">
+      <defs><marker id="arrow-before" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8391ae"/></marker></defs>
+      <rect class="box" x="75" y="80" width="155" height="70"/><text class="label" x="152" y="105">Prepared</text><text class="small" x="152" y="130">starts one scope</text>
+      <rect class="box" x="300" y="80" width="155" height="70"/><text class="label" x="377" y="105">Portal</text><text class="small" x="377" y="130">inherits scope</text>
+      <rect class="box adapter" x="525" y="80" width="155" height="70"/><text class="label" x="602" y="105">Executing</text><text class="small" x="602" y="130">operation lookup</text>
+      <rect class="box danger" x="755" y="35" width="230" height="80"/><text class="label" x="870" y="63">Complete immediately</text><text class="small" x="870" y="88">including PortalSuspended</text>
+      <rect class="box danger" x="755" y="165" width="230" height="80"/><text class="label" x="870" y="193">Finish shared scope</text><text class="small" x="870" y="218">first terminal response</text>
+      <rect class="box" x="525" y="310" width="155" height="70"/><text class="label" x="602" y="335">ReadyForQuery</text><text class="small" x="602" y="360">transaction status only</text>
+      <g fill="none" stroke="#8391ae" stroke-width="2" marker-end="url(#arrow-before)">
+        <path d="M30 115H75"/><path d="M230 115H300"/><path d="M455 115H525"/><path d="M680 105C715 95 725 75 755 75"/><path d="M870 115V165"/><path d="M680 140C715 165 720 195 755 205"/><path d="M755 235C700 270 650 300 630 310" stroke-dasharray="7 7"/>
+      </g>
+      <g class="small"><text x="51" y="96">Parse</text><text x="265" y="96">Bind</text><text x="490" y="96">Execute</text><text x="718" y="60">CommandComplete</text><text x="718" y="185">ErrorResponse</text><text x="635" y="238">simple-query command may</text><text x="635" y="257">finish before readiness</text><text x="735" y="286">later protocol event</text></g>
+      <rect x="80" y="290" width="350" height="95" rx="12" fill="#271f32" stroke="#ff7d8b" stroke-width="2"/>
+      <text class="label" x="255" y="320">Missing lifecycle states</text>
+      <text class="small" x="255" y="347">No suspended execution retained for resume</text>
+      <text class="small" x="255" y="368">No explicit “complete at readiness” state</text>
+    </svg>
+  </div>
+  <p>A prepared Statement created a metrics scope that its Portals and Execute operations reused. Backend terminal messages independently completed execution and finished that shared scope. <code>PortalSuspended</code> did not retain an execution occurrence for resumption, and simple-query execution had no explicit state saying that its scope remained open until <code>ReadyForQuery</code>.</p>
+  </section>
+
+  <section id="execution-after">
+  <h2>Execution lifecycle after the refactor</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 1080 440" role="img" aria-label="Execution lifecycle state diagram">
+      <defs><marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8391ae"/></marker></defs>
+      <g class="label"><circle cx="45" cy="115" r="12" fill="#65a7ff"/><rect class="box" x="95" y="80" width="135" height="70"/><text class="label" x="162" y="115">Prepared</text><rect class="box" x="285" y="80" width="135" height="70"/><text class="label" x="352" y="115">Portal</text><rect class="box adapter" x="475" y="80" width="145" height="70"/><text class="label" x="547" y="115">Executing</text><rect class="box state" x="685" y="30" width="145" height="70"/><text class="label" x="757" y="65">Suspended</text><rect class="box state" x="685" y="145" width="175" height="70"/><text class="label" x="772" y="180">Await readiness</text><rect class="box" x="925" y="80" width="125" height="70"/><text class="label" x="987" y="115">Complete</text><rect class="box danger" x="685" y="285" width="145" height="70"/><text class="label" x="757" y="320">Failed</text></g>
+      <g fill="none" stroke="#8391ae" stroke-width="2" marker-end="url(#arrow3)"><path d="M57 115H95"/><path d="M230 115H285"/><path d="M420 115H475"/><path d="M620 95C650 80 655 65 685 65"/><path d="M685 82C650 100 650 120 620 125"/><path d="M620 130C650 145 655 180 685 180"/><path d="M620 90C740 5 890 45 925 100"/><path d="M860 180C900 175 900 140 925 125"/><path d="M580 150C610 240 650 300 685 315"/></g>
+      <g class="small"><text x="67" y="95">Parse</text><text x="257" y="95">Bind</text><text x="447" y="95">Execute</text><text x="650" y="48">PortalSuspended</text><text x="650" y="152">simple query</text><text x="775" y="22">CommandComplete / EmptyQueryResponse</text><text x="893" y="197">ReadyForQuery</text><text x="625" y="250">ErrorResponse</text><text x="650" y="118">new Execute</text></g>
+    </svg>
+  </div>
+  <p>An Execute now owns a distinct metrics scope. <code>PortalSuspended</code> retains that occurrence so the next Execute resumes it; CommandComplete or EmptyQueryResponse completes it; an ErrorResponse fails it. Simple Query explicitly waits for ReadyForQuery, keeping transaction-boundary behavior separate from an individual command response.</p>
+  </section>
+
+  <section id="invariants">
+    <h2>The invariants this refactor establishes</h2>
+    <div class="grid">
+      <div class="finding positive"><h3>One correlated transition</h3><p>Statements, portals, operations, suspended executes, and metric scopes change under one protocol-state lock.</p></div>
+      <div class="finding positive"><h3>One scope per occurrence</h3><p>Repeated execution does not reuse the prepared Statement’s measurement window. Parse timing remains reusable Statement knowledge.</p></div>
+      <div class="finding positive"><h3>Suspension is not completion</h3><p>A suspended portal retains the same execution occurrence and metric identity until resume reaches a terminal result.</p></div>
+      <div class="finding positive"><h3>Effects happen after mutation</h3><p>The lock is released before metrics emission, asynchronous work, or Schema middleware calls.</p></div>
+      <div class="finding positive"><h3>Errors are atomic</h3><p>A terminal local failure replaces the upstream response as part of the same correlated lifecycle decision.</p></div>
+      <div class="finding medium"><h3>The snapshot has a tolerance boundary</h3><p>Context protocol-state methods reject unavailable or inconsistent state, while Backend deliberately ignores unknown operations, Executes, and Describes for untracked responses. The unrelated keyset accessor remains optional, but correlated protocol metadata no longer treats a poisoned lock as absence.</p></div>
+    </div>
+  </section>
+
+  <section id="hotspots">
+    <h2>Review hotspots</h2>
+    <div class="grid">
+      <div class="finding high"><h3>Transition completeness</h3><p>For every terminal backend response, verify the operation, execution occurrence, portal relationship, metric scope, and schema outcome are each consumed exactly once.</p></div>
+      <div class="finding high"><h3>Suspension and resume identity</h3><p>Confirm a resumed Execute cannot accidentally allocate a second scope or complete a stale occurrence.</p></div>
+      <div class="finding high"><h3>Simple Query readiness</h3><p>A command can complete before ReadyForQuery. Review multi-statement and error paths for premature metric completion or duplicate schema reporting.</p></div>
+      <div class="finding medium"><h3>Lock boundaries</h3><p>Every transition should return effects before calling metrics, Schema middleware, encryption, or other asynchronous work.</p></div>
+      <div class="finding high"><h3>Tolerated untracked responses</h3><p>Backend converts unknown-operation, operation-without-Execute, and unknown-Describe errors into warnings. Verify this exception is necessary and cannot consume or conceal correlated state; other transition failures still propagate.</p></div>
+      <div class="finding medium"><h3>Metrics compatibility</h3><p>The meaning becomes more precise, but existing Prometheus metric names remain stable. Check dashboards need no rename while values now represent executions.</p></div>
+    </div>
+  </section>
+
+  <section id="validation">
+    <h2>Validation map</h2>
+    <table>
+      <caption>Coverage present in the fixed snapshot, and remaining review gaps</caption>
+      <thead><tr><th scope="col">Scenario</th><th scope="col">Coverage</th><th scope="col">Expected lifecycle</th></tr></thead>
+      <tbody>
+        <tr><td>Suspended portal resumes</td><td><a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/src/postgresql/context/mod.rs#L1653">Unit</a></td><td>One execution occurrence and one metrics scope survive suspension through final completion.</td></tr>
+        <tr><td>Portal executes repeatedly</td><td><a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/src/postgresql/context/mod.rs#L1695">Unit</a></td><td>Each occurrence receives a distinct metrics scope while reusing prepared Statement knowledge.</td></tr>
+        <tr><td>Unknown or stale operation</td><td><a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/src/postgresql/context/mod.rs#L1730">Unit</a> + review gap</td><td>Context rejects stale transition requests; Backend deliberately warns and ignores untracked terminal and Describe responses.</td></tr>
+        <tr><td>Protocol state lock unavailable</td><td><a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy/src/postgresql/context/mod.rs#L1756">Unit matrix</a></td><td>Correlated protocol metadata reads, mutations, and cleanup return <code>ProtocolStateUnavailable</code> rather than silently omitting a transition.</td></tr>
+        <tr><td>ErrorResponse</td><td>Unit</td><td>The execution fails once, local terminal replacement is atomic, and schema failure is reported once.</td></tr>
+        <tr><td>Simple multi-statement Query</td><td><a href="https://github.com/cipherstash/my-little-proxy/blob/fddd09ddf56ee66ba5d813457df01f068d5c6a3e/packages/cipherstash-proxy-integration/src/schema_change.rs#L460">Integration</a></td><td>Command responses may arrive independently; the connection remains usable and lifecycle completion waits for readiness where required.</td></tr>
+        <tr><td>Statement or portal close</td><td>Unit</td><td>Only unreferenced metric state is released; PostgreSQL’s surviving portal semantics remain intact.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>Validation principle:</strong> the branch’s unit tests pin most transitions. Its one new integration regression pins connection usability after a multi-statement simple Query; it does not independently exercise the full lifecycle matrix.</div>
+  </section>
+
+  <section id="boundary">
+    <h2>Where this PR deliberately stops</h2>
+    <p><code>Context</code> owns CipherStash’s correlated metadata, not the PostgreSQL protocol itself. <code>pg-proto</code> still owns ordering and backpressure. Schema middleware still owns transaction-aware schema overlays and publication. ZeroKMS remains the encryption adapter. The refactor also keeps existing Prometheus metric names, despite clarifying their semantics.</p>
+    <div class="verdict">A reviewer should be able to approve the ownership change without also approving a new protocol engine, schema state machine, encryption boundary, or metrics migration. Those are explicitly outside this branch.</div>
+  </section>
+
+  <footer>Implementation snapshot: <code>195344ec12da6ab6ddf8158264cf3f66002a0074…fddd09ddf56ee66ba5d813457df01f068d5c6a3e</code> · Branch: <code>cip-3933-execution-lifecycle</code> · Architecture diagrams carried forward from the original audit.</footer>
+
+  </article>
+</main>
+</body>
+</html>

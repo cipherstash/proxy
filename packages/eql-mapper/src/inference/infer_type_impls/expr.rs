@@ -414,9 +414,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
                 // The operands of a predicate reach PostgreSQL as query
                 // operands — terms only, never a ciphertext. Record them so the
-                // proxy projects their payloads accordingly. Containment
-                // (`@>`/`<@`) is deliberately excluded: its needle is a whole
-                // document and keeps its full payload.
+                // proxy projects their payloads accordingly. JSON containment
+                // uses a SteVec query needle rather than a stored document.
                 if matches!(
                     op,
                     BinaryOperator::Eq
@@ -426,6 +425,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         | BinaryOperator::Gt
                         | BinaryOperator::GtEq
                         | BinaryOperator::AtAt
+                        | BinaryOperator::AtArrow
+                        | BinaryOperator::ArrowAt
                 ) {
                     self.record_query_operands([&**left, &**right]);
                 }

@@ -11,16 +11,15 @@
 mod tests {
     use tracing::info;
 
-    use crate::common::{connect_with_tls, trace, PROXY};
+    use crate::common::{assert_db_error, connect_with_tls, trace, PROXY};
 
     /// Helper function to assert that a result contains the expected "Cannot SET CIPHERSTASH.KEYSET" error
     fn assert_keyset_error<T>(result: Result<T, tokio_postgres::Error>) {
-        if let Err(err) = result {
-            let msg = err.to_string();
-            assert_eq!(msg, "db error: FATAL: Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unexpected-set-keyset");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "FATAL",
+            "Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unexpected-set-keyset",
+        );
     }
 
     /// Tests error handling of unknown keyset id

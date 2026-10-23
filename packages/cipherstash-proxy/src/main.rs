@@ -1,6 +1,6 @@
 use cipherstash_proxy::config::{LogConfig, LogLevel, TandemConfig};
-use cipherstash_proxy::connect::{self, AsyncStream};
-use cipherstash_proxy::error::{ConfigError, Error};
+use cipherstash_proxy::connect;
+use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             Err(err) => {
-                error!(msg = "Error running command", error = err.to_string());
+                error!(msg = "Error running command", error = %ErrorChain(&err));
                 std::process::exit(exitcode::USAGE);
             }
         }
@@ -106,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!(msg = "Received SIGTERM");
                 break;
             },
-            Ok(client_stream) = AsyncStream::accept(&listener) => {
+            Ok(client_stream) = connect::accept(&listener) => {
 
                     client_id += 1;
 
@@ -116,12 +116,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
-                        match pg::handler(client_stream,context).await {
+                        let result = pg::handler(client_stream,context).await;
+                        gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+
+                        match result {
                             Ok(_) => (),
                             Err(err) => {
-
-                                gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
-
                                 match err {
                                     Error::ConnectionClosed => {
                                         info!(msg = "Database connection closed by client");
@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         warn!(msg = "Database connection timeout", error = err.to_string());
                                     }
                                     _ => {
-                                        error!(msg = "Database connection error", error = err.to_string());
+                                        error!(msg = "Database connection error", error = %ErrorChain(&err));
                                     }
                                 }
                             },
@@ -276,7 +276,7 @@ async fn init(mut config: TandemConfig, force_tls: bool) -> Proxy {
         Err(err) => {
             error!(
                 msg = "Could not start CipherStash proxy",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             std::process::exit(exitcode::UNAVAILABLE);
         }

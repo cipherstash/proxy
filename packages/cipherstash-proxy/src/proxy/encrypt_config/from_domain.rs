@@ -3,7 +3,8 @@
 //! EQL v3 domain types are self-configuring: a column's Postgres domain (e.g.
 //! `eql_v3_text_search`) encodes both the plaintext token type and the
 //! searchable-encryption terms it stores. That is enough to build the
-//! [`ColumnConfig`] the encrypt pipeline needs, so `eql_v2.add_search_config`
+//! [`cipherstash_client::schema::ColumnConfig`] the encrypt pipeline needs, so
+//! `eql_v2.add_search_config`
 //! and the `eql_v2_configuration` table are redundant.
 //!
 //! The SEM term → index mapping mirrors the client's indexers (verified against

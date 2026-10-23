@@ -18,6 +18,7 @@ codebase has used it for both a connection and a single statement.
 **Context**:
 The mutable state belonging to one connection — its prepared statements, portals,
 pending describes and executes, and keyset.
+Context owns the correlated transitions of this metadata throughout preparation, execution, failure, and readiness.
 
 **Frontend** / **Backend**:
 The two halves of the proxy pipeline by direction of travel: Frontend carries client to
@@ -33,9 +34,15 @@ are different things; do not call either of them a Statement here.
 A prepared statement bound to parameter values, ready to execute. Either `Encrypted`,
 carrying the analysed statement, or `Passthrough` when nothing in it is encrypted.
 
+**Local preparation**:
+Proxy's speculative analysis of a Parse or Bind before PostgreSQL acknowledges it.
+Finishing local preparation neither confirms execution nor changes effective connection settings.
+
 **Statement metrics scope**:
-The measurement window around a single statement — opened at Parse or Query, closed when
-the statement completes. Many of these occur per connection.
+The measurement window around one statement execution occurrence. A simple Query owns one;
+an extended-protocol Execute owns one from its first execution through any suspension and
+resumption until completion or failure, while Parse timing belongs to the prepared Statement
+and may be attributed to each execution occurrence.
 _Avoid_: session (`start_session`, `SessionId` and the
 `..._statements_session_duration_seconds` metric all use this sense and are misnamed).
 
@@ -98,13 +105,48 @@ produces only the term needed to match. The statement's EQL term shape decides w
 ### Control plane
 
 **`SET CIPHERSTASH.*`**:
-Proxy's in-band control API, intercepted rather than forwarded — `KEYSET_ID`,
-`KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING`. These are the supported spellings; log messages
-that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
+Proxy's in-band control API — `KEYSET_ID`, `KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING` — whose effective values come from successfully executed commands, never preparation alone.
+Values have PostgreSQL transaction and savepoint scope: session values survive commit, local values end with the transaction, rollback restores earlier values, and successful `DISCARD ALL` resets them.
+Successful `RESET` restores the corresponding defaults while remaining subject to transaction and savepoint rollback.
+
+**Effective connection settings**:
+The keyset and mapping controls currently applicable to encryption and decryption on one Proxy connection, including any transaction-local overrides; behind a pooler their scope is a security boundary.
 
 **Reload**:
-Re-reading state from the database after observed DDL. Two independent things reload: the
-database schema, and the column encrypt config.
+Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces
+one **committed schema snapshot**; it does not merge Proxy's inferred DDL effects into shared
+state.
+
+**Committed schema snapshot**:
+An immutable, monotonically versioned pair of database structure and column encryption
+metadata loaded from PostgreSQL. The pair is published atomically because a table without its
+encryption policy (or an encryption policy without its table) is not a valid observable state.
+
+**Transaction schema overlay**:
+The confirmed effects of successful DDL executions in one connection's current transaction.
+It is checkpointed by savepoints, restored by `ROLLBACK TO SAVEPOINT`, and discarded by a full
+rollback. Parsed or prepared DDL is only intent; it enters the overlay after PostgreSQL reports
+successful execution.
+
+**Effective schema**:
+The committed schema snapshot pinned when a transaction starts, with that transaction's schema
+overlay applied. EQL Mapper type-checks and transforms against this view. An idle connection
+adopts the latest committed snapshot before its next transaction.
+
+**Schema publication**:
+Atomically replacing the shared committed schema snapshot after the outermost transaction
+containing DDL commits and an authoritative catalog reload succeeds. Proxy completes publication
+before forwarding `ReadyForQuery(I)`, so a connection opened after readiness observes the new
+schema and encryption metadata. Failed publication is fail-closed: the affected connection is
+closed without forwarding readiness, and the dirty publication remains eligible for retry.
+
+**Schema middleware**:
+The owner of transactional schema state. Frontend and Backend report protocol lifecycle events;
+they do not directly change overlays or dirty flags. The middleware owns DDL detection, prepared
+DDL effects, successful-execution activation, savepoint and transaction transitions,
+effective-schema resolution, and the decision that publication is required. `Context` performs the
+authoritative reload round trip, while `SchemaManager` coalesces reloads and orders their
+generations. See `docs/adr/0001-transaction-aware-schema-middleware.md`.
 
 ## Note on `session`
 

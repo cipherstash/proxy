@@ -243,9 +243,17 @@ impl TandemConfig {
                 }
             })?;
 
+        config.validate()?;
         config.encrypt.build_client_key()?;
 
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), Error> {
+        if self.server.require_tls && self.tls.is_none() {
+            return Err(ConfigError::TlsConfigurationRequired.into());
+        }
+        Ok(())
     }
 
     pub fn database_tls_disabled(&self) -> bool {
@@ -287,7 +295,7 @@ impl TandemConfig {
     /// In order of precedence
     ///     config if explicitly set
     ///     RUST_MIN_STACK env var if set
-    ///     DEBUG_THREAD_STACK_SIZE if log level is Debug or Trace
+    ///     DEBUG_THREAD_STACK_SIZE for debug builds or Debug/Trace logging
     ///     otherwise set to DEFAULT_THREAD_STACK_SIZE (2MiB)
     ///
     pub fn thread_stack_size(&self) -> usize {
@@ -298,7 +306,7 @@ impl TandemConfig {
 
         // If the environment variable is set, use that value
         if let Ok(stack_size) = env::var("RUST_MIN_STACK") {
-            stack_size
+            return stack_size
                 .parse()
                 .inspect_err(|err| {
                     println!("Could not parse env var RUST_MIN_STACK: {err}");
@@ -307,7 +315,10 @@ impl TandemConfig {
                 .unwrap_or(DEFAULT_THREAD_STACK_SIZE);
         }
 
-        if self.log.level == LogLevel::Debug || self.log.level == LogLevel::Trace {
+        if cfg!(debug_assertions)
+            || self.log.level == LogLevel::Debug
+            || self.log.level == LogLevel::Trace
+        {
             return DEBUG_THREAD_STACK_SIZE;
         }
 
@@ -348,6 +359,15 @@ impl TandemConfig {
             prometheus: PrometheusConfig::default(),
             development: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn disable_mapping_for_testing(&mut self) {
+        self.development = Some(DevelopmentConfig {
+            disable_mapping: true,
+            disable_database_tls: false,
+            enable_mapping_errors: false,
+        });
     }
 }
 
@@ -470,7 +490,7 @@ mod tests {
     use crate::test_helpers::with_no_cs_vars;
     use crate::{
         config::{tandem::extract_missing_field_and_key, TandemConfig},
-        error::Error,
+        error::{ConfigError, Error},
     };
     use cipherstash_client::config::vars::{
         CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID,
@@ -533,6 +553,18 @@ mod tests {
                 assert!(std::env::var("CS_DATABASE__PASSWORD").is_err());
             });
         });
+    }
+
+    #[test]
+    fn require_tls_needs_server_tls_configuration() {
+        let mut config = TandemConfig::for_testing();
+        config.server.require_tls = true;
+        config.tls = None;
+
+        assert!(matches!(
+            config.validate(),
+            Err(Error::Config(ConfigError::TlsConfigurationRequired))
+        ));
     }
 
     #[test]
@@ -1047,6 +1079,30 @@ mod tests {
                     assert!(config.log.slow_statements);
                     assert_eq!(config.log.slow_statement_min_duration_ms, 500);
                 },
+            );
+        });
+    }
+
+    #[test]
+    fn thread_stack_size_honors_rust_min_stack() {
+        temp_env::with_var("RUST_MIN_STACK", Some("8388608"), || {
+            assert_eq!(
+                TandemConfig::for_testing().thread_stack_size(),
+                8 * 1024 * 1024
+            );
+        });
+    }
+
+    #[test]
+    fn debug_builds_use_the_larger_thread_stack() {
+        temp_env::with_var("RUST_MIN_STACK", None::<&str>, || {
+            assert_eq!(
+                TandemConfig::for_testing().thread_stack_size(),
+                if cfg!(debug_assertions) {
+                    crate::config::DEBUG_THREAD_STACK_SIZE
+                } else {
+                    crate::config::DEFAULT_THREAD_STACK_SIZE
+                }
             );
         });
     }

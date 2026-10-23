@@ -69,6 +69,39 @@ INSERT INTO t (name) VALUES
 	require.Equal("Ada", result)
 }
 
+func TestPgxBatchPipelinesEncryptedDDLAndDependentInsert(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	config, err := pgx.ParseConfig(os.Getenv("DATABASE_URL"))
+	require.NoError(err)
+	config.DefaultQueryExecMode = pgx.QueryExecModeExec
+	conn, err := pgx.ConnectConfig(ctx, config)
+	require.NoError(err)
+	defer conn.Close(ctx)
+
+	table := fmt.Sprintf("bug_308_pgx_pipeline_%d", rand.Int())
+	batch := &pgx.Batch{}
+	batch.Queue(fmt.Sprintf(
+		"CREATE TABLE %s (id bigint PRIMARY KEY, secret EQL_V3_TEXT_SEARCH NOT NULL)",
+		table,
+	))
+	batch.Queue(
+		fmt.Sprintf("INSERT INTO %s (id, secret) VALUES ($1, $2)", table),
+		1,
+		"batched",
+	)
+
+	results := conn.SendBatch(ctx, batch)
+	_, err = results.Exec()
+	require.NoError(err)
+	command, err := results.Exec()
+	require.NoError(err)
+	require.Equal(int64(1), command.RowsAffected())
+	require.NoError(results.Close())
+}
+
 func TestPgxEncryptedMapText(t *testing.T) {
 	t.Parallel()
 	conn := setupPgxConnection(t)
@@ -261,9 +294,9 @@ func TestPgxInsertEncryptedWithStructScan(t *testing.T) {
 
 // EncryptedRowWithJsonb represents a row with id, encrypted_text and encrypted_jsonb fields
 type EncryptedRowWithJsonb struct {
-	ID              int                    `db:"id"`
-	EncryptedText   string                 `db:"encrypted_text"`
-	EncryptedJsonb  map[string]interface{} `db:"encrypted_jsonb"`
+	ID             int                    `db:"id"`
+	EncryptedText  string                 `db:"encrypted_text"`
+	EncryptedJsonb map[string]interface{} `db:"encrypted_jsonb"`
 }
 
 // Scan implements the sql.Scanner interface for EncryptedRowWithJsonb
@@ -304,4 +337,3 @@ func TestPgxInsertEncryptedWithJsonbStructScan(t *testing.T) {
 		})
 	}
 }
-

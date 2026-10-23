@@ -8,7 +8,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, random_id, rows_to_vec, simple_query_with_client, trace, PROXY,
+        assert_db_error, clear, connect_with_tls, random_id, rows_to_vec, simple_query_with_client,
+        trace, PROXY,
     };
 
     ///
@@ -64,8 +65,15 @@ mod tests {
         let result = client.query(&sql, &[]).await;
         assert!(result.is_ok());
 
+        // A decryption failure is connection-fatal, so verify tenant isolation on
+        // a disposable connection while preserving this connection for the
+        // TENANT_1 -> TENANT_2 -> TENANT_1 switch under test.
+        let tenant_2_client = connect_with_tls(*PROXY).await;
+        let sql = format!("SET CIPHERSTASH.KEYSET_NAME = '{tenant_keyset_name_2}'");
+        tenant_2_client.query(&sql, &[]).await.unwrap();
+
         // SELECT data created by TENANT_1 AS TENANT_2
-        let result = client.query(select_sql, &[&tenant_1_id]).await;
+        let result = tenant_2_client.query(select_sql, &[&tenant_1_id]).await;
         assert!(result.is_err());
 
         //  --------
@@ -146,9 +154,16 @@ mod tests {
         let result = client.simple_query(&sql).await;
         assert!(result.is_ok());
 
+        // A decryption failure is connection-fatal, so verify tenant isolation on
+        // a disposable connection while preserving this connection for the
+        // TENANT_1 -> TENANT_2 -> TENANT_1 switch under test.
+        let tenant_2_client = connect_with_tls(*PROXY).await;
+        let sql = format!("SET CIPHERSTASH.KEYSET_NAME = '{tenant_keyset_name_2}'");
+        tenant_2_client.simple_query(&sql).await.unwrap();
+
         // SELECT data created by TENANT_1 AS TENANT_2
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
-        let result = client.simple_query(&sql).await;
+        let result = tenant_2_client.simple_query(&sql).await;
         assert!(result.is_err());
 
         //  --------
@@ -342,15 +357,12 @@ mod tests {
 
         let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         let result = client.query(insert_sql, &[&id, &text]).await;
-        assert!(result.is_err());
 
-        if let Err(err) = result {
-            let msg = err.to_string();
-
-            assert_eq!(msg, "db error: FATAL: Unknown keyset name or id 'BLAHVTHA'. Check the configured credentials. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "FATAL",
+            "Unknown keyset name or id 'BLAHVTHA'. Check the configured credentials. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset",
+        );
 
         //  --------
         // Switch back to TENANT_1
@@ -378,8 +390,8 @@ mod tests {
 
         // Test cases that should potentially fail or be handled gracefully
         let invalid_cases = vec![
-            format!("SET CIPHERSTASH.KEYSET_NAME = test-1"), // unquoted string that is NOT a valid pg Identifier
-            format!("SET CIPHERSTASH.KEYSET_NAME = NULL"),   // null value
+            "SET CIPHERSTASH.KEYSET_NAME = test-1".to_string(), // unquoted string that is NOT a valid pg Identifier
+            "SET CIPHERSTASH.KEYSET_NAME = NULL".to_string(),   // null value
         ];
 
         for invalid_sql in invalid_cases {

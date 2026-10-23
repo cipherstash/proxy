@@ -7,13 +7,13 @@
 //! ## How to use these tests:
 //!
 //! 1. **Generate fixtures from main branch:**
-//!    ```
+//!    ```text
 //!    git checkout main
 //!    CS_GENERATE_EQL_FIXTURES=1 cargo nextest run -p cipherstash-proxy-integration eql_regression::generate
 //!    ```
 //!
 //! 2. **Run regression tests on new branch:**
-//!    ```
+//!    ```text
 //!    git checkout <your-branch>
 //!    cargo nextest run -p cipherstash-proxy-integration eql_regression::regression
 //!    ```

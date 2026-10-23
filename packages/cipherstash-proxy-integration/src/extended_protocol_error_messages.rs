@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use tracing::{debug, info};
+    use tracing::debug;
 
-    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
+    use crate::common::{
+        assert_client_error, assert_db_error, clear, connect_with_tls, random_id, reset_schema,
+        trace, PROXY,
+    };
 
     /// A statement that always fails inside the proxy, at Parse, in every
     /// configuration: the proxy's SQL parser rejects it before it reaches the
@@ -45,14 +48,11 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            assert_eq!(msg, "db error: ERROR: column \"encrypted_unconfigured\" of relation \"encrypted\" does not exist");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "ERROR",
+            "column \"encrypted_unconfigured\" of relation \"encrypted\" does not exist",
+        );
     }
 
     /// A storage-only encrypted column round-trips.
@@ -110,14 +110,11 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_date]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `i32` and the Postgres type `date`");
-        } else {
-            unreachable!();
-        }
+        assert_client_error(
+            result,
+            "error serializing parameter 1",
+            "cannot convert between the Rust type `i32` and the Postgres type `date`",
+        );
     }
 
     /// CIP-3678 regression: a statement that fails inside the proxy on a
@@ -210,14 +207,10 @@ mod tests {
         let sql = "INSERT INTO encrypted id, encrypted_text VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            info!("{}", msg);
-            assert_eq!(msg, "db error: ERROR: sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-invalid-sql-statement");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "ERROR",
+            "sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-invalid-sql-statement",
+        );
     }
 }

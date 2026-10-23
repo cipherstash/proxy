@@ -40,12 +40,14 @@ When a statement exceeds the threshold, the proxy logs a detailed breakdown:
   "breakdown": {
     "parse_ms": 5,
     "encrypt_ms": 450,
-    "server_write_ms": 12,
-    "server_wait_ms": 9800,
-    "server_response_ms": 233
+    "decrypt_ms": null
   }
 }
 ```
+
+`duration_ms` measures the full statement. The breakdown reports phases owned by
+Proxy itself; pg-proto owns the database and client transport, so transport
+write, wait, and response timings are not reported separately.
 
 ### Query Fingerprints
 
@@ -84,6 +86,5 @@ Measures time for cipher initialization including ZeroKMS network call. High val
 | Symptom | Likely Cause |
 |---------|--------------|
 | High `encrypt_ms` | ZeroKMS latency or large payload |
-| High `server_wait_ms` | Database latency |
 | High `cipher_init_duration` | ZeroKMS cold start or network |
 | High `parse_ms` | Complex SQL or schema lookup |

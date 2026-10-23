@@ -67,7 +67,8 @@ run = """
 # Exit immediately if any command returns non-zero. Stops proxy from starting when the build fails
 set -e
 
-{% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set target_arch = arch() | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set target = target_arch ~ "-unknown-linux-gnu" %}
 {% set docker_platform = "linux/" ~ arch() | replace(from="x64", to="amd64") %}
 
 # build a binary
@@ -173,6 +174,22 @@ run = """
 cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
 """
 
+[tasks."test:burn-in"]
+description = "Run a bounded encrypted CRUD soak against a release Proxy"
+run = """
+set -e
+duration="${BURN_IN_DURATION_SECONDS:-30}"
+concurrency="${BURN_IN_CONCURRENCY:-4}"
+
+# The burn-in owns its Proxy process. Disable the optional metrics listener so
+# shared developer and CI environments cannot collide on its separate port.
+CS_PROMETHEUS__ENABLED=false cargo run --locked -p cipherstash-proxy-burn-in -- \
+  soak \
+  --duration-seconds "${duration}" \
+  --concurrency "${concurrency}" \
+  --output target/burn-in/soak-report.json
+"""
+
 [tasks."test:integration:setup:tls"]
 description = "Setup for TLS integration tests: preflight, postgres, proxy"
 run = """
@@ -205,12 +222,14 @@ mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 
 """
 
 [tasks."test:integration:without_multitenant"]
+dir = "./tests"
 description = "Runs integration tests excluding multitenant (run test:integration:setup:tls first for standalone use)"
 run = """
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
 """
 
 [tasks."test:integration:multitenant"]
+dir = "./tests"
 description = "Runs multitenant integration tests only"
 run = """
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and test(multitenant)'
@@ -232,7 +251,7 @@ run = "mise run test:nextest {{arg(name='test',default='')}}"
 dir = "{{config_root}}"
 run = """
 {% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
-{% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
+{% set default_port = get_env(name="CS_DATABASE__PORT",default="5432") %}
 host={{option(name="host",default=default_host)}}
 port={{option(name="port",default=default_port)}}
 tls={{flag(name="tls")}}
@@ -244,12 +263,11 @@ echo "Testing presence of Postgres at ${host}:${port} with a maximum of ${max_re
 postgres_ready () {
   # tls test
   if [ "$1" = "true" ]; then
-    response="$(echo | openssl s_client -starttls postgres -connect $host:$port -state -no_ign_eof 2>&1)"
-    success=$?
-    if [ -n "${DEBUG}" ]; then
-      echo "response: ${response}"
-    fi
-    return $success
+    # Use psql so TLS negotiation and a real PostgreSQL connection both
+    # complete before the service is considered ready on Linux and macOS.
+    PGPASSWORD="$CS_DATABASE__PASSWORD" PGCONNECT_TIMEOUT=1 PGSSLMODE=require \
+      psql -h "$host" -p "$port" -d "$CS_DATABASE__NAME" \
+        -U "$CS_DATABASE__USERNAME" -c 'SELECT 1' >/dev/null 2>&1
   else
     # plaintext test
     # We blackhole stderr (2>/dev/null) below because nc is echoing to stderr,
@@ -493,8 +511,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
@@ -506,8 +524,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]
@@ -653,8 +671,8 @@ fi
 export CIPHERSTASH_CLIENT_SECONDARY_USER_AGENT="cipherstash-proxy/${BUILD_VERSION}"
 
 # cross-compile
-rustup update
-rustup target add --toolchain stable {{ target }}
+rustup toolchain install --no-self-update
+rustup target add {{ target }}
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
 

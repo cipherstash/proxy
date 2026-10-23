@@ -3,9 +3,10 @@ use std::sync::Arc;
 use crate::{
     config::TandemConfig,
     connect,
-    error::Error,
+    error::{ConfigError, Error, ErrorChain, TlsConfigError},
     postgresql::{Column, Context, KeysetIdentifier},
-    proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
+    proxy::schema::SchemaManager,
+    tls,
 };
 use cipherstash_client::encryption::Plaintext;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -13,7 +14,8 @@ use tokio::sync::oneshot::Sender;
 use tracing::{debug, warn};
 
 mod encrypt_config;
-mod schema;
+/// Transaction-aware schema snapshots, overlays, and publication.
+pub(crate) mod schema;
 mod zerokms;
 
 pub use encrypt_config::EncryptConfig;
@@ -23,7 +25,7 @@ pub type ReloadSender = UnboundedSender<ReloadCommand>;
 
 type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
 
-pub type ReloadResponder = Sender<()>;
+pub type ReloadResponder = Sender<bool>;
 
 /// SQL Statement for loading database schema.
 ///
@@ -37,7 +39,6 @@ const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 #[derive(Debug)]
 pub enum ReloadCommand {
     DatabaseSchema(ReloadResponder),
-    EncryptSchema(ReloadResponder),
 }
 
 ///
@@ -45,23 +46,33 @@ pub enum ReloadCommand {
 ///
 pub struct Proxy {
     pub config: Arc<TandemConfig>,
-    pub encrypt_config_manager: EncryptConfigManager,
     pub schema_manager: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
+    upstream_tls_roots: Arc<rustls::RootCertStore>,
     zerokms: ZeroKms,
     reload_sender: ReloadSender,
 }
 
 impl Proxy {
     pub async fn init(config: TandemConfig) -> Result<Proxy, Error> {
+        let upstream_tls_roots = if config.database_tls_disabled() {
+            Arc::new(rustls::RootCertStore::empty())
+        } else {
+            let roots = tokio::task::spawn_blocking(tls::load_native_root_store)
+                .await
+                .map_err(|error| std::io::Error::other(error.to_string()))??;
+            if config.database.with_tls_verification && roots.is_empty() {
+                return Err(ConfigError::from(TlsConfigError::InvalidCertificate).into());
+            }
+            Arc::new(roots)
+        };
+
         let zerokms = ZeroKms::init(&config)?;
 
         // Attempt to connect to default keyset
         // Ensures error on start if credential or network issue
         zerokms.init_cipher(None).await?;
-
-        let encrypt_config_manager = EncryptConfigManager::init(&config.database).await?;
 
         let schema_manager = SchemaManager::init(&config.database).await?;
 
@@ -69,18 +80,14 @@ impl Proxy {
 
         let (reload_sender, reload_receiver) = mpsc::unbounded_channel();
 
-        Proxy::receive(
-            reload_receiver,
-            schema_manager.clone(),
-            encrypt_config_manager.clone(),
-        );
+        Proxy::receive(reload_receiver, schema_manager.clone());
 
         Ok(Proxy {
             config: Arc::new(config),
             zerokms,
-            encrypt_config_manager,
             schema_manager,
             eql_version,
+            upstream_tls_roots,
             reload_sender,
         })
     }
@@ -96,7 +103,7 @@ impl Proxy {
             Err(err) => {
                 warn!(
                     msg = "Could not query EQL version from database",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
                 None
             }
@@ -104,23 +111,17 @@ impl Proxy {
         Ok(version)
     }
 
-    pub fn receive(
-        mut reload_receiver: ReloadReceiver,
-        schema_manager: SchemaManager,
-        encrypt_config_manager: EncryptConfigManager,
-    ) {
+    /// Starts the asynchronous coordinator for schema reload requests.
+    pub fn receive(mut reload_receiver: ReloadReceiver, schema_manager: SchemaManager) {
         tokio::task::spawn(async move {
             while let Some(command) = reload_receiver.recv().await {
                 debug!(msg = "ReloadCommand received", ?command);
                 match command {
                     ReloadCommand::DatabaseSchema(responder) => {
-                        schema_manager.reload().await;
-                        encrypt_config_manager.reload().await;
-                        let _ = responder.send(());
-                    }
-                    ReloadCommand::EncryptSchema(responder) => {
-                        encrypt_config_manager.reload().await;
-                        let _ = responder.send(());
+                        let schema_manager = schema_manager.clone();
+                        tokio::task::spawn(async move {
+                            let _ = responder.send(schema_manager.reload().await);
+                        });
                     }
                 }
             }
@@ -132,22 +133,23 @@ impl Proxy {
     ///
     pub fn context(&self, client_id: i32) -> Context<ZeroKms> {
         let config = self.config.clone();
-        let encrypt_config = self.encrypt_config_manager.load();
-        let schema = self.schema_manager.load();
         let reload_sender = self.reload_sender.clone();
         let encryption = self.zerokms.clone();
 
-        Context::new(
+        Context::new_with_schema_store(
             client_id,
             config,
-            encrypt_config,
-            schema,
+            self.schema_manager.store(),
+            self.upstream_tls_roots.clone(),
             encryption,
             reload_sender,
         )
     }
 }
 
+// async_trait adds must_use to its generated methods. Clippy on Rust 1.99
+// reports these annotations as redundant because Future is already must_use.
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait EncryptionService: Send + Sync {
     /// Encrypt plaintexts for storage in the database
@@ -160,6 +162,14 @@ pub trait EncryptionService: Send + Sync {
 
     /// Decrypt values retrieved from the database
     async fn decrypt(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+    ) -> Result<Vec<Option<Plaintext>>, Error>;
+
+    /// Authenticate every ciphertext component of application-generated EQL
+    /// storage payloads and return their root plaintexts for SEM verification.
+    async fn decrypt_inbound_eql(
         &self,
         keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<crate::EqlCiphertext>>,
