@@ -1,7 +1,7 @@
 //! Behavioral transaction-setting tests at the PostgreSQL message boundary.
 
 use super::{Backend, Frontend};
-use crate::postgresql::test_operation_id as operation_id;
+use crate::postgresql::{test_operation_id as operation_id, OperationId};
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
@@ -290,7 +290,8 @@ impl Client {
         self.reply(&mut replies).await;
     }
 
-    async fn reply(&mut self, replies: &mut Vec<(crate::postgresql::OperationId, BackendMessage)>) {
+    /// Delivers PostgreSQL's queued replies to the backend, in order
+    async fn reply(&mut self, replies: &mut Vec<(OperationId, BackendMessage)>) {
         for (operation, message) in replies.drain(..) {
             self.backend
                 .intercept(Some(operation), message)
@@ -898,11 +899,20 @@ async fn pipelined_batch_that_changes_settings_and_rolls_back_restores_them() {
     ]
     .concat();
     let savepoint_rollback = [
-        &[("BEGIN", Some("BEGIN")), ("SAVEPOINT s", Some("SAVEPOINT"))][..],
+        &[
+            ("BEGIN", Some("BEGIN")),
+            ("SAVEPOINT before_change", Some("SAVEPOINT")),
+        ][..],
         &changes,
-        &[("ROLLBACK TO s", Some("ROLLBACK"))],
+        &[("ROLLBACK TO before_change", Some("ROLLBACK"))],
     ]
     .concat();
+    // Without a rollback, the batch's changes take effect
+    let mut client = Client::new();
+    client.pipeline(&changes, Idle).await;
+    assert_eq!(client.context.keyset_identifier().unwrap(), named("other"));
+    assert!(client.context.unsafe_disable_mapping().unwrap());
+
     // The batch's implicit transaction is rolled back when a later statement fails
     let implicit_abort = [&changes[..], &[("SELECT 1 / 0", None)]].concat();
     for (batch, status) in [

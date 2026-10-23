@@ -257,6 +257,7 @@ mod tests {
 
         let actual = query_with_client::<String>(select_sql, &client).await;
         assert_eq!(expected, actual);
+        assert_written_with_default_keyset(&client).await;
 
         client.execute("BEGIN", &[]).await.unwrap();
         client
@@ -267,6 +268,7 @@ mod tests {
 
         let actual = simple_query_with_client::<String>(select_sql, &client).await;
         assert_eq!(expected, actual);
+        assert_written_with_default_keyset(&client).await;
 
         // A rolled-back reset leaves mapping off
         for reset in [
@@ -301,35 +303,33 @@ mod tests {
                 .simple_query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false")
                 .await
                 .unwrap();
-
-            // With mapping enabled, an encrypted write after a rolled-back reset
-            // still uses the default keyset
-            client.simple_query("BEGIN").await.unwrap();
-            client.simple_query(reset).await.unwrap();
-            client.simple_query("ROLLBACK").await.unwrap();
-            client.execute("BEGIN", &[]).await.unwrap();
-            client.execute(reset, &[]).await.unwrap();
-            client.execute("ROLLBACK", &[]).await.unwrap();
-
-            let id = random_id();
-            client.execute(sql, &[&id, &encrypted_text]).await.unwrap();
-            assert_eq!(
-                stored_keyset_id(id).await,
-                Some(default_keyset_id()),
-                "{reset}"
-            );
-            client
-                .execute("DELETE FROM encrypted WHERE id = $1", &[&id])
-                .await
-                .unwrap();
         }
+    }
+
+    /// Writes a row through Proxy, which must encrypt it with the default keyset. With
+    /// mapping disabled, the plaintext parameter would be refused for the encrypted column.
+    async fn assert_written_with_default_keyset(client: &tokio_postgres::Client) {
+        let id = random_id();
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&id, &"written after rollback"],
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored_keyset_id(id).await, Some(default_keyset_id()));
+        // The test's other reads expect only the row it inserted first
+        client
+            .execute("DELETE FROM encrypted WHERE id = $1", &[&id])
+            .await
+            .unwrap();
     }
 
     /// The keyset Proxy is configured to encrypt with when none is selected
     fn default_keyset_id() -> Uuid {
         std::env::var("CS_DEFAULT_KEYSET_ID")
             .or_else(|_| std::env::var("CS_ENCRYPT__DEFAULT_KEYSET_ID"))
-            .unwrap()
+            .expect("the without_multitenant run configures CS_DEFAULT_KEYSET_ID")
             .parse()
             .unwrap()
     }
