@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792732155170,
+  "lastUpdate": 1792743346280,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28702,6 +28702,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.138349,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1519312643f714bdcd2b6c1d6ad85d9c1b46bcb2",
+          "message": "Merge pull request #484 from cipherstash/claude/project-thread-hqgv43\n\nrefactor(proxy): route each statement through one refuse-by-default decision",
+          "timestamp": "2026-10-23T19:10:25+11:00",
+          "tree_id": "16acde498b88b779011488b33109abca61457aea",
+          "url": "https://github.com/cipherstash/proxy/commit/1519312643f714bdcd2b6c1d6ad85d9c1b46bcb2"
+        },
+        "date": 1792743344725,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 42.39821,
             "unit": "Number"
           }
         ]
