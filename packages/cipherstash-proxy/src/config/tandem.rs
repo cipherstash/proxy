@@ -68,6 +68,37 @@ pub struct DevelopmentConfig {
     pub enable_mapping_errors: bool,
 }
 
+/// The outcome of validating the inbound (client-facing) TLS configuration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InboundTls {
+    /// TLS is configured and valid.
+    Enabled,
+    /// TLS is not configured, so the proxy listens in plaintext.
+    NotConfigured,
+    /// TLS is configured but invalid, so the proxy listens in plaintext.
+    FallbackToPlaintext { error: String },
+}
+
+impl InboundTls {
+    /// A notice for the user, printed regardless of log level.
+    /// `no_tls` is true when plaintext was explicitly requested with --no-tls.
+    pub fn notice(&self, no_tls: bool) -> Option<String> {
+        match self {
+            InboundTls::Enabled => None,
+            InboundTls::NotConfigured if no_tls => None,
+            InboundTls::NotConfigured => Some(
+                "TLS is not configured; listening for client connections in plaintext. \
+                 Pass --no-tls to silence this warning."
+                    .to_string(),
+            ),
+            InboundTls::FallbackToPlaintext { error } => Some(format!(
+                "TLS configuration is invalid ({error}); falling back to a plaintext listener. \
+                 Pass --tls to make this fatal, or --no-tls to silence this warning."
+            )),
+        }
+    }
+}
+
 /// Config defaults to a file called `tandem` in the current directory.
 /// Supports TOML, JSON, YAML
 /// Variable names should match the struct field names.
@@ -106,6 +137,12 @@ impl TandemConfig {
         if args.no_tls {
             config.tls = None;
             config.server.require_tls = false;
+        }
+
+        // --tls requires inbound TLS: clients that skip SSLRequest are rejected.
+        if args.tls {
+            config.server.require_tls = true;
+            config.validate()?;
         }
 
         Ok(config)
@@ -254,6 +291,41 @@ impl TandemConfig {
             return Err(ConfigError::TlsConfigurationRequired.into());
         }
         Ok(())
+    }
+
+    /// Validate the inbound (client-facing) TLS configuration.
+    ///
+    /// By default, a TLS misconfiguration is non-fatal: TLS is disabled and the
+    /// proxy falls back to a plaintext listener. With `require_tls` (set by
+    /// `--tls` or `CS_SERVER__REQUIRE_TLS`) any TLS problem is fatal, because
+    /// a plaintext listener would accept the sessions `require_tls` rejects.
+    pub fn resolve_inbound_tls(&mut self) -> Result<InboundTls, Error> {
+        let tls_error = match &self.tls {
+            Some(tls) => tls
+                .check_cert()
+                .map_err(|err| Error::from(ConfigError::from(err)))
+                .and_then(|_| {
+                    tls.check_private_key()
+                        .map_err(|err| Error::from(ConfigError::from(err)))
+                })
+                .and_then(|_| crate::tls::configure_server(tls).map(|_| ()))
+                .err(),
+            None => None,
+        };
+
+        match (&self.tls, tls_error, self.server.require_tls) {
+            (Some(_), None, _) => Ok(InboundTls::Enabled),
+            (Some(_), Some(err), true) => Err(err),
+            (Some(_), Some(err), false) => {
+                self.tls = None;
+                self.server.require_tls = false;
+                Ok(InboundTls::FallbackToPlaintext {
+                    error: err.to_string(),
+                })
+            }
+            (None, _, true) => Err(ConfigError::TlsConfigurationRequired.into()),
+            (None, _, false) => Ok(InboundTls::NotConfigured),
+        }
     }
 
     pub fn database_tls_disabled(&self) -> bool {
@@ -408,10 +480,38 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
             value: err.to_string(),
         })?;
 
-    if let Some(host) = pg.get_hosts().iter().find_map(|h| match h {
-        tokio_postgres::config::Host::Tcp(host) => Some(host.clone()),
-        _ => None,
-    }) {
+    // Reject what the proxy cannot apply, rather than silently ignoring it.
+    // The proxy negotiates database TLS itself (as `sslmode=prefer`), so
+    // honouring only part of the URL could downgrade `sslmode=require`.
+    if pg.get_ssl_mode() != tokio_postgres::config::SslMode::Prefer {
+        return Err(ConfigError::InvalidParameter {
+            name: "database-url".to_string(),
+            value: "sslmode is not supported. Remove it from the URL, and set CS_DATABASE__WITH_TLS_VERIFICATION=true to verify the database certificate".to_string(),
+        }
+        .into());
+    }
+
+    let host = match pg.get_hosts() {
+        [] => None,
+        [tokio_postgres::config::Host::Tcp(host)] => Some(host.clone()),
+        [_] => {
+            return Err(ConfigError::InvalidParameter {
+                name: "database-url".to_string(),
+                value: "Unix socket hosts are not supported. Use a TCP host name or address"
+                    .to_string(),
+            }
+            .into())
+        }
+        _ => {
+            return Err(ConfigError::InvalidParameter {
+                name: "database-url".to_string(),
+                value: "multiple hosts are not supported. Use a single host".to_string(),
+            }
+            .into())
+        }
+    };
+
+    if let Some(host) = host {
         env::set_var("CS_DATABASE__HOST", host);
     }
 
@@ -489,7 +589,7 @@ fn extract_invalid_field(input: &str) -> (String, String) {
 mod tests {
     use crate::test_helpers::with_no_cs_vars;
     use crate::{
-        config::{tandem::extract_missing_field_and_key, TandemConfig},
+        config::{tandem::extract_missing_field_and_key, InboundTls, TandemConfig},
         error::{ConfigError, Error},
     };
     use cipherstash_client::config::vars::{
@@ -1104,6 +1204,174 @@ mod tests {
                     crate::config::DEFAULT_THREAD_STACK_SIZE
                 }
             );
+        });
+    }
+
+    fn missing_tls_config() -> crate::config::TlsConfig {
+        crate::config::TlsConfig::Path {
+            certificate_path: "tests/tls/does-not-exist.cert".to_string(),
+            private_key_path: "tests/tls/does-not-exist.key".to_string(),
+        }
+    }
+
+    fn load_test_config(args: crate::Args) -> Result<TandemConfig, Error> {
+        with_no_cs_vars(|| TandemConfig::load(&args))
+    }
+
+    fn test_args() -> crate::Args {
+        use clap::Parser;
+        crate::Args::parse_from([
+            "cipherstash-proxy",
+            "--config-file-path",
+            "tests/config/cipherstash-proxy-test.toml",
+        ])
+    }
+
+    #[test]
+    /// An invalid certificate must not discard an explicit `require_tls`:
+    /// falling back to plaintext would accept the sessions it exists to reject.
+    fn invalid_tls_with_require_tls_is_fatal() {
+        let mut config = TandemConfig::for_testing();
+        config.tls = Some(missing_tls_config());
+        config.server.require_tls = true;
+
+        let result = config.resolve_inbound_tls();
+
+        assert!(result.is_err(), "expected an error, got {result:?}");
+    }
+
+    #[test]
+    fn invalid_tls_without_require_tls_falls_back_to_plaintext() {
+        let mut config = TandemConfig::for_testing();
+        config.tls = Some(missing_tls_config());
+
+        let result = config.resolve_inbound_tls().unwrap();
+
+        assert!(matches!(result, InboundTls::FallbackToPlaintext { .. }));
+        assert_eq!(config.tls, None);
+        assert!(!config.server.require_tls);
+    }
+
+    #[test]
+    /// `--tls` must require TLS from clients, not only a valid certificate.
+    fn tls_flag_sets_require_tls() {
+        let mut args = test_args();
+        args.tls = true;
+
+        let config = load_test_config(args).unwrap();
+
+        assert!(config.server.require_tls);
+    }
+
+    #[test]
+    fn tls_flag_without_tls_configuration_is_an_error() {
+        let mut args = test_args();
+        args.tls = true;
+        args.config_file_path = "tests/config/does-not-exist.toml".to_string();
+
+        let result = with_no_cs_vars(|| {
+            temp_env::with_vars(
+                [
+                    ("CS_DATABASE__NAME", Some("test")),
+                    ("CS_DATABASE__PASSWORD", Some("test")),
+                    (
+                        "CS_WORKSPACE_CRN",
+                        Some("crn:ap-southeast-2.aws:IJGECSCWKREECNBS"),
+                    ),
+                    ("CS_CLIENT_ACCESS_KEY", Some("test")),
+                    ("CS_CLIENT_ID", Some("00000000-0000-0000-0000-000000000001")),
+                    (
+                        "CS_CLIENT_KEY",
+                        Some(TandemConfig::for_testing().encrypt.client_key.as_str()),
+                    ),
+                ],
+                || TandemConfig::load(&args),
+            )
+        });
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::Config(ConfigError::TlsConfigurationRequired))
+            ),
+            "expected TlsConfigurationRequired, got {result:?}"
+        );
+    }
+
+    #[test]
+    /// The quiet default filters `warn!`, so a plaintext listener needs a
+    /// notice that is printed regardless of log level.
+    fn tls_not_configured_prints_a_notice() {
+        assert!(InboundTls::NotConfigured.notice(false).is_some());
+    }
+
+    #[test]
+    fn no_tls_flag_silences_the_not_configured_notice() {
+        assert_eq!(InboundTls::NotConfigured.notice(true), None);
+    }
+
+    /// Runs `f` with the CS_DATABASE__* vars that --database-url sets unset,
+    /// and restores them afterwards.
+    fn with_no_database_vars<F: FnOnce() -> R, R>(f: F) -> R {
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(
+                [
+                    "CS_DATABASE__HOST",
+                    "CS_DATABASE__PORT",
+                    "CS_DATABASE__USERNAME",
+                    "CS_DATABASE__PASSWORD",
+                    "CS_DATABASE__NAME",
+                ],
+                f,
+            )
+        })
+    }
+
+    #[test]
+    /// `sslmode` is not applied to the database connection, so accepting it
+    /// would silently downgrade `sslmode=require` to `prefer`.
+    fn database_url_rejects_sslmode() {
+        use crate::config::tandem::apply_database_url;
+        for sslmode in ["require", "disable"] {
+            with_no_database_vars(|| {
+                let url =
+                    format!("postgres://alice:s3cret@db.example.com/orders?sslmode={sslmode}");
+                let result = apply_database_url(&url);
+                assert!(result.is_err(), "expected sslmode={sslmode} to be rejected");
+            });
+        }
+    }
+
+    #[test]
+    fn database_url_accepts_sslmode_prefer() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice:s3cret@db.example.com/orders?sslmode=prefer")
+                .unwrap();
+        });
+    }
+
+    #[test]
+    /// A Unix socket host would leave CS_DATABASE__HOST unset while still
+    /// setting the port from the same URL.
+    fn database_url_rejects_unix_socket_host() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            let result =
+                apply_database_url("postgres://alice@%2Fvar%2Frun%2Fpostgresql:5433/orders");
+            assert!(result.is_err());
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+        });
+    }
+
+    #[test]
+    fn database_url_rejects_multiple_hosts() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            let result =
+                apply_database_url("postgres://alice@db1.example.com,db2.example.com/orders");
+            assert!(result.is_err());
+            assert!(std::env::var("CS_DATABASE__HOST").is_err());
         });
     }
 }

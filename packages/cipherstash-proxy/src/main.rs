@@ -1,9 +1,9 @@
-use cipherstash_proxy::config::{LogConfig, LogLevel, TandemConfig};
+use cipherstash_proxy::config::{InboundTls, LogLevel, TandemConfig};
 use cipherstash_proxy::connect;
 use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
-use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
+use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, Args};
 use clap::Parser;
 use metrics::gauge;
 use tokio::signal::unix::{signal, SignalKind};
@@ -33,9 +33,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_config = if log_explicitly_set {
         config.log.clone()
     } else if args.debug {
-        LogConfig::with_level(LogLevel::Debug)
+        config.log.with_default_level(LogLevel::Debug)
     } else {
-        LogConfig::with_level(LogLevel::Error)
+        config.log.with_default_level(LogLevel::Error)
     };
     log::init(log_config);
 
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.block_on(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
 
-        let mut proxy = init(config, args.tls).await;
+        let mut proxy = init(config, args.no_tls).await;
 
         // If the listen port is just the default (not set via CS_SERVER__PORT or
         // a config file) and it's already in use, fall back to an OS-assigned
@@ -163,7 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Validate various configuration options and
 /// Init the Proxy service
 ///
-async fn init(mut config: TandemConfig, force_tls: bool) -> Proxy {
+async fn init(mut config: TandemConfig, no_tls: bool) -> Proxy {
     if config.encrypt.default_keyset_id.is_none() {
         warn!(msg = "Default Keyset Id has not been configured");
         warn!(msg = "A Keyset Identifier must be set using the `SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` commands");
@@ -201,55 +201,30 @@ async fn init(mut config: TandemConfig, force_tls: bool) -> Proxy {
             std::process::exit(exitcode::CONFIG);
         });
 
-    // Validate inbound TLS if configured. By default, a TLS misconfiguration is
-    // non-fatal: we warn and fall back to a plaintext listener. Passing --tls
-    // makes any TLS problem fatal (no silent downgrade).
-    let tls_error: Option<String> = match &config.tls {
-        Some(tls) => {
-            if let Err(err) = tls.check_cert() {
-                Some(err.to_string())
-            } else if let Err(err) = tls.check_private_key() {
-                Some(err.to_string())
-            } else if let Err(err) = tls::configure_server(tls) {
-                Some(err.to_string())
-            } else {
-                None
+    match config.resolve_inbound_tls() {
+        Ok(inbound_tls) => {
+            match &inbound_tls {
+                InboundTls::Enabled => {
+                    info!(msg = "Server Transport Layer Security (TLS) configuration validated");
+                }
+                InboundTls::NotConfigured => {
+                    warn!(msg = "Transport Layer Security (TLS) is not configured");
+                    warn!(msg = "Listening on an unsafe connection");
+                }
+                InboundTls::FallbackToPlaintext { error } => {
+                    warn!(
+                        msg = "Server Transport Layer Security (TLS) configuration is invalid; listening on an unsafe connection",
+                        error
+                    );
+                }
+            }
+            if let Some(notice) = inbound_tls.notice(no_tls) {
+                eprintln!("{notice}");
             }
         }
-        None => None,
-    };
-
-    match (&config.tls, tls_error, force_tls) {
-        // TLS configured and valid.
-        (Some(_), None, _) => {
-            info!(msg = "Server Transport Layer Security (TLS) configuration validated");
-        }
-        // TLS configured but invalid, and --tls forces it: fatal.
-        (Some(_), Some(err), true) => {
-            eprintln!("TLS is required (--tls) but the configuration is invalid: {err}");
+        Err(err) => {
+            eprintln!("{err}");
             std::process::exit(exitcode::CONFIG);
-        }
-        // TLS configured but invalid, no force: fall back to plaintext.
-        (Some(_), Some(err), false) => {
-            eprintln!(
-                "TLS configuration is invalid ({err}); falling back to a plaintext listener. \
-                 Pass --tls to make this fatal, or --no-tls to silence this warning."
-            );
-            config.tls = None;
-            config.server.require_tls = false;
-        }
-        // No TLS configured, but --tls forces it: fatal.
-        (None, _, true) => {
-            eprintln!(
-                "TLS is required (--tls) but no inbound TLS certificate is configured \
-                 (set CS_TLS__CERTIFICATE_PATH / CS_TLS__PRIVATE_KEY_PATH)."
-            );
-            std::process::exit(exitcode::CONFIG);
-        }
-        // No TLS configured, no force: plaintext listener.
-        (None, _, false) => {
-            warn!(msg = "Transport Layer Security (TLS) is not configured");
-            warn!(msg = "Listening on an unsafe connection");
         }
     }
 
@@ -327,6 +302,6 @@ async fn reload_application_config(config: &TandemConfig, args: &Args) -> Result
     }
 
     info!(msg = "Configuration reloaded");
-    let proxy = init(new_config, args.tls).await;
+    let proxy = init(new_config, args.no_tls).await;
     Ok(proxy)
 }

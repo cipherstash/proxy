@@ -25,6 +25,8 @@ pub struct Args {
     /// "postgres://user:pass@host:5432/dbname".
     /// Sets host, port, user, password and database name at once.
     /// Individual flags below override matching parts of the URL.
+    /// A password in the URL is exposed in shell history and the process
+    /// list; prefer CS_DATABASE__PASSWORD.
     #[arg(long, value_name = "URL", verbatim_doc_comment)]
     pub database_url: Option<String>,
 
@@ -50,8 +52,8 @@ pub struct Args {
 
     /// Optional database password.
     /// Uses env or config file if not specified.
-    /// Prefer CS_DATABASE__PASSWORD or --database-url to avoid leaking the
-    /// password into shell history / the process list.
+    /// Prefer CS_DATABASE__PASSWORD: a password on the command line, here or
+    /// in --database-url, is exposed in shell history and the process list.
     #[arg(short = 'W', long, verbatim_doc_comment)]
     pub db_password: Option<String>,
 
