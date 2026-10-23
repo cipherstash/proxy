@@ -16,11 +16,13 @@ use tokio::{
     sync::mpsc,
 };
 
-/// Records the keyset of each encryption and decryption, and refuses it, as it has no keys
+/// Records the keyset of each encryption and decryption, and refuses it, as it has no keys.
+/// With `encrypts`, an encryption returns stub ciphertexts instead.
 #[derive(Clone, Default)]
 struct TestService {
     encrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
     decrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+    encrypts: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -29,12 +31,31 @@ impl EncryptionService for TestService {
         &self,
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
-        _columns: &[Option<Column>],
+        columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
         if plaintexts.iter().all(Option::is_none) {
             return Ok(vec![None; plaintexts.len()]);
         }
         self.encrypted_with.lock().unwrap().push(keyset_id);
+        if self.encrypts.load(std::sync::atomic::Ordering::Relaxed) {
+            // A ciphertext with no encrypted record, which is enough for Proxy to rewrite a
+            // statement
+            return Ok(plaintexts
+                .iter()
+                .zip(columns)
+                .map(|(plaintext, column)| {
+                    plaintext.as_ref()?;
+                    let identifier = &column.as_ref()?.identifier;
+                    Some(
+                        serde_json::from_value(serde_json::json!({
+                            "i": { "t": identifier.table, "c": identifier.column },
+                            "v": 2,
+                        }))
+                        .unwrap(),
+                    )
+                })
+                .collect());
+        }
         Err(crate::error::EncryptError::ColumnCouldNotBeEncrypted {
             table: "users".to_string(),
             column: "email".to_string(),
@@ -75,6 +96,8 @@ struct Connection {
     encrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
     /// The keyset of each decryption so far
     decrypted_with: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+    /// Set to have encryptions return stub ciphertexts
+    encrypts: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Connection {
@@ -94,10 +117,13 @@ impl Connection {
             "v": 1,
             "tables": { "users": { "email": {} } }
         }));
+        // Quoted column names, as Proxy loads them from the database
         let mut users = Table::new(Ident::new("users"));
-        users.add_column(Arc::new(eql_mapper::Column::native(Ident::new("id"))));
+        users.add_column(Arc::new(eql_mapper::Column::native(Ident::with_quote(
+            '"', "id",
+        ))));
         users.add_column(Arc::new(eql_mapper::Column::eql(
-            Ident::new("email"),
+            Ident::with_quote('"', "email"),
             EqlTraits::all(),
         )));
         let mut schema = Schema::new("public");
@@ -113,6 +139,7 @@ impl Connection {
         let service = TestService::default();
         let encrypted_with = service.encrypted_with.clone();
         let decrypted_with = service.decrypted_with.clone();
+        let encrypts = service.encrypts.clone();
         let context = Context::new(
             1,
             Arc::new(config),
@@ -144,6 +171,7 @@ impl Connection {
             context,
             encrypted_with,
             decrypted_with,
+            encrypts,
         }
     }
 
@@ -2059,5 +2087,483 @@ mod refusals {
         connection.server(ready(b'I')).await;
         assert_eq!(connection.error_codes_sent_to_client(), vec!["42P01"]);
         assert_eq!(connection.context.state_sizes().refusals, 0);
+    }
+}
+
+/// A `COPY ... FROM STDIN` into a table with no encrypted columns is forwarded with its copy
+/// data, and one into an encrypted column is refused, as Proxy does not encrypt copy data.
+mod copy_from_stdin {
+    use super::*;
+
+    fn copy_in_response() -> BytesMut {
+        // Text format, one text column
+        message(b'G', &[0, 0, 1, 0, 0])
+    }
+
+    fn copy_data(row: &str) -> BytesMut {
+        message(b'd', row.as_bytes())
+    }
+
+    fn copy_done() -> BytesMut {
+        message(b'c', b"")
+    }
+
+    /// Check that Proxy refused what the client sent: it forwarded only a message PostgreSQL
+    /// rejects in its place, and none of the client's SQL. PostgreSQL then rejects it, and the
+    /// client gets Proxy's errors, which are returned.
+    async fn refused(connection: &mut Connection) -> Vec<String> {
+        connection.errors_sent_to_client();
+        let forwarded = connection.forwarded().await;
+        for (_, body) in &forwarded {
+            let body = String::from_utf8_lossy(body);
+            assert!(!body.contains("COPY") && !body.contains("alice"), "{body}");
+        }
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+
+        let mut errors = vec![];
+        while let Ok(message) = connection.to_client.try_recv() {
+            if message.first() == Some(&b'E') {
+                let field = message[5..]
+                    .split(|byte| *byte == 0)
+                    .find(|field| field.first() == Some(&b'M'))
+                    .unwrap();
+                errors.push(String::from_utf8_lossy(&field[1..]).into_owned());
+            }
+        }
+        errors
+    }
+
+    /// The Query was forwarded unchanged
+    async fn forwarded_unchanged(connection: &mut Connection, sql: &str) {
+        assert_eq!(
+            connection.forwarded().await,
+            vec![(b'Q', format!("{sql}\0").into_bytes())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_simple_query_copy_into_a_plaintext_table_is_forwarded_with_its_data() {
+        let mut connection = Connection::started().await;
+        let sql = "COPY users (email) FROM STDIN";
+
+        connection.client(query(sql)).await;
+        connection.server(copy_in_response()).await;
+        connection.client(copy_data("alice@example.com\n")).await;
+        connection.client(copy_done()).await;
+        connection.server(command_complete("COPY 1")).await;
+        connection.server(ready(b'I')).await;
+
+        assert_eq!(
+            connection.forwarded().await,
+            vec![
+                (b'Q', format!("{sql}\0").into_bytes()),
+                (b'd', b"alice@example.com\n".to_vec()),
+                (b'c', vec![]),
+            ]
+        );
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_simple_query_copy_into_an_encrypted_column_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query("COPY users (id, email) FROM STDIN"))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0]
+            .starts_with("COPY into encrypted column 'email' of table 'users' is not supported"));
+    }
+
+    /// The SQL parser would read the statements after a `COPY ... FROM STDIN` as its copy data
+    #[tokio::test]
+    async fn a_statement_after_a_copy_in_one_simple_query_is_not_forwarded_as_plaintext() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query(
+                "COPY users (id) FROM STDIN; INSERT INTO users (email) VALUES ('alice@example.com')",
+            ))
+            .await;
+
+        // The test encryption service refuses to encrypt the INSERT
+        assert_eq!(refused(&mut connection).await.len(), 1);
+        assert_eq!(connection.encrypted_with().len(), 1);
+    }
+
+    /// Proxy writes out each statement again when it rewrites a Query to encrypt it
+    #[tokio::test]
+    async fn a_copy_in_one_simple_query_with_a_statement_that_is_encrypted_is_refused() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .encrypts
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+
+        connection
+            .client(query(
+                "INSERT INTO users (email) VALUES ('alice@example.com'); COPY users (id) FROM STDIN",
+            ))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].starts_with("COPY must be sent in a query of its own"));
+    }
+
+    /// A refused Query leaves nothing behind to describe the results of the next one
+    #[tokio::test]
+    async fn the_query_after_a_refused_copy_with_an_encrypted_statement_is_not_decrypted() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .encrypts
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        connection
+            .client(query(
+                "INSERT INTO users (email) VALUES ('alice@example.com') RETURNING email; COPY users (id) FROM STDIN",
+            ))
+            .await;
+        refused(&mut connection).await;
+
+        connection.client(query("SELECT 'hello'")).await;
+        let mut body = vec![];
+        body.extend_from_slice(&1i16.to_be_bytes());
+        body.extend_from_slice(&5i32.to_be_bytes());
+        body.extend_from_slice(b"hello");
+        let row = message(b'D', &body);
+        connection.server(row.clone()).await;
+        connection.server(command_complete("SELECT 1")).await;
+        connection.server(ready(b'I')).await;
+
+        assert_eq!(connection.decrypted_with(), vec![]);
+        assert_eq!(connection.to_client.try_recv().unwrap(), row);
+    }
+
+    #[tokio::test]
+    async fn an_extended_copy_into_a_plaintext_table_is_forwarded_with_its_data() {
+        let mut connection = Connection::started().await;
+        let sql = "COPY users (email) FROM STDIN";
+
+        connection.client(parse("", sql)).await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+        connection.server(parse_complete()).await;
+        connection.server(bind_complete()).await;
+        connection.server(copy_in_response()).await;
+        connection.client(copy_data("alice@example.com\n")).await;
+        connection.client(copy_done()).await;
+        // PostgreSQL ignores the Sync sent during the copy
+        connection.client(sync()).await;
+        connection.server(command_complete("COPY 1")).await;
+        connection.server(ready(b'I')).await;
+
+        assert_eq!(connection.forwarded_codes().await, b"PBESdcS".to_vec());
+        assert_eq!(connection.errors_sent_to_client(), 0);
+
+        // The next batch is matched to its own ReadyForQuery
+        connection.simple("SELECT 1", "SELECT 1").await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_extended_copy_into_an_encrypted_column_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection.client(parse("", "COPY users FROM STDIN")).await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        let errors = refused(&mut connection).await;
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+    }
+
+    /// PostgreSQL reads a file or program into the table as it reads copy data
+    #[tokio::test]
+    async fn a_copy_from_a_file_into_an_encrypted_column_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query(
+                "COPY public.users FROM '/tmp/users.csv' WITH (FORMAT csv)",
+            ))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+    }
+
+    #[tokio::test]
+    async fn a_copy_into_only_plaintext_columns_of_an_encrypted_table_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = "COPY users (id) FROM STDIN";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    /// Proxy cannot tell whether a table it does not know has encrypted columns
+    #[tokio::test]
+    async fn a_copy_into_an_unknown_table_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection.client(query("COPY unknown FROM STDIN")).await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into table 'unknown' is not supported"));
+    }
+
+    #[tokio::test]
+    async fn a_copy_into_a_table_created_in_the_same_query_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = "CREATE TABLE staging (id int); COPY staging FROM STDIN";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    /// `CREATE TABLE ... AS` creates columns Proxy does not see
+    #[tokio::test]
+    async fn a_copy_with_no_column_list_into_a_table_with_no_known_columns_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query(
+                "CREATE TABLE staging AS SELECT * FROM users; COPY staging FROM STDIN",
+            ))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into table 'staging' is not supported"));
+    }
+
+    /// `CREATE TABLE ... (LIKE ...)` copies columns Proxy does not see. The parser reads the
+    /// `LIKE` clause as a column named `LIKE`.
+    #[tokio::test]
+    async fn a_copy_into_a_table_created_like_another_is_refused() {
+        for sql in [
+            "CREATE TABLE staging (LIKE users); COPY staging FROM STDIN",
+            "CREATE TABLE staging (like users, note text); COPY staging FROM STDIN",
+            "CREATE TABLE staging (LIKE users, note text); COPY staging (note) FROM STDIN",
+        ] {
+            let mut connection = Connection::encrypted().await;
+
+            connection.client(query(sql)).await;
+
+            let errors = refused(&mut connection).await;
+            assert!(
+                errors[0].starts_with("COPY into table 'staging' is not supported"),
+                "{sql}"
+            );
+        }
+    }
+
+    /// PostgreSQL finds a table named without a schema in the temporary schema first, but a
+    /// schema-qualified name is the table in that schema
+    #[tokio::test]
+    async fn a_schema_qualified_copy_is_not_hidden_by_a_table_of_the_same_name() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query(
+                "CREATE TEMP TABLE users (id int, email text); COPY public.users FROM STDIN",
+            ))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into encrypted column 'email' of table 'users'"));
+    }
+
+    #[tokio::test]
+    async fn a_schema_qualified_copy_into_a_table_created_with_that_name_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = "CREATE TABLE public.staging (id int); COPY public.staging FROM STDIN";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    /// The Query is forwarded unchanged after a statement that fails type checking
+    #[tokio::test]
+    async fn a_copy_after_a_statement_that_fails_type_checking_is_still_checked() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query("SELECT * FROM unknown; COPY users FROM STDIN"))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+    }
+
+    /// The query of a `COPY ... TO` is not type checked, so one that writes would send its
+    /// values to PostgreSQL as plaintext
+    #[tokio::test]
+    async fn a_copy_of_a_query_that_writes_is_refused() {
+        for sql in [
+            "COPY (INSERT INTO users (email) VALUES ('alice@example.com') RETURNING id) TO STDOUT",
+            "COPY (UPDATE users SET email = 'alice@example.com' RETURNING id) TO STDOUT",
+            "COPY (DELETE FROM users WHERE email = 'alice@example.com' RETURNING id) TO STDOUT",
+            "COPY (WITH i AS (INSERT INTO users (email) VALUES ('alice@example.com') RETURNING id) SELECT id FROM i) TO STDOUT",
+            "COPY ((WITH i AS (INSERT INTO users (email) VALUES ('alice@example.com') RETURNING id) SELECT id FROM i)) TO STDOUT",
+        ] {
+            let mut connection = Connection::encrypted().await;
+
+            connection.client(query(sql)).await;
+
+            let errors = refused(&mut connection).await;
+            assert!(
+                errors[0].starts_with("COPY of a query that writes is not supported"),
+                "{sql}: {errors:?}"
+            );
+        }
+    }
+
+    /// Proxy records a table created on this connection before PostgreSQL runs the `CREATE`, which
+    /// may then not create it
+    #[tokio::test]
+    async fn a_copy_into_an_encrypted_table_is_not_hidden_by_a_table_created_on_the_connection() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .client(query(
+                "CREATE TABLE IF NOT EXISTS users (id int, email text); COPY users FROM STDIN",
+            ))
+            .await;
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+
+        let mut connection = Connection::encrypted().await;
+        connection
+            .client(query(
+                "CREATE TEMP TABLE users (id int, email text); COPY unknown FROM STDIN",
+            ))
+            .await;
+        refused(&mut connection).await;
+        connection.client(query("COPY users FROM STDIN")).await;
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+    }
+
+    /// PostgreSQL stops at the statement that fails, so it does not run the `CREATE` after it
+    #[tokio::test]
+    async fn a_table_created_after_a_statement_that_fails_type_checking_is_not_known() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query(
+                "SELECT * FROM unknown; CREATE TABLE staging (id int); COPY staging FROM STDIN",
+            ))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into table 'staging' is not supported"));
+    }
+
+    /// The loaded schema has tables by name, without their schema
+    #[tokio::test]
+    async fn a_copy_into_a_table_name_two_schemas_have_is_refused() {
+        let mut config = TandemConfig::for_testing();
+        config.encrypt.default_keyset_id = None;
+        let encrypt_config = EncryptConfig::from_json(serde_json::json!({
+            "v": 1,
+            "tables": { "users": { "email": {} } }
+        }));
+        let mut plaintext = Table::new(Ident::new("users"));
+        plaintext.add_column(Arc::new(eql_mapper::Column::native(Ident::with_quote(
+            '"', "email",
+        ))));
+        let mut encrypted = Table::new(Ident::new("users"));
+        encrypted.add_column(Arc::new(eql_mapper::Column::eql(
+            Ident::with_quote('"', "email"),
+            EqlTraits::all(),
+        )));
+        let mut schema = Schema::new("public");
+        schema.add_table(plaintext);
+        schema.add_table(encrypted);
+        let mut connection = Connection::with_schema(config, encrypt_config, schema);
+        connection.server(ready(b'I')).await;
+
+        connection.client(query("COPY users FROM STDIN")).await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into table 'users' is not supported"));
+    }
+
+    #[tokio::test]
+    async fn a_copy_into_an_unknown_column_of_a_known_table_is_refused() {
+        let mut connection = Connection::encrypted().await;
+
+        connection
+            .client(query("COPY users (id, nickname) FROM STDIN"))
+            .await;
+
+        let errors = refused(&mut connection).await;
+        assert!(errors[0].starts_with("COPY into table 'users' is not supported"));
+    }
+
+    /// Only an unquoted `LIKE` is the clause
+    #[tokio::test]
+    async fn a_copy_into_a_table_with_a_quoted_like_column_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = r#"CREATE TABLE staging ("like" text); COPY staging FROM STDIN"#;
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    #[tokio::test]
+    async fn a_copy_into_an_encrypted_column_is_forwarded_with_mapping_disabled() {
+        for sql in [
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; COPY users FROM STDIN",
+            "SELECT * FROM unknown; SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; COPY users FROM STDIN",
+        ] {
+            let mut connection = Connection::encrypted().await;
+
+            connection.client(query(sql)).await;
+
+            forwarded_unchanged(&mut connection, sql).await;
+        }
+    }
+
+    /// Proxy returns the ciphertext, as it does not decrypt copy data
+    #[tokio::test]
+    async fn a_copy_of_an_encrypted_table_to_stdout_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = "COPY users TO STDOUT";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    /// Proxy returns the ciphertext, as it does not decrypt copy data
+    #[tokio::test]
+    async fn a_copy_to_stdout_of_a_query_that_only_reads_is_forwarded() {
+        let mut connection = Connection::encrypted().await;
+        let sql = "COPY (SELECT id, email FROM users) TO STDOUT";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    #[tokio::test]
+    async fn a_copy_of_a_query_that_writes_is_forwarded_with_no_encrypted_columns() {
+        let mut connection = Connection::started().await;
+        let sql =
+            "COPY (INSERT INTO users (email) VALUES ('alice@example.com') RETURNING id) TO STDOUT";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
     }
 }

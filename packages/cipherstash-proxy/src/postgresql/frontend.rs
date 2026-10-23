@@ -513,9 +513,12 @@ where
         let mut encrypted = false;
         let mut parse_duration_recorded = false;
 
-        for (statement, (mapping_disabled, keyset)) in
-            parsed_statements.iter().zip(statement_settings)
+        for (index, (statement, (mapping_disabled, keyset))) in parsed_statements
+            .iter()
+            .zip(&statement_settings)
+            .enumerate()
         {
+            let mapping_disabled = *mapping_disabled;
             // Every statement is forwarded, so PostgreSQL answers each settings command
             if mapping_disabled {
                 warn!(msg = "Encrypted statement mapping is not enabled");
@@ -526,6 +529,7 @@ where
             }
 
             self.check_for_schema_change(statement);
+            self.check_copy(statement)?;
 
             if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -540,7 +544,18 @@ where
                         return Err(err);
                     } else {
                         // The Query is forwarded unchanged, so the settings commands after
-                        // this statement still run, in order
+                        // this statement still run, in order. A COPY after it is still checked.
+                        for (statement, (mapping_disabled, _)) in parsed_statements
+                            .iter()
+                            .zip(&statement_settings)
+                            .skip(index + 1)
+                        {
+                            // PostgreSQL stops at the failed statement, so a `CREATE` after it
+                            // is not run, and is not recorded
+                            if !mapping_disabled {
+                                self.check_copy(statement)?;
+                            }
+                        }
                         return Ok(None);
                     };
                 }
@@ -605,6 +620,17 @@ where
                     transformed_statements.push(statement.clone());
                 }
             };
+        }
+
+        // Proxy writes out each statement again when it rewrites a Query, and a `COPY` is not
+        // tested in a rewritten Query, so it must be sent in a Query of its own. Refused before the
+        // portal is added, so nothing is left to describe the results of a later Query.
+        if encrypted
+            && parsed_statements
+                .iter()
+                .any(|statement| matches!(statement, ast::Statement::Copy { .. }))
+        {
+            return Err(MappingError::CopyWithEncryptedStatement.into());
         }
 
         // Record parse/typecheck duration (if not already recorded before encryption)
@@ -904,6 +930,7 @@ where
         }
 
         self.check_for_schema_change(&statement);
+        self.check_copy(&statement)?;
 
         if !eql_mapper::requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -1011,6 +1038,106 @@ where
 
         if schema_changed {
             self.context.set_schema_changed();
+        }
+    }
+
+    /// Refuse a `COPY` that would send plaintext to an encrypted column, as Proxy does not
+    /// encrypt copy data: a `COPY ... FROM` into an encrypted column, and a `COPY` of a query
+    /// that writes, as Proxy does not type check the query of a `COPY ... TO`. Without a column
+    /// list, a `COPY ... FROM` fills every column.
+    ///
+    /// A `COPY ... FROM` into a table or column Proxy does not know, or into a table name that
+    /// more than one schema has, is refused, as Proxy cannot tell whether it is encrypted. With no
+    /// encrypted columns configured, every `COPY` is forwarded.
+    fn check_copy(&self, statement: &ast::Statement) -> Result<(), Error> {
+        let ast::Statement::Copy { source, to, .. } = statement else {
+            return Ok(());
+        };
+        if self.context.is_passthrough() {
+            return Ok(());
+        }
+        match source {
+            ast::CopySource::Query(query) if writes(query) => {
+                Err(MappingError::CopyOfQueryThatWrites.into())
+            }
+            ast::CopySource::Table {
+                table_name,
+                columns,
+            } if !to => self.check_copy_into(table_name, columns),
+            _ => Ok(()),
+        }
+    }
+
+    /// Refuse a `COPY ... FROM` into `columns` of `table_name` unless Proxy knows none of them is
+    /// encrypted.
+    ///
+    /// The schema Proxy loads has the tables of every schema by name, without the schema. A table
+    /// created or changed on this connection is known by the name it was given. Proxy records it
+    /// before PostgreSQL runs the statement, which may then not create it, as with
+    /// `CREATE TABLE IF NOT EXISTS`, or roll it back. So the `COPY` is refused if either the table
+    /// created with that name or the loaded table of that name has an encrypted column it fills.
+    fn check_copy_into(
+        &self,
+        table_name: &ast::ObjectName,
+        columns: &[ast::Ident],
+    ) -> Result<(), Error> {
+        let unknown = || MappingError::CopyIntoUnknownTable {
+            table: table_name.to_string(),
+        };
+        let resolver = self.context.get_table_resolver();
+        let name = ast::ObjectName(table_name.0.last().cloned().into_iter().collect());
+        let tables: Vec<_> = [
+            resolver.resolve_table(table_name),
+            resolver.resolve_loaded_table(&name),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // The parser reads the `LIKE` clause of `CREATE TABLE t (LIKE u)` as a column named
+        // `LIKE`, so Proxy does not know the columns it copies. PostgreSQL reserves `LIKE`, so an
+        // unquoted column of that name is always the clause.
+        let created_like = tables.iter().any(|table| {
+            table.columns.iter().any(|column| {
+                column.name.quote_style.is_none() && column.name.value.eq_ignore_ascii_case("like")
+            })
+        });
+        if created_like {
+            return Err(unknown().into());
+        }
+
+        let mut targets = vec![];
+        if columns.is_empty() {
+            for table in &tables {
+                targets.extend(table.columns.iter().map(|column| (table, column.clone())));
+            }
+        } else {
+            for name in columns {
+                let found: Vec<_> = tables
+                    .iter()
+                    .filter_map(|table| Some((table, table.get_column(name).ok()?)))
+                    .collect();
+                if found.is_empty() {
+                    return Err(unknown().into());
+                }
+                targets.extend(found);
+            }
+        }
+        // A table with no columns Proxy knows, such as one created with `AS`
+        if targets.is_empty() {
+            return Err(unknown().into());
+        }
+
+        match targets
+            .iter()
+            .find(|(_, column)| matches!(column.kind, eql_mapper::ColumnKind::Eql(_)))
+        {
+            Some((table, column)) => Err(MappingError::CopyIntoEncryptedColumn {
+                table: table.name.value.clone(),
+                column: column.name.value.clone(),
+            }
+            .into()),
+            None => Ok(()),
         }
     }
 
@@ -1345,6 +1472,27 @@ where
 
         Ok(bytes)
     }
+}
+
+/// Whether `query` writes: it is, or has a `WITH` query that is, an `INSERT`, `UPDATE` or
+/// `DELETE`. PostgreSQL allows a statement that writes only there.
+fn writes(query: &ast::Query) -> bool {
+    fn body_writes(body: &ast::SetExpr) -> bool {
+        match body {
+            ast::SetExpr::Insert(_) | ast::SetExpr::Update(_) | ast::SetExpr::Delete(_) => true,
+            ast::SetExpr::Query(query) => writes(query),
+            ast::SetExpr::SetOperation { left, right, .. } => {
+                body_writes(left) || body_writes(right)
+            }
+            ast::SetExpr::Select(_) | ast::SetExpr::Values(_) | ast::SetExpr::Table(_) => false,
+        }
+    }
+    query
+        .with
+        .iter()
+        .flat_map(|with| &with.cte_tables)
+        .any(|cte| writes(&cte.query))
+        || body_writes(&query.body)
 }
 
 /// `Sync`, `Query` and `FunctionCall` are each answered with exactly one `ReadyForQuery`

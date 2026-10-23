@@ -67,6 +67,13 @@ impl SchemaWithEdits {
         }
     }
 
+    pub(crate) fn resolve_loaded_table(
+        &self,
+        name: &ObjectName,
+    ) -> Result<Arc<Table>, SchemaError> {
+        self.schema.resolve_table(name)
+    }
+
     pub(crate) fn resolve_table_columns(
         &self,
         table_name: &ObjectName,
