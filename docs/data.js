@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792714302028,
+  "lastUpdate": 1792714671459,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -28269,6 +28269,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 42.237877,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "025dba5bb9fbec1ded3e3ceaa27310dda29440e2",
+          "message": "fix(proxy): refuse writes to a table Proxy cannot resolve",
+          "timestamp": "2026-10-22T01:09:31Z",
+          "url": "https://github.com/cipherstash/proxy/pull/486/commits/025dba5bb9fbec1ded3e3ceaa27310dda29440e2"
+        },
+        "date": 1792714669720,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.918121,
             "unit": "Number"
           }
         ]
