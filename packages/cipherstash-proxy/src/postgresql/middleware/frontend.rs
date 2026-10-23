@@ -351,7 +351,7 @@ impl<S: EncryptionService> Frontend<S> {
         }
         if self
             .context
-            .settings_simple_query_requires_fail_closed(&parsed_statements)
+            .settings_simple_query_requires_fail_closed(&parsed_statements)?
         {
             return Err(MappingError::DependentStatementAfterSettings.into());
         }

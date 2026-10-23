@@ -167,8 +167,8 @@ pub enum SettingsCommand {
 }
 
 impl SettingsCommand {
-    pub fn from_statement(statement: &Statement) -> Self {
-        match statement {
+    pub fn from_statement(statement: &Statement) -> Result<Self, Error> {
+        Ok(match statement {
             Statement::StartTransaction { .. } => Self::Begin,
             Statement::Commit { .. } => Self::Commit,
             Statement::Rollback {
@@ -180,12 +180,10 @@ impl SettingsCommand {
             } => Self::RollbackTo(postgres_identifier(name)),
             Statement::Savepoint { name } => Self::Savepoint(postgres_identifier(name)),
             Statement::ReleaseSavepoint { name } => Self::Release(postgres_identifier(name)),
-            _ => SettingChange::parse(statement)
-                .ok()
-                .flatten()
+            _ => SettingChange::parse(statement)?
                 .map(Self::Change)
                 .unwrap_or(Self::Other),
-        }
+        })
     }
 
     pub fn may_change_effective(&self, settings: &ConnectionSettings) -> bool {
@@ -310,7 +308,10 @@ impl ConnectionSettings {
     /// Applies only a command confirmed successful by PostgreSQL.
     #[cfg(test)]
     pub fn execution_succeeded(&mut self, statement: &Statement, command_tag: &str) {
-        self.command_succeeded(&SettingsCommand::from_statement(statement), command_tag);
+        self.command_succeeded(
+            &SettingsCommand::from_statement(statement).unwrap(),
+            command_tag,
+        );
     }
 
     pub fn command_succeeded(&mut self, command: &SettingsCommand, command_tag: &str) {
@@ -875,6 +876,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn settings_command_reports_an_invalid_cipherstash_setting() {
+        for sql in [
+            "SET CIPHERSTASH.KEYSET_ID = 'invalid'",
+            "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = 'maybe'",
+            "SET CIPHERSTASH.UNKNOWN = 'value'",
+        ] {
+            let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
+            assert!(
+                SettingsCommand::from_statement(&statements[0]).is_err(),
+                "{sql}"
+            );
+        }
+    }
+
     fn parse_one(sql: &str) -> Result<Option<SettingChange>, Error> {
         let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
         SettingChange::parse(&statements[0])
@@ -1017,7 +1033,9 @@ mod tests {
             "SET",
         );
         let commit = crate::postgresql::parser::SqlParser::parse_statement("COMMIT").unwrap();
-        assert!(SettingsCommand::from_statement(&commit).may_change_effective(&settings));
+        assert!(SettingsCommand::from_statement(&commit)
+            .unwrap()
+            .may_change_effective(&settings));
     }
 
     #[test]

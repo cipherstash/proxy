@@ -3,6 +3,7 @@ use super::{
     settings::{ConnectionSettings, SettingChange, SettingsCommand},
     KeysetIdentifier, SessionId,
 };
+use crate::error::Error;
 use crate::postgresql::{Name, OperationId};
 use sqltk::parser::ast::Statement;
 use std::{
@@ -40,20 +41,23 @@ impl EffectiveSettings {
     }
 }
 
-/// Projects a simple-query batch over a copy of the confirmed settings, yielding
+/// Projects a simple-query batch over a copy of the confirmed settings, returning
 /// each statement, its settings command, and whether it may change the
 /// effective settings after the statements before it succeed.
 pub(super) fn project_settings_effects<'a>(
     settings: &ConnectionSettings,
     statements: &'a [Statement],
-) -> impl Iterator<Item = (&'a Statement, SettingsCommand, bool)> + 'a {
+) -> Result<Vec<(&'a Statement, SettingsCommand, bool)>, Error> {
     let mut projected = settings.clone();
-    statements.iter().map(move |statement| {
-        let command = SettingsCommand::from_statement(statement);
-        let changes = command.may_change_effective(&projected);
-        projected.command_succeeded(&command, command.success_tag());
-        (statement, command, changes)
-    })
+    statements
+        .iter()
+        .map(|statement| {
+            let command = SettingsCommand::from_statement(statement)?;
+            let changes = command.may_change_effective(&projected);
+            projected.command_succeeded(&command, command.success_tag());
+            Ok((statement, command, changes))
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -159,12 +163,13 @@ impl SettingsProtocol {
         name: Name,
         statement: &Statement,
         settings: EffectiveSettings,
-    ) {
+    ) -> Result<(), Error> {
+        let command = SettingsCommand::from_statement(statement)?;
         let previous = self.prepared.insert(
             name.clone(),
             Prepared {
                 operation,
-                command: SettingsCommand::from_statement(statement),
+                command,
                 needs_mapping: eql_mapper::requires_type_check(statement),
                 settings,
                 literal_sensitive: false,
@@ -176,6 +181,7 @@ impl SettingsProtocol {
             metadata: MetadataSnapshot::default(),
             close: false,
         });
+        Ok(())
     }
     pub fn capture_literals(&mut self, name: &Name, sensitive: bool) {
         if let Some(prepared) = self.prepared.get_mut(name) {
@@ -258,9 +264,10 @@ impl SettingsProtocol {
         operation: OperationId,
         statements: &[Statement],
         settings: &ConnectionSettings,
-    ) -> bool {
+    ) -> Result<bool, Error> {
         let mut barrier = false;
-        let commands: VecDeque<_> = project_settings_effects(settings, statements)
+        let commands: VecDeque<_> = project_settings_effects(settings, statements)?
+            .into_iter()
             .map(|(_, command, changes)| {
                 barrier |= changes;
                 command
@@ -275,7 +282,7 @@ impl SettingsProtocol {
             },
         );
         self.boundary(operation);
-        barrier
+        Ok(barrier)
     }
     pub fn succeeded(&mut self, operation: OperationId) -> Option<SettingsCommand> {
         let pending = self.pending.get_mut(&operation)?;
@@ -543,22 +550,26 @@ mod protocol_regressions {
     use crate::postgresql::{parser::SqlParser, test_operation_id as operation_id};
     fn prepare(protocol: &mut SettingsProtocol, name: &Name) {
         let operation = operation_id();
-        protocol.prepare(
-            operation,
-            name.clone(),
-            &SqlParser::parse_statement("SELECT 1").unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                operation,
+                name.clone(),
+                &SqlParser::parse_statement("SELECT 1").unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol.prepared_or_bound(operation);
     }
     fn named_prepare(protocol: &mut SettingsProtocol, name: &Name, savepoint: &str) -> OperationId {
         let operation = operation_id();
-        protocol.prepare(
-            operation,
-            name.clone(),
-            &SqlParser::parse_statement(&format!("SAVEPOINT {savepoint}")).unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                operation,
+                name.clone(),
+                &SqlParser::parse_statement(&format!("SAVEPOINT {savepoint}")).unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         operation
     }
 
@@ -638,11 +649,13 @@ mod protocol_regressions {
         let original = named_prepare(&mut protocol, &name, "original");
         protocol.prepared_or_bound(original);
         let discard = operation_id();
-        protocol.simple_query(
-            discard,
-            &SqlParser::parse_statements("DISCARD ALL").unwrap(),
-            &ConnectionSettings::default(),
-        );
+        protocol
+            .simple_query(
+                discard,
+                &SqlParser::parse_statements("DISCARD ALL").unwrap(),
+                &ConnectionSettings::default(),
+            )
+            .unwrap();
         let later = named_prepare(&mut protocol, &name, "later");
         protocol.succeeded(discard);
         assert!(
@@ -696,12 +709,14 @@ mod protocol_regressions {
         let name = Name::from_static(b"statement");
         prepare(&mut protocol, &name);
         let rejected = operation_id();
-        protocol.prepare(
-            rejected,
-            name.clone(),
-            &SqlParser::parse_statement("SELECT 2").unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                rejected,
+                name.clone(),
+                &SqlParser::parse_statement("SELECT 2").unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol.failed(Some(rejected));
         protocol.ready(Some(operation_id()), true);
         protocol.close(
@@ -710,12 +725,14 @@ mod protocol_regressions {
             pg_proto::DescribeTarget::Statement,
             Default::default(),
         );
-        protocol.prepare(
-            operation_id(),
-            name.clone(),
-            &SqlParser::parse_statement("SELECT 3").unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                operation_id(),
+                name.clone(),
+                &SqlParser::parse_statement("SELECT 3").unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol
             .bind(
                 operation_id(),
@@ -780,7 +797,9 @@ mod protocol_regressions {
             let mut protocol = SettingsProtocol::default();
             let statements = SqlParser::parse_statements(sql).unwrap();
             assert!(
-                !protocol.simple_query(operation_id(), &statements, &ConnectionSettings::default()),
+                !protocol
+                    .simple_query(operation_id(), &statements, &ConnectionSettings::default())
+                    .unwrap(),
                 "{sql}"
             );
         }
@@ -802,12 +821,14 @@ mod protocol_regressions {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"insert");
         let parse = operation_id();
-        protocol.prepare(
-            parse,
-            name.clone(),
-            &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ($1)").unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                parse,
+                name.clone(),
+                &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ($1)").unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol.prepared_or_bound(parse);
         let mut tenant_b = ConnectionSettings::default();
         tenant_b.execution_succeeded(
@@ -844,13 +865,15 @@ mod protocol_regressions {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"insert_literal");
         let parse = operation_id();
-        protocol.prepare(
-            parse,
-            name.clone(),
-            &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ('literal')")
-                .unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                parse,
+                name.clone(),
+                &SqlParser::parse_statement("INSERT INTO encrypted (secret) VALUES ('literal')")
+                    .unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol.capture_literals(&name, true);
         protocol.prepared_or_bound(parse);
         let mut tenant_b = ConnectionSettings::default();
@@ -881,12 +904,14 @@ mod protocol_regressions {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"keyset");
         let parse = operation_id();
-        protocol.prepare(
-            parse,
-            name.clone(),
-            &SqlParser::parse_statement("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
-            EffectiveSettings::new(&ConnectionSettings::default()),
-        );
+        protocol
+            .prepare(
+                parse,
+                name.clone(),
+                &SqlParser::parse_statement("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
+                EffectiveSettings::new(&ConnectionSettings::default()),
+            )
+            .unwrap();
         protocol.prepared_or_bound(parse);
         let bind = operation_id();
         protocol
@@ -918,11 +943,13 @@ mod protocol_regressions {
     fn failed_simple_query_settings_change_stays_in_flight_until_ready() {
         let mut protocol = SettingsProtocol::default();
         let query = operation_id();
-        assert!(protocol.simple_query(
-            query,
-            &SqlParser::parse_statements("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
-            &ConnectionSettings::default(),
-        ));
+        assert!(protocol
+            .simple_query(
+                query,
+                &SqlParser::parse_statements("SET CIPHERSTASH.KEYSET_NAME = 'tenant'").unwrap(),
+                &ConnectionSettings::default(),
+            )
+            .unwrap());
         protocol.failed(Some(query));
         assert!(protocol.in_flight());
         protocol.ready(Some(query), true);
@@ -939,12 +966,14 @@ mod protocol_regressions {
         let mut protocol = SettingsProtocol::default();
         let name = Name::from_static(b"commit");
         let parse = operation_id();
-        protocol.prepare(
-            parse,
-            name.clone(),
-            &parse_sql("COMMIT"),
-            EffectiveSettings::new(&connection),
-        );
+        protocol
+            .prepare(
+                parse,
+                name.clone(),
+                &parse_sql("COMMIT"),
+                EffectiveSettings::new(&connection),
+            )
+            .unwrap();
         protocol.prepared_or_bound(parse);
         let bind = operation_id();
         protocol
