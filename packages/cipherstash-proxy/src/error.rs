@@ -200,6 +200,12 @@ pub enum ConfigError {
     InvalidParameter { name: String, value: String },
 
     #[error(
+        "Invalid --database-url: {reason}. For help visit {}#config-invalid-database-url",
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidDatabaseUrl { reason: String },
+
+    #[error(
         "Invalid Workspace CRN: {crn}. CRN format is `crn:{{region}}.aws:{{workspace_id}}` For help visit {}",
         ERROR_DOC_CONFIG_URL
     )]

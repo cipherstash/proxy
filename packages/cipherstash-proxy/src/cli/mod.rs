@@ -58,20 +58,23 @@ pub struct Args {
     pub db_password: Option<String>,
 
     /// Disable inbound (client-facing) TLS: the proxy listens for client
-    /// connections in plaintext. Overrides any CS_TLS__* env / config.
+    /// connections in plaintext. Overrides any CS_TLS__* env / config and
+    /// CS_SERVER__REQUIRE_TLS.
     /// Use for local development only. Does not affect the connection from the
     /// proxy to the database.
     #[arg(long, verbatim_doc_comment, conflicts_with = "tls")]
     pub no_tls: bool,
 
-    /// Require inbound (client-facing) TLS. Startup fails if TLS is not
-    /// configured or the certificate/key are invalid. Without this flag the
-    /// proxy uses TLS when configured and falls back to plaintext otherwise.
+    /// Require inbound (client-facing) TLS, as CS_SERVER__REQUIRE_TLS does:
+    /// clients that do not use TLS are rejected, and startup fails if TLS is
+    /// not configured. Without this flag the proxy uses TLS when configured
+    /// and listens in plaintext otherwise.
     #[arg(long, verbatim_doc_comment)]
     pub tls: bool,
 
-    /// Enable verbose (debug) logging. Without it the proxy logs errors only.
-    /// An explicit --log-level / CS_LOG__LEVEL or a config file takes precedence.
+    /// Enable verbose (debug) logging. Without it, the proxy run in a
+    /// terminal logs errors only. An explicit --log-level / CS_LOG__LEVEL
+    /// takes precedence.
     #[arg(long, verbatim_doc_comment)]
     pub debug: bool,
 

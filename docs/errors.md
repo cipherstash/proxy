@@ -46,6 +46,7 @@
 
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
+  - [Invalid database URL](#config-invalid-database-url)
   - [Network configuration change requires restart](#config-network-change-requires-restart)
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -1035,6 +1036,27 @@ Encrypted jsonb entry has an invalid selector '{selector}'.
 
 # Configuration errors
 
+
+## Invalid database URL <a id='config-invalid-database-url'></a>
+
+The connection string passed with `--database-url` cannot be applied.
+
+### Error message
+
+```
+Invalid --database-url: {reason}.
+```
+
+### How to fix
+
+`--database-url` sets only the user, password, host, port and database name.
+Remove any other connection option from the URL, and use a single TCP host and port.
+Proxy connects to the database with `sslmode=prefer`, so remove `sslmode` and other `ssl` options.
+To verify the database certificate, set `CS_DATABASE__WITH_TLS_VERIFICATION=true`.
+To connect to the database without TLS, set `CS_DEVELOPMENT__DISABLE_DATABASE_TLS=true`.
+Percent-encode special characters in the password, and prefer `CS_DATABASE__PASSWORD` so the password is not exposed on the command line.
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 ## Database <a id='config-missing-or-invalid-tls'></a>
 
