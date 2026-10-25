@@ -510,7 +510,8 @@ A `COPY ... FROM` into a table with no encrypted columns, or into only the plain
 A `COPY ... TO` of a table or of a query that reads is forwarded, and returns encrypted columns as ciphertext, as Proxy does not decrypt `COPY` data.
 A `COPY ... FROM` into a table Proxy cannot resolve is refused as an [Unresolvable table](#mapping-unresolvable-table) or an [Ambiguous table](#mapping-ambiguous-table).
 That includes a table created with `CREATE TABLE ... (LIKE ...)` or `CREATE TABLE ... AS`, whose columns Proxy does not know.
-When no columns are encrypted, Proxy forwards every `COPY`.
+When no columns are encrypted, Proxy does not check the table of a `COPY`.
+A `COPY` after DDL that may change which columns are encrypted, in the same simple query, is still refused, as an `INSERT` would be.
 
 ### How to fix
 

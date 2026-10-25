@@ -1422,7 +1422,9 @@ fn check_copy_into(
             .map(|column| table.get_column(column).map_err(|_| unknown(column)))
             .collect::<Result<_, _>>()?
     };
-    // A table with no columns Proxy knows, such as one created with `AS`
+    // A defence: a table with no columns Proxy knows. A loaded table has its
+    // columns, and DDL that leaves a table's columns unknown, such as
+    // `CREATE TABLE ... AS`, fails closed before a `COPY` in the same Query.
     if targets.is_empty() {
         return Err(MappingError::UnresolvableTable {
             table: table_name.to_string(),

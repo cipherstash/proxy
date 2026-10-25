@@ -187,6 +187,10 @@ fn contains_copy_from_stdin(tokens: &[TokenWithSpan]) -> bool {
         .any(is_copy_from_stdin)
 }
 
+/// Whether `statement` is a `COPY` with `FROM` followed by `STDIN` anywhere in
+/// it. That also matches a query that reads a table named `stdin`, as in
+/// `COPY (SELECT * FROM stdin) TO STDOUT`, which only makes Proxy parse the
+/// Query one statement at a time, and so fails closed.
 fn is_copy_from_stdin(statement: &[TokenWithSpan]) -> bool {
     let mut significant = statement
         .iter()
