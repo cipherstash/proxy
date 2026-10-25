@@ -96,6 +96,17 @@ impl Default for LogConfig {
 }
 
 impl LogConfig {
+    /// This config with `level` as the default level, used when no log level
+    /// was set explicitly.
+    /// Every other setting, and any per-target level that was set, is kept.
+    pub fn with_default_level(&self, level: LogLevel) -> Self {
+        LogConfig {
+            level,
+            targets: self.targets.with_default_level(level),
+            ..self.clone()
+        }
+    }
+
     pub fn with_level(level: LogLevel) -> Self {
         LogConfig {
             format: LogConfig::default_log_format(),
@@ -193,5 +204,28 @@ mod tests {
                 assert!(matches!(config.unwrap_err(), Error::Config(_)));
             });
         });
+    }
+
+    #[test]
+    /// The quiet default replaces only the level: settings and explicit
+    /// per-target levels from env or config are kept.
+    fn with_default_level_keeps_loaded_settings() {
+        use crate::config::LogConfig;
+        let mut loaded = LogConfig {
+            output: LogOutput::Stderr,
+            format: LogFormat::Structured,
+            slow_statements: true,
+            ..Default::default()
+        };
+        loaded.targets.mapper_level = LogLevel::Debug;
+
+        let config = loaded.with_default_level(LogLevel::Error);
+
+        assert_eq!(config.level, LogLevel::Error);
+        assert_eq!(config.output, LogOutput::Stderr);
+        assert_eq!(config.format, LogFormat::Structured);
+        assert!(config.slow_statements);
+        assert_eq!(config.targets.mapper_level, LogLevel::Debug);
+        assert_eq!(config.targets.protocol_level, LogLevel::Error);
     }
 }

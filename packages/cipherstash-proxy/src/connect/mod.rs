@@ -112,15 +112,24 @@ pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool)
                 report_listening(&listener);
                 return listener;
             }
-            // The configured port is in use, but it's only the default (not
-            // explicitly set), so fall back to an OS-assigned port and report it
-            // rather than failing.
-            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && allow_random_fallback => {
+            // The port is still in use after retrying, but it's only the default
+            // (not explicitly set), so fall back to an OS-assigned port and
+            // report it rather than failing.
+            Err(err)
+                if err.kind() == std::io::ErrorKind::AddrInUse
+                    && allow_random_fallback
+                    && retry_count > MAX_RETRY_COUNT =>
+            {
                 match TcpListener::bind(format!("{}:0", server.host)).await {
                     Ok(listener) => {
-                        println!(
+                        eprintln!(
                             "Port {} is already in use; listening on an OS-assigned port instead.",
                             server.port
+                        );
+                        warn!(
+                            msg =
+                                "Default port is already in use; listening on an OS-assigned port",
+                            port = server.port
                         );
                         report_listening(&listener);
                         return listener;
@@ -187,5 +196,28 @@ mod tests {
 
         assert_ne!(bound_port, occupied_port);
         assert_ne!(bound_port, 0);
+    }
+
+    #[tokio::test]
+    /// The random-port fallback only applies once the retries are exhausted,
+    /// so a port that frees up during the retries is still bound.
+    async fn bind_retries_default_port_before_falling_back() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+
+        let server = ServerConfig {
+            host: "127.0.0.1".to_string(),
+            port: occupied_port,
+            ..ServerConfig::default()
+        };
+
+        tokio::spawn(async move {
+            time::sleep(Duration::from_millis(150)).await;
+            drop(occupied);
+        });
+
+        let listener = bind_with_retry(&server, true).await;
+
+        assert_eq!(listener.local_addr().unwrap().port(), occupied_port);
     }
 }
