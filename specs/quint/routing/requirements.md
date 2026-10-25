@@ -58,7 +58,7 @@ Out:
 | A1 | A coverage gap is nondeterministic: any type-checked statement may hit one. | Over-approximates EQL Mapper's incompleteness instead of modelling SQL. |
 | A2 | The encrypt config covers every encrypted column in the catalog, including one whose table name Proxy cannot resolve. | `has_encrypted_columns` gates the unresolvable-table refusal (#486). If an encrypted table were missing from the config, S2 would not protect it. |
 | A3 | Statement kinds Proxy never type checks (`COPY ... FROM STDIN`, `DO`, `CALL`) carry no values for a column. Switched off in the `uncheckedWrites` instance. | `requires_type_check` forwards these as written. |
-| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. Tested through Proxy for F1, F2 (`COPY ... FROM STDIN`) and F3 in `packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` (#489). |
+| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. Tested through Proxy for F1 and F2 (`COPY ... FROM STDIN`) in `packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` (#489). |
 | A5 | A schema publication and the DDL that caused it are one step. | Publication completes before `ReadyForQuery` reaches the DDL's own client. |
 
 ## Properties
@@ -74,7 +74,7 @@ Out:
 
 - **F1: stale routes under concurrent DDL.** Proxy routes a prepared statement once, at Parse, and a transaction pins the schema at `BEGIN`. If another connection makes a column encrypted in between, Proxy forwards plaintext for it. Today PostgreSQL rejects that write (A4), so S3 holds in production, but it holds because of PostgreSQL rather than Proxy.
 - **F2: kinds Proxy never type checks.** If A3 is false, a `COPY ... FROM STDIN`, `DO` or `CALL` that writes to an encrypted column is forwarded with plaintext. The model cannot tell how likely that is; it shows that nothing in routing prevents it.
-- **F3: Parse under `UNSAFE_DISABLE_MAPPING`, Bind after it is turned off.** The Parse is forwarded and stores no Statement, so a later Bind with mapping enabled again forwards plaintext for an encrypted column. Bind only checks the setting in force at Bind to pass a statement through, not the other way round. The same code shape is on `main` (`parse_handler`'s early return and `bind_handler`'s `knowledge.statement == None` path). PostgreSQL's domain check (A4) is again what rejects the value.
+- **F3: Parse under `UNSAFE_DISABLE_MAPPING`, Bind after it is turned off.** The Parse is forwarded and stores no Statement, so a later Bind with mapping enabled again forwards plaintext for an encrypted column. Bind only checks the setting in force at Bind to pass a statement through, not the other way round. The same code shape is on `main` (`parse_handler`'s early return and `bind_handler`'s `knowledge.statement == None` path). PostgreSQL's domain check (A4) is again what rejects the value. Through Proxy, this is not reproduced on `main`: an integration test in #489 shows Proxy refuses the Bind with `PreparedSettingsChanged`, because the mapping setting changed since the Parse. The model does not represent that check.
 
 None of these is confirmed as a reachable plaintext leak in production: each needs a test against Proxy and PostgreSQL first, written as a failing test before any fix.
 
