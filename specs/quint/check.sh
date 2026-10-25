@@ -29,7 +29,9 @@ verify_holds() {
     echo "$out" >&2
     fail "$main should satisfy $invariant"
   fi
-  grep -E "distinct states found|No violation found" <<<"$out"
+  # The summary is informational: a change in Quint's wording must not fail
+  # a check that passed.
+  grep -E "distinct states found|No violation found" <<<"$out" || true
 }
 
 # verify_violated INSTANCE INVARIANT [FILE]: TLC must report a counterexample,

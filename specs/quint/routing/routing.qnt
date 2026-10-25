@@ -435,7 +435,7 @@ module routing {
   val noPlaintextAtRest: bool =
     atRest.forall(r => r.payload == Cipher or r.unsafe)
 
-  /// S4 (open decision D1): Proxy never forwards plaintext for a column its
+  /// S4 (not required; D1 decided): Proxy never forwards plaintext for a column its
   /// schema says is encrypted at the moment it sends the write.
   val noPlaintextToCurrentlyEncrypted: bool =
     lastSent.forall(w => plainSafe(w) or w.currentView != VEncrypted)
