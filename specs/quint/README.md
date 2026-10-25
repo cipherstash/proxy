@@ -18,8 +18,8 @@ The Quint CLI is pinned in `package-lock.json`; install it here rather than glob
 cd specs/quint
 npm ci --ignore-scripts
 ./check.sh            # typecheck, scenario tests, simulation (about 20 s)
-./check.sh tlc        # exhaustive TLC checks, including expected findings (about 7 min)
-./check.sh mutations  # injected faults must each be caught (about 30 s)
+./check.sh tlc        # exhaustive TLC checks, including expected findings (about 10 min)
+./check.sh mutations  # injected faults must each be caught (about 1 min)
 ```
 
 The first `quint verify` downloads the Apalache distribution, which bundles TLC, into `~/.quint`.

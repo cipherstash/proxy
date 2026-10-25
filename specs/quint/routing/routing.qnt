@@ -33,12 +33,6 @@ module routing {
   /// Statement kinds Proxy never type checks (`COPY ... FROM STDIN`, `DO`,
   /// `CALL`) may write data. Assumption A3.
   const UNCHECKED_WRITES: bool
-  /// Candidate fix for open decision D2: a Bind refuses a statement whose
-  /// Parse was forwarded only because mapping was disabled, once mapping is
-  /// enabled again. False is the behaviour as built.
-  const BIND_RECHECKS_MAPPING: bool
-  /// The client may use `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
-  const UNSAFE_SETTING: bool
 
   // ---------------------------------------------------------------------
   // Types
@@ -71,9 +65,9 @@ module routing {
   /// One immutable committed schema snapshot as a connection sees it.
   type Snapshot = { view: str -> View, encConfigured: bool }
 
-  /// What Proxy keeps for a prepared statement: the route its Parse took and
-  /// the snapshot it was routed against.
-  type Prepared = { stmt: Stmt, route: Route, routedAt: Snapshot }
+  /// What Proxy keeps for a prepared statement: the route its Parse took, the
+  /// snapshot it was routed against, and whether mapping was disabled then.
+  type Prepared = { stmt: Stmt, route: Route, routedAt: Snapshot, unsafeAtParse: bool }
 
   type Slot = Empty | Held(Prepared)
 
@@ -101,6 +95,7 @@ module routing {
     | Refused(Set[Route])
     | BatchRefused
     | UnknownStatementRefused
+    | SettingsChangedRefused
     | DbRejected
 
   type Conn = {
@@ -294,13 +289,15 @@ module routing {
         }
       else
         all {
-          conn' = { ...conn, prepared: conn.prepared.set(name, Held({ stmt: s, route: r, routedAt: snap })) },
+          conn' = { ...conn, prepared: conn.prepared.set(name, Held({ stmt: s, route: r, routedAt: snap, unsafeAtParse: conn.unsafe })) },
           outcome' = Idle,
         },
     }
 
   /// Bind and Execute a prepared statement. Bind reuses the route its Parse
-  /// took; it does not route again.
+  /// took; it does not route again. It refuses a statement Proxy type checks
+  /// when the mapping setting differs from the one at Parse
+  /// (`SettingsProtocol::bind`, `MappingError::PreparedSettingsChanged`).
   action bindExecute(name: str): bool = all {
     conn' = conn,
     dbType' = dbType,
@@ -317,8 +314,9 @@ module routing {
         val writes =
           if (p.stmt.op == Write) Set(sent(p.stmt, r, false, conn.unsafe, p.routedAt, effective))
           else Set()
-        if (BIND_RECHECKS_MAPPING and r == Forward(MappingDisabled) and not(conn.unsafe))
-          all { lastSent' = Set(), atRest' = atRest, outcome' = Refused(Set(Refuse)) }
+        val settingsChanged = p.stmt.kind != Unchecked and conn.unsafe != p.unsafeAtParse
+        if (settingsChanged)
+          all { lastSent' = Set(), atRest' = atRest, outcome' = SettingsChangedRefused }
         else
           deliver(writes, conn.unsafe, Set(r))
     },
@@ -366,7 +364,6 @@ module routing {
 
   /// A successfully executed `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
   action setUnsafe(on: bool): bool = all {
-    UNSAFE_SETTING,
     conn' = { ...conn, unsafe: on },
     dbType' = dbType,
     unresolvable' = unresolvable,
@@ -473,6 +470,9 @@ module routing {
   /// The batch rule refused a Query mixing a mapped statement and a fallback.
   val batchRuleFired: bool = outcome == BatchRefused
 
+  /// A Bind was refused because the mapping setting changed since its Parse.
+  val settingsChangedRefused: bool = outcome == SettingsChangedRefused
+
   /// An unknown prepared statement name was refused at Bind.
   val unknownBindRefused: bool = outcome == UnknownStatementRefused
 
@@ -485,7 +485,7 @@ module routing {
 }
 
 /// As built, with a stable schema and PostgreSQL's domain check switched
-/// off, so that S3 rests on Proxy alone. S1, S2 and S3 fail (F3).
+/// off, so that S3 rests on Proxy alone. S1, S2 and S3 hold.
 module asBuilt {
   import routing(
     COLS = Set("a", "b"),
@@ -493,39 +493,11 @@ module asBuilt {
     CONCURRENT_DDL = false,
     PG_DOMAIN_CHECK = false,
     UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = false,
-    UNSAFE_SETTING = true,
   ).*
 }
 
-/// As built, for a client that never disables mapping: S1, S2 and S3 hold.
-module asBuiltNoUnsafe {
-  import routing(
-    COLS = Set("a", "b"),
-    NAMES = Set("s"),
-    CONCURRENT_DDL = false,
-    PG_DOMAIN_CHECK = false,
-    UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = false,
-    UNSAFE_SETTING = false,
-  ).*
-}
-
-/// The candidate fix for D2 under the same conditions: S1, S2 and S3 hold.
-module bindRechecks {
-  import routing(
-    COLS = Set("a", "b"),
-    NAMES = Set("s"),
-    CONCURRENT_DDL = false,
-    PG_DOMAIN_CHECK = false,
-    UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = true,
-    UNSAFE_SETTING = true,
-  ).*
-}
-
-/// Concurrent DDL with PostgreSQL's domain check, as in production, and the
-/// candidate fix. S1, S2 and S3 hold; S4 fails (F1).
+/// Concurrent DDL with PostgreSQL's domain check, as in production.
+/// S1, S2 and S3 hold; S4 fails (F1).
 module concurrentDdl {
   import routing(
     COLS = Set("a", "b"),
@@ -533,8 +505,6 @@ module concurrentDdl {
     CONCURRENT_DDL = true,
     PG_DOMAIN_CHECK = true,
     UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = true,
-    UNSAFE_SETTING = true,
   ).*
 }
 
@@ -546,8 +516,6 @@ module concurrentDdlNoDomainCheck {
     CONCURRENT_DDL = true,
     PG_DOMAIN_CHECK = false,
     UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = true,
-    UNSAFE_SETTING = true,
   ).*
 }
 
@@ -559,7 +527,5 @@ module uncheckedWrites {
     CONCURRENT_DDL = false,
     PG_DOMAIN_CHECK = false,
     UNCHECKED_WRITES = true,
-    BIND_RECHECKS_MAPPING = true,
-    UNSAFE_SETTING = true,
   ).*
 }

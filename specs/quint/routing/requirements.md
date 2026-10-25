@@ -15,6 +15,7 @@ It does not execute Proxy's Rust code.
 - The simple Query batch rule in `Frontend::query_handler` on #484: a fallback must not forward a batch that also holds a statement that needs mapping.
 - `eql_mapper::requires_type_check` and `eql_mapper::writes_data` in `packages/eql-mapper/src/eql_mapper.rs`.
 - `Context::begin_bind` and `Context::finish_parse` in `packages/cipherstash-proxy/src/postgresql/context/lifecycle.rs`: Bind reuses the Statement its Parse stored, and a Parse that was forwarded stores none.
+- `SettingsProtocol::bind` in `packages/cipherstash-proxy/src/postgresql/context/settings_protocol.rs`: for a statement `requires_type_check` accepts, Bind is refused with `MappingError::PreparedSettingsChanged` when the mapping setting differs from the one at Parse.
 - The Proxy glossary in `packages/cipherstash-proxy/CONTEXT.md`: effective schema, committed schema snapshot, schema publication, passthrough conditions.
 - #486 (refuse writes to a table Proxy cannot resolve) and the batch DDL and temporary table work on #484 (temporary tables in the effective schema).
 
@@ -65,21 +66,20 @@ Out:
 
 | ID | Property | Kind | Rationale | Status |
 |---|---|---|---|---|
-| S1 | Proxy never forwards plaintext for a column that its schema said was encrypted when it routed the statement, unless mapping was disabled. | Safety | Core promise of refuse-by-default routing. | Intended. Violated as built (F3); holds with the D2 candidate fix. |
+| S1 | Proxy never forwards plaintext for a column that its schema said was encrypted when it routed the statement, unless mapping was disabled. | Safety | Core promise of refuse-by-default routing. | Intended and holds as built. |
 | S2 | While encrypted columns are configured, Proxy never forwards plaintext for a column whose table it cannot resolve. | Safety | Unresolvable-table refusal (#486). | Intended and implemented on #484. |
-| S3 | No write stores plaintext in a column that is encrypted at the time of the write, except a write made with mapping disabled. Values already in a column when DDL later makes it encrypted are out of scope. | Safety | The end-to-end promise. | Holds with a stable schema on Proxy alone once D2 is fixed; with concurrent DDL it rests on A4 (F1). |
+| S3 | No write stores plaintext in a column that is encrypted at the time of the write, except a write made with mapping disabled. Values already in a column when DDL later makes it encrypted are out of scope. | Safety | The end-to-end promise. | Holds as built with a stable schema on Proxy alone; with concurrent DDL it rests on A4 (F1). |
 | S4 | Proxy never forwards plaintext for a column that its schema says is encrypted at the moment it sends the write. | Safety | Stronger than S1: also covers routes that went stale. | Not required for now (D1 decided). Violated by F1. |
 
 ## Findings
 
 - **F1: stale routes under concurrent DDL.** Proxy routes a prepared statement once, at Parse, and a transaction pins the schema at `BEGIN`. If another connection makes a column encrypted in between, Proxy forwards plaintext for it. Today PostgreSQL rejects that write (A4), so S3 holds in production, but it holds because of PostgreSQL rather than Proxy.
 - **F2: kinds Proxy never type checks.** If A3 is false, a `COPY ... FROM STDIN`, `DO` or `CALL` that writes to an encrypted column is forwarded with plaintext. The model cannot tell how likely that is; it shows that nothing in routing prevents it.
-- **F3: Parse under `UNSAFE_DISABLE_MAPPING`, Bind after it is turned off.** The Parse is forwarded and stores no Statement, so a later Bind with mapping enabled again forwards plaintext for an encrypted column. Bind only checks the setting in force at Bind to pass a statement through, not the other way round. The same code shape is on `main` (`parse_handler`'s early return and `bind_handler`'s `knowledge.statement == None` path). PostgreSQL's domain check (A4) is again what rejects the value. Through Proxy, this is not reproduced on `main`: an integration test in #489 shows Proxy refuses the Bind with `PreparedSettingsChanged`, because the mapping setting changed since the Parse. The model does not represent that check.
+- **F3 (retracted 2026-10-25).** An earlier version of this model left out the Bind settings check in `SettingsProtocol::bind`. It reported that a statement prepared under `UNSAFE_DISABLE_MAPPING` and bound after mapping is enabled again forwards plaintext. Proxy built from `main` refuses that Bind with `PreparedSettingsChanged`, as an integration test in #489 shows. The model now includes the check, and mutation M4 shows S1 depends on it. The lesson: a design model reviewed against the code by hand can miss a guard, and a Quint Connect adapter would have caught this one.
 
-None of these is confirmed as a reachable plaintext leak in production: each needs a test against Proxy and PostgreSQL first, written as a failing test before any fix.
+Neither F1 nor F2 is confirmed as a reachable plaintext leak in production: each needs a test against Proxy and PostgreSQL first, written as a failing test before any fix.
 
-## Open decisions
+## Decisions
 
 - **D1** (decided 2026-10-25): For now, PostgreSQL's type and domain checks (A4) are the accepted guard against routes made stale by concurrent DDL. Proxy will not route again at Bind or invalidate prepared routes, so S4 is not a requirement. Integration tests in #489 prove that PostgreSQL rejects the stale write. Revisit if A4 stops holding, for example for a domain whose CHECK accepts arbitrary JSON.
-- **D2**: What should a Bind do with a statement whose Parse was passed through only because mapping was disabled, once mapping is enabled again? The model's candidate (`BIND_RECHECKS_MAPPING`) refuses it, which makes S1 and S3 hold. Routing it at Bind is the alternative.
-- **D3**: Should Proxy refuse, or type check, writes by statement kinds it does not type check today (A3, F2)?
+- **D3** (decided 2026-10-25): Proxy will refuse `COPY ... FROM` into encrypted columns on `main`, as release/2.2 does (#483). `DO` and `CALL` stay forwarded, as a documented limit: their values are inside server-side code that Proxy cannot inspect.

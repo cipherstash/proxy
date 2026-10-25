@@ -13,8 +13,6 @@ module routingAsBuiltTest {
     CONCURRENT_DDL = true,
     PG_DOMAIN_CHECK = false,
     UNCHECKED_WRITES = true,
-    BIND_RECHECKS_MAPPING = false,
-    UNSAFE_SETTING = true,
   ).* from "./routing"
 
   pure val aEncrypted = Map("a" -> Encrypted, "b" -> Native)
@@ -105,19 +103,23 @@ module routingAsBuiltTest {
       .then(simpleQuery([stmt(Write, "a", Checked)]))
       .expect(and { unsafePlaintextStored, safety })
 
-  /// Finding F3: a statement prepared while mapping was disabled keeps its
-  /// passthrough route after mapping is enabled again.
-  run f3UnsafeParseBindsPlaintextTest =
+  /// A statement prepared while mapping was disabled is refused at Bind once
+  /// mapping is enabled again (`MappingError::PreparedSettingsChanged`).
+  run settingsChangedRefusedAfterUnsafeParseTest =
     initWith(aEncrypted, Set(), false)
       .then(setUnsafe(true))
       .then(parse("s", stmt(Write, "a", Checked)))
       .then(setUnsafe(false))
       .then(bindExecute("s"))
-      .expect(and {
-        outcome == Executed(Set(Forward(MappingDisabled))),
-        not(noPlaintextToKnownEncrypted),
-        not(noPlaintextAtRest),
-      })
+      .expect(and { settingsChangedRefused, lastSent == Set(), safety })
+
+  /// The other direction: prepared with mapping on, bound with it off.
+  run settingsChangedRefusedAfterMappedParseTest =
+    initWith(aEncrypted, Set(), false)
+      .then(parse("s", stmt(Write, "a", Checked)))
+      .then(setUnsafe(true))
+      .then(bindExecute("s"))
+      .expect(and { settingsChangedRefused, lastSent == Set(), atRest == Set() })
 
   /// Finding F1: a statement prepared against a native column keeps its
   /// route after another connection makes the column encrypted.
@@ -163,30 +165,20 @@ module routingAsBuiltTest {
       })
 }
 
-/// Scenarios against the candidate fix for D2, with PostgreSQL's domain check.
-module routingCandidateTest {
+/// Scenarios with PostgreSQL's domain check, as in production.
+module routingDomainCheckTest {
   import routing(
     COLS = Set("a", "b"),
     NAMES = Set("s"),
     CONCURRENT_DDL = true,
     PG_DOMAIN_CHECK = true,
     UNCHECKED_WRITES = false,
-    BIND_RECHECKS_MAPPING = true,
-    UNSAFE_SETTING = true,
   ).* from "./routing"
 
   pure val aEncrypted = Map("a" -> Encrypted, "b" -> Native)
   pure val allNative = Map("a" -> Native, "b" -> Native)
 
   pure def stmt(op: Op, col: str, kind: Kind): Stmt = { op: op, col: col, kind: kind }
-
-  run unsafeParseRefusedAtBindTest =
-    initWith(aEncrypted, Set(), false)
-      .then(setUnsafe(true))
-      .then(parse("s", stmt(Write, "a", Checked)))
-      .then(setUnsafe(false))
-      .then(bindExecute("s"))
-      .expect(and { outcome == Refused(Set(Refuse)), safety })
 
   run unsafeParsePassesThroughWhileUnsafeTest =
     // Forwarded as written; the domain check then rejects the plaintext.

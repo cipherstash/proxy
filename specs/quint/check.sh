@@ -54,15 +54,15 @@ basic() {
   "${QUINT[@]}" typecheck "$TESTS"
 
   echo "== scenario tests"
-  for main in routingAsBuiltTest routingCandidateTest; do
+  for main in routingAsBuiltTest routingDomainCheckTest; do
     "${QUINT[@]}" test "$TESTS" --main "$main" --backend typescript --seed "$SEED"
   done
 
   echo "== simulation"
-  "${QUINT[@]}" run "$MODEL" --main bindRechecks --backend typescript \
+  "${QUINT[@]}" run "$MODEL" --main asBuilt --backend typescript \
     --max-samples=2000 --max-steps=12 --seed="$SEED" --invariant safety \
     --witnesses ciphertextStored readFellBack statementRefused batchRuleFired \
-      unknownBindRefused unsafePlaintextStored
+      unknownBindRefused settingsChangedRefused unsafePlaintextStored
   "${QUINT[@]}" run "$MODEL" --main concurrentDdl --backend typescript \
     --max-samples=2000 --max-steps=12 --seed="$SEED" --invariant safety \
     --witnesses ciphertextStored dbRejected
@@ -70,21 +70,18 @@ basic() {
 
 tlc() {
   # Properties that must hold.
-  verify_holds asBuiltNoUnsafe safety
-  verify_holds bindRechecks safety
+  verify_holds asBuilt safety
   verify_holds concurrentDdl safety
 
   # Findings: each counterexample must still exist. When one stops existing,
   # the behaviour changed; update requirements.md and this list together.
-  verify_violated asBuilt noPlaintextToKnownEncrypted                 # F3
-  verify_violated asBuilt noPlaintextToUnresolvable                   # F3
   verify_violated concurrentDdl noPlaintextToCurrentlyEncrypted       # F1
   verify_violated concurrentDdlNoDomainCheck noPlaintextAtRest        # F1
   verify_violated uncheckedWrites noPlaintextToKnownEncrypted         # F2
 }
 
 # mutate NAME FROM TO INVARIANT: replace FROM with TO in a copy of the model
-# and require TLC to find a violation of INVARIANT in the bindRechecks
+# and require TLC to find a violation of INVARIANT in the asBuilt
 # instance.
 mutate() {
   local name=$1 from=$2 to=$3 invariant=$4 dir file
@@ -94,7 +91,7 @@ mutate() {
   grep -qF -- "$from" "$file" || fail "mutation $name: pattern not found"
   FROM=$from TO=$to perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/' "$file"
   echo "== mutation $name"
-  verify_violated bindRechecks "$invariant" "$file"
+  verify_violated asBuilt "$invariant" "$file"
   rm -rf "$dir"
 }
 
@@ -113,6 +110,11 @@ mutations() {
   mutate M3-no-batch-rule \
     "else if (batchRefused(routes))" \
     "else if (false)" \
+    noPlaintextToKnownEncrypted
+  # M4: Bind ignores a change to the mapping setting since Parse.
+  mutate M4-no-bind-settings-check \
+    "val settingsChanged = p.stmt.kind != Unchecked and conn.unsafe != p.unsafeAtParse" \
+    "val settingsChanged = false" \
     noPlaintextToKnownEncrypted
 }
 
