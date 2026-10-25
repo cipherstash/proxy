@@ -4,6 +4,7 @@ use crate::{
     tls, DatabaseConfig,
 };
 use socket2::{SockRef, TcpKeepalive};
+use std::io::IsTerminal;
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -122,10 +123,12 @@ pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool)
             {
                 match TcpListener::bind(format!("{}:0", server.host)).await {
                     Ok(listener) => {
-                        eprintln!(
-                            "Port {} is already in use; listening on an OS-assigned port instead.",
-                            server.port
-                        );
+                        if std::io::stderr().is_terminal() {
+                            eprintln!(
+                                "Port {} is already in use; listening on an OS-assigned port instead.",
+                                server.port
+                            );
+                        }
                         warn!(
                             msg =
                                 "Default port is already in use; listening on an OS-assigned port",
@@ -159,13 +162,16 @@ pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool)
     }
 }
 
-/// Report the address the proxy is listening on. Uses `println!` so the
-/// listening address (including an OS-assigned fallback port) is always visible,
-/// even when logging is quiet.
+/// Report the address the proxy is listening on. In a terminal it is also
+/// printed, so the listening address (including an OS-assigned fallback port)
+/// is visible even when logging is quiet. Without a terminal the log line is
+/// enough, and plain text would break a structured log stream.
 fn report_listening(listener: &TcpListener) {
     match listener.local_addr() {
         Ok(addr) => {
-            println!("CipherStash Proxy listening on {addr}");
+            if std::io::stdout().is_terminal() {
+                println!("CipherStash Proxy listening on {addr}");
+            }
             info!(msg = "Server waiting for connections", address = %addr);
         }
         Err(_) => {

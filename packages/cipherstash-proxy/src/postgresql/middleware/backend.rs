@@ -406,7 +406,7 @@ impl<S: EncryptionService> Backend<S> {
     ///
     /// A database error forwarded to the client is normal proxy operation, and
     /// the client surfaces it, so it is logged concisely at DEBUG level.
-    /// Proxy-generated errors are logged at ERROR level by the frontend.
+    /// Errors that Proxy itself generates are logged by the frontend.
     fn error_response_handler(&mut self, response: &pg_proto::DiagnosticResponse) {
         let field = |code: u8| {
             response

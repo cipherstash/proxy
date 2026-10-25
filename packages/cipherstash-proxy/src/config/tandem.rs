@@ -75,8 +75,6 @@ pub enum InboundTls {
     Enabled,
     /// TLS is not configured, so the proxy listens in plaintext.
     NotConfigured,
-    /// TLS is configured but invalid, so the proxy listens in plaintext.
-    FallbackToPlaintext { error: String },
 }
 
 impl InboundTls {
@@ -91,10 +89,6 @@ impl InboundTls {
                  Pass --no-tls to silence this warning."
                     .to_string(),
             ),
-            InboundTls::FallbackToPlaintext { error } => Some(format!(
-                "TLS configuration is invalid ({error}); falling back to a plaintext listener. \
-                 Pass --tls to make this fatal, or --no-tls to silence this warning."
-            )),
         }
     }
 }
@@ -295,36 +289,21 @@ impl TandemConfig {
 
     /// Validate the inbound (client-facing) TLS configuration.
     ///
-    /// By default, a TLS misconfiguration is non-fatal: TLS is disabled and the
-    /// proxy falls back to a plaintext listener. With `require_tls` (set by
-    /// `--tls` or `CS_SERVER__REQUIRE_TLS`) any TLS problem is fatal, because
-    /// a plaintext listener would accept the sessions `require_tls` rejects.
-    pub fn resolve_inbound_tls(&mut self) -> Result<InboundTls, Error> {
-        let tls_error = match &self.tls {
-            Some(tls) => tls
-                .check_cert()
-                .map_err(|err| Error::from(ConfigError::from(err)))
-                .and_then(|_| {
-                    tls.check_private_key()
-                        .map_err(|err| Error::from(ConfigError::from(err)))
-                })
-                .and_then(|_| crate::tls::configure_server(tls).map(|_| ()))
-                .err(),
-            None => None,
-        };
-
-        match (&self.tls, tls_error, self.server.require_tls) {
-            (Some(_), None, _) => Ok(InboundTls::Enabled),
-            (Some(_), Some(err), true) => Err(err),
-            (Some(_), Some(err), false) => {
-                self.tls = None;
-                self.server.require_tls = false;
-                Ok(InboundTls::FallbackToPlaintext {
-                    error: err.to_string(),
-                })
+    /// TLS that is configured but invalid is fatal, at startup and on reload:
+    /// a plaintext fallback would silently downgrade clients that use
+    /// `sslmode=prefer`. Without TLS configuration, the proxy listens in
+    /// plaintext unless `require_tls` is set (by `--tls` or
+    /// `CS_SERVER__REQUIRE_TLS`).
+    pub fn resolve_inbound_tls(&self) -> Result<InboundTls, Error> {
+        match &self.tls {
+            Some(tls) => {
+                tls.check_cert().map_err(ConfigError::from)?;
+                tls.check_private_key().map_err(ConfigError::from)?;
+                crate::tls::configure_server(tls)?;
+                Ok(InboundTls::Enabled)
             }
-            (None, _, true) => Err(ConfigError::TlsConfigurationRequired.into()),
-            (None, _, false) => Ok(InboundTls::NotConfigured),
+            None if self.server.require_tls => Err(ConfigError::TlsConfigurationRequired.into()),
+            None => Ok(InboundTls::NotConfigured),
         }
     }
 
@@ -473,49 +452,109 @@ static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap())
 /// are applied after this and take precedence.
 fn apply_database_url(url: &str) -> Result<(), Error> {
     use std::str::FromStr;
+    use tokio_postgres::config::{Host, SslMode};
 
-    let pg =
-        tokio_postgres::Config::from_str(url).map_err(|err| ConfigError::InvalidParameter {
-            name: "database-url".to_string(),
-            value: err.to_string(),
-        })?;
-
-    // Reject what the proxy cannot apply, rather than silently ignoring it.
-    // The proxy negotiates database TLS itself (as `sslmode=prefer`), so
-    // honouring only part of the URL could downgrade `sslmode=require`.
-    if pg.get_ssl_mode() != tokio_postgres::config::SslMode::Prefer {
-        return Err(ConfigError::InvalidParameter {
-            name: "database-url".to_string(),
-            value: "sslmode is not supported. Remove it from the URL, and set CS_DATABASE__WITH_TLS_VERIFICATION=true to verify the database certificate".to_string(),
+    let invalid = |reason: &str| -> Error {
+        ConfigError::InvalidDatabaseUrl {
+            reason: reason.to_string(),
         }
-        .into());
+        .into()
+    };
+
+    // Proxy negotiates database TLS itself (as `sslmode=prefer`), so honouring
+    // only part of the URL could silently downgrade `sslmode=require`.
+    const DATABASE_TLS_HINT: &str = "Proxy connects to the database with sslmode=prefer. \
+        Remove sslmode and other ssl options from the URL, and set \
+        CS_DATABASE__WITH_TLS_VERIFICATION=true to verify the database certificate";
+
+    let pg = tokio_postgres::Config::from_str(url).map_err(|err| {
+        // The cause names the option, as in "invalid value for option `sslmode`".
+        let err =
+            std::error::Error::source(&err).map_or(err.to_string(), |cause| cause.to_string());
+        if err.contains("`ssl") {
+            invalid(DATABASE_TLS_HINT)
+        } else {
+            invalid(&err)
+        }
+    })?;
+
+    match pg.get_ssl_mode() {
+        SslMode::Prefer => {}
+        SslMode::Disable => {
+            return Err(invalid(
+                "sslmode=disable is not supported. Remove it from the URL, and set \
+                 CS_DEVELOPMENT__DISABLE_DATABASE_TLS=true to connect to the database without TLS",
+            ))
+        }
+        _ => return Err(invalid(DATABASE_TLS_HINT)),
     }
 
     let host = match pg.get_hosts() {
         [] => None,
-        [tokio_postgres::config::Host::Tcp(host)] => Some(host.clone()),
+        [Host::Tcp(host)] => Some(host.clone()),
         [_] => {
-            return Err(ConfigError::InvalidParameter {
-                name: "database-url".to_string(),
-                value: "Unix socket hosts are not supported. Use a TCP host name or address"
-                    .to_string(),
-            }
-            .into())
+            return Err(invalid(
+                "Unix socket hosts are not supported. Use a TCP host name or address",
+            ))
         }
         _ => {
-            return Err(ConfigError::InvalidParameter {
-                name: "database-url".to_string(),
-                value: "multiple hosts are not supported. Use a single host".to_string(),
-            }
-            .into())
+            return Err(invalid(
+                "multiple hosts are not supported. Use a single host",
+            ))
         }
     };
+
+    let port = match pg.get_ports() {
+        [] => None,
+        [port] => Some(*port),
+        _ => {
+            return Err(invalid(
+                "multiple ports are not supported. Use a single port",
+            ))
+        }
+    };
+
+    // Refuse every other connection option rather than silently ignoring it:
+    // the URL must equal a config built from the parts Proxy applies.
+    let mut applied = tokio_postgres::Config::new();
+    if let Some(user) = pg.get_user() {
+        applied.user(user);
+    }
+    if let Some(password) = pg.get_password() {
+        applied.password(password);
+    }
+    if let Some(dbname) = pg.get_dbname() {
+        applied.dbname(dbname);
+    }
+    if let Some(host) = &host {
+        applied.host(host);
+    }
+    if let Some(port) = port {
+        applied.port(port);
+    }
+    if applied != pg {
+        return Err(invalid(
+            "only the user, password, host, port and database name are supported. \
+             Remove other connection options from the URL",
+        ));
+    }
+
+    // The password is required downstream as a String. Rather than silently
+    // dropping a non-UTF8 password (which would leave the proxy connecting
+    // with no password, or a stale env/config one), fail clearly.
+    let password = pg
+        .get_password()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| invalid("password contains invalid UTF-8"))?;
 
     if let Some(host) = host {
         env::set_var("CS_DATABASE__HOST", host);
     }
 
-    if let Some(port) = pg.get_ports().first() {
+    // tokio-postgres fills in 5432 for a URL without a port, which would
+    // replace the configured port.
+    if let Some(port) = port.filter(|_| url_has_port(url)) {
         env::set_var("CS_DATABASE__PORT", port.to_string());
     }
 
@@ -523,15 +562,7 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
         env::set_var("CS_DATABASE__USERNAME", user);
     }
 
-    if let Some(password) = pg.get_password() {
-        // The password is required downstream as a String. Rather than silently
-        // dropping a non-UTF8 password (which would leave the proxy connecting
-        // with no password, or a stale env/config one), fail clearly.
-        let password =
-            std::str::from_utf8(password).map_err(|_| ConfigError::InvalidParameter {
-                name: "database-url".to_string(),
-                value: "password contains invalid UTF-8".to_string(),
-            })?;
+    if let Some(password) = password {
         env::set_var("CS_DATABASE__PASSWORD", password);
     }
 
@@ -540,6 +571,26 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Whether a connection string names a port. A `postgres://` URL names one
+/// in its authority, after the host; a key=value string only has ports it
+/// sets.
+fn url_has_port(url: &str) -> bool {
+    let Some(rest) = url
+        .strip_prefix("postgres://")
+        .or_else(|| url.strip_prefix("postgresql://"))
+    else {
+        return true;
+    };
+    let authority = rest.split(['/', '?']).next().unwrap_or_default();
+    let host_and_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host_and_port)| host_and_port);
+    match host_and_port.rsplit_once(']') {
+        Some((_, after_ipv6_host)) => after_ipv6_host.starts_with(':'),
+        None => host_and_port.contains(':'),
+    }
 }
 
 /// Expected string is in the forms:
@@ -1241,15 +1292,16 @@ mod tests {
     }
 
     #[test]
-    fn invalid_tls_without_require_tls_falls_back_to_plaintext() {
+    /// TLS that was configured but is invalid is fatal: a plaintext fallback
+    /// would silently downgrade clients that use `sslmode=prefer`, including
+    /// after a SIGHUP reload.
+    fn invalid_tls_without_require_tls_is_fatal() {
         let mut config = TandemConfig::for_testing();
         config.tls = Some(missing_tls_config());
 
-        let result = config.resolve_inbound_tls().unwrap();
+        let result = config.resolve_inbound_tls();
 
-        assert!(matches!(result, InboundTls::FallbackToPlaintext { .. }));
-        assert_eq!(config.tls, None);
-        assert!(!config.server.require_tls);
+        assert!(result.is_err(), "expected an error, got {result:?}");
     }
 
     #[test]
@@ -1372,6 +1424,86 @@ mod tests {
                 apply_database_url("postgres://alice@db1.example.com,db2.example.com/orders");
             assert!(result.is_err());
             assert!(std::env::var("CS_DATABASE__HOST").is_err());
+        });
+    }
+
+    #[test]
+    /// Every connection option other than user, password, host, port and
+    /// dbname would be silently ignored, so it is refused.
+    fn database_url_rejects_unapplied_options() {
+        use crate::config::tandem::apply_database_url;
+        for option in [
+            "channel_binding=require",
+            "hostaddr=10.0.0.9",
+            "port=5432,5433",
+            "target_session_attrs=read-write",
+            "options=-csearch_path%3Dfoo",
+            "application_name=app",
+            "connect_timeout=5",
+            "load_balance_hosts=random",
+            "sslnegotiation=direct",
+        ] {
+            with_no_database_vars(|| {
+                let url = format!("postgres://alice@db.example.com/orders?{option}");
+                let result = apply_database_url(&url);
+                assert!(result.is_err(), "expected {option} to be rejected");
+            });
+        }
+    }
+
+    #[test]
+    /// A URL without a port must not replace the configured port with 5432.
+    fn database_url_without_port_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db.example.com/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+            assert_eq!(
+                std::env::var("CS_DATABASE__HOST").unwrap(),
+                "db.example.com"
+            );
+        });
+    }
+
+    #[test]
+    fn database_url_with_port_sets_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@[::1]:6543/orders").unwrap();
+
+            assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "6543");
+        });
+    }
+
+    #[test]
+    fn database_url_sslmode_errors_point_to_the_supported_setting() {
+        use crate::config::tandem::apply_database_url;
+        for option in [
+            "sslmode=require",
+            "sslmode=verify-full",
+            "sslmode=verify-ca",
+            "sslmode=allow",
+            "sslrootcert=/etc/ssl/root.crt",
+        ] {
+            with_no_database_vars(|| {
+                let url = format!("postgres://alice@db.example.com/orders?{option}");
+                let err = apply_database_url(&url).unwrap_err().to_string();
+                assert!(
+                    err.contains("CS_DATABASE__WITH_TLS_VERIFICATION"),
+                    "{option}: {err}"
+                );
+            });
+        }
+
+        with_no_database_vars(|| {
+            let url = "postgres://alice@db.example.com/orders?sslmode=disable";
+            let err = apply_database_url(url).unwrap_err().to_string();
+            assert!(
+                err.contains("CS_DEVELOPMENT__DISABLE_DATABASE_TLS"),
+                "sslmode=disable: {err}"
+            );
+            assert!(!err.contains("CS_DATABASE__WITH_TLS_VERIFICATION"));
         });
     }
 }
