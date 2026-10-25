@@ -58,7 +58,7 @@ Out:
 | A1 | A coverage gap is nondeterministic: any type-checked statement may hit one. | Over-approximates EQL Mapper's incompleteness instead of modelling SQL. |
 | A2 | The encrypt config covers every encrypted column in the catalog, including one whose table name Proxy cannot resolve. | `has_encrypted_columns` gates the unresolvable-table refusal (#486). If an encrypted table were missing from the config, S2 would not protect it. |
 | A3 | Statement kinds Proxy never type checks (`COPY ... FROM STDIN`, `DO`, `CALL`) carry no values for a column. Switched off in the `uncheckedWrites` instance. | `requires_type_check` forwards these as written. |
-| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. |
+| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. Tested through Proxy for F1, F2 (`COPY ... FROM STDIN`) and F3 in `packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` (#489). |
 | A5 | A schema publication and the DDL that caused it are one step. | Publication completes before `ReadyForQuery` reaches the DDL's own client. |
 
 ## Properties
@@ -80,6 +80,6 @@ None of these is confirmed as a reachable plaintext leak in production: each nee
 
 ## Open decisions
 
-- **D1** (decided 2026-10-25): For now, PostgreSQL's type and domain checks (A4) are the accepted guard against routes made stale by concurrent DDL. Proxy will not route again at Bind or invalidate prepared routes, so S4 is not a requirement. An integration test that proves PostgreSQL rejects the stale write is planned. Revisit if A4 stops holding, for example for a domain whose CHECK accepts arbitrary JSON.
+- **D1** (decided 2026-10-25): For now, PostgreSQL's type and domain checks (A4) are the accepted guard against routes made stale by concurrent DDL. Proxy will not route again at Bind or invalidate prepared routes, so S4 is not a requirement. Integration tests in #489 prove that PostgreSQL rejects the stale write. Revisit if A4 stops holding, for example for a domain whose CHECK accepts arbitrary JSON.
 - **D2**: What should a Bind do with a statement whose Parse was passed through only because mapping was disabled, once mapping is enabled again? The model's candidate (`BIND_RECHECKS_MAPPING`) refuses it, which makes S1 and S3 hold. Routing it at Bind is the alternative.
 - **D3**: Should Proxy refuse, or type check, writes by statement kinds it does not type check today (A3, F2)?
