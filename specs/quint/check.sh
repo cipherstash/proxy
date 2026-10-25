@@ -104,7 +104,7 @@ mutations() {
     "not(mapErrs) and not(writesEncrypted)" \
     "not(mapErrs)" \
     noPlaintextToKnownEncrypted
-  # M2: a table Proxy cannot resolve type checks as native (CIP-5102).
+  # M2: a table Proxy cannot resolve type checks as native (#486).
   mutate M2-unresolvable-is-native \
     "val typeCheckFails = s.kind == Gap or v == VUnknown" \
     "val typeCheckFails = s.kind == Gap" \

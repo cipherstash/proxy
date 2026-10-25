@@ -45,7 +45,7 @@ Each mutation edits a copy of the model and requires TLC to find a counterexampl
 | ID | Fault | Caught by |
 |---|---|---|
 | M1 | A write may fall back while encrypted columns are configured (`may_fall_back` ignores `writes_encrypted`). | S1 |
-| M2 | A table Proxy cannot resolve type checks as if it were native (no CIP-5102 refusal). | S2 |
+| M2 | A table Proxy cannot resolve type checks as if it were native (no unresolvable-table refusal, #486). | S2 |
 | M3 | No simple Query batch rule, so a fallback forwards a mapped statement as written. | S1 |
 
 M3 is the live behaviour on `main` before #484, where a multi-statement Query's fallback forwards the whole batch.

@@ -63,7 +63,7 @@ module routingAsBuiltTest {
       .expect(statementRefused)
 
   run unresolvableWriteRefusedTest =
-    // CIP-5102: the type checker never saw the table's columns.
+    // #486: the type checker never saw the table's columns.
     initWith(aEncrypted, Set("b"), false)
       .then(simpleQuery([stmt(Write, "b", Checked)]))
       .expect(outcome == Refused(Set(Refuse)))
