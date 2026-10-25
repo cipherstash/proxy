@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Quiet by default in a terminal**: when run in a terminal with no `--log-level`, `CS_LOG__LEVEL` or configuration file, Proxy now logs errors only and prints its listen address. Pass `--debug` for debug logging. Other log settings from the environment, such as `CS_LOG__OUTPUT` and per-target levels like `CS_LOG__MAPPER_LEVEL`, still apply. Without a terminal, as in a container, logging is unchanged.
+- **Quiet by default in a terminal**: when run in a terminal with no `--log-level`, `CS_LOG__LEVEL` or configuration file, Proxy now logs errors only and prints its listen address. Pass `--debug` for debug logging. Other log settings from the environment, such as `CS_LOG__OUTPUT` and per-target levels like `CS_LOG__MAPPER_LEVEL`, still apply. Without a terminal, such as in a container run without `-t`, logging is unchanged.
 
 - **Default port fallback**: if the default listen port is still in use after Proxy's bind retries, Proxy listens on an OS-assigned port and prints it. A port set with `CS_SERVER__PORT` or a configuration file is never replaced.
 
