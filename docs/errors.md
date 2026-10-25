@@ -11,6 +11,10 @@
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
+  - [COPY into encrypted column](#mapping-copy-into-encrypted-column)
+  - [COPY into unknown table](#mapping-copy-into-unknown-table)
+  - [COPY of a query that writes](#mapping-copy-of-query-that-writes)
+  - [COPY with a statement that uses an encrypted column](#mapping-copy-with-encrypted-statement)
   - [Internal Error](#mapping-internal-error)
   - [Prepared settings changed](#mapping-prepared-settings-changed)
 
@@ -243,6 +247,107 @@ Check if you are running the latest version of CipherStash Proxy, and update to 
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into encrypted column <a id='mapping-copy-into-encrypted-column'></a>
+
+A `COPY ... FROM` statement would load data into an encrypted column.
+CipherStash Proxy does not encrypt `COPY` data, so it refuses the statement rather than send plaintext to the encrypted column.
+
+### Error message
+
+```
+COPY into encrypted column 'encrypted_email' of table 'users' is not supported, as Proxy does not encrypt COPY data.
+```
+
+### Notes
+
+A `COPY` with no column list loads every column of the table, so it is refused when the table has any encrypted column.
+A `COPY ... FROM` into a table with no encrypted columns, or into only the plaintext columns of a table, is forwarded to PostgreSQL with its data.
+A `COPY ... TO` of a table or a query that reads is forwarded, and returns the encrypted columns as ciphertext, as Proxy does not decrypt `COPY` data.
+Proxy checks a `COPY` with the SQL parser, so it refuses as invalid SQL the few `COPY` options the parser does not support, such as `WHERE`, `HEADER MATCH` and `ON_ERROR`, even with no encryption configured.
+
+### How to fix
+
+Load the encrypted columns with `INSERT` statements through CipherStash Proxy, which encrypts the values.
+Use `COPY` only for columns that are not encrypted.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into unknown table <a id='mapping-copy-into-unknown-table'></a>
+
+A `COPY ... FROM` statement would load data into a table or column that is not in the database schema CipherStash Proxy has loaded.
+Proxy cannot tell whether the data would go to an encrypted column, so it refuses the statement.
+
+### Error message
+
+```
+COPY into table 'users' is not supported, as Proxy cannot tell which of its columns are encrypted.
+```
+
+### Notes
+
+Proxy loads the tables of every schema by name, without the schema.
+A table name used in more than one schema is refused, as Proxy cannot tell which table is meant.
+A table created on the same connection, earlier or in the same query, is known by the name it was created with, so `CREATE TABLE public.staging` is known to `COPY public.staging` but not to `COPY staging`.
+A `COPY` is refused if either a table created with that name or the loaded table of that name has an encrypted column it would fill, as Proxy cannot tell whether PostgreSQL created the table, such as after `CREATE TABLE IF NOT EXISTS` or a rollback.
+So a `COPY` into a temporary table named like an encrypted table is refused.
+A `COPY` with no column list into a table whose columns Proxy does not know, such as one created with `CREATE TABLE ... AS`, is refused.
+Any `COPY` into a table created with `CREATE TABLE ... (LIKE ...)` is refused, as Proxy does not know which columns it copies.
+When no columns are encrypted, Proxy does not check the table of a `COPY`.
+
+### How to fix
+
+Check that the table and columns exist.
+If the table was created on another connection, retry once Proxy has reloaded the database schema.
+If the table name is used in more than one schema, rename one of the tables.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY of a query that writes <a id='mapping-copy-of-query-that-writes'></a>
+
+A `COPY (...) TO` statement has a query that writes, such as `INSERT ... RETURNING`, `UPDATE ... RETURNING` or `DELETE ... RETURNING`, or a `WITH` query that does.
+CipherStash Proxy does not encrypt the query of a `COPY`, so it refuses the statement rather than send its values to PostgreSQL as plaintext.
+
+### Error message
+
+```
+COPY of a query that writes is not supported, as Proxy does not encrypt the query of a COPY.
+```
+
+### Notes
+
+When no columns are encrypted, Proxy forwards the `COPY`.
+
+### How to fix
+
+Run the statement on its own, without `COPY`, so Proxy encrypts it.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY with a statement that uses an encrypted column <a id='mapping-copy-with-encrypted-statement'></a>
+
+A simple query contains a `COPY` together with a statement that CipherStash Proxy encrypts.
+Proxy rewrites such a query to encrypt it, and cannot keep the `COPY` in the rewritten query.
+
+### Error message
+
+```
+COPY must be sent in a query of its own when the query has a statement that uses an encrypted column.
+```
+
+### How to fix
+
+Send the `COPY` in a query of its own.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

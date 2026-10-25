@@ -5,7 +5,8 @@ use sqltk::parser::ast;
 use sqltk::parser::dialect::PostgreSqlDialect;
 use sqltk::parser::keywords::Keyword;
 use sqltk::parser::parser::Parser;
-use sqltk::parser::tokenizer::{Token, Tokenizer};
+use sqltk::parser::parser::ParserError;
+use sqltk::parser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -25,9 +26,17 @@ pub enum ResetStatement {
 impl SqlParser {
     /// Parse a SQL statement string into an SqlParser AST
     pub fn parse_statement(statement: &str) -> Result<ast::Statement, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statement()?;
+        let tokens = tokenize(statement)?;
+        let statement = if contains_copy_from_stdin(&tokens) {
+            parse_copy_from_stdin_statements(tokens)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| ParserError::ParserError("Expected: a statement".to_owned()))?
+        } else {
+            Parser::new(&DIALECT)
+                .with_tokens_with_locations(tokens)
+                .parse_statement()?
+        };
 
         counter!(STATEMENTS_TOTAL).increment(1);
 
@@ -36,9 +45,14 @@ impl SqlParser {
 
     /// Parse a SQL String potentially containing multiple statements into parsed SqlParser AST
     pub fn parse_statements(statement: &str) -> Result<Vec<ast::Statement>, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statements()?;
+        let tokens = tokenize(statement)?;
+        let statement = if contains_copy_from_stdin(&tokens) {
+            parse_copy_from_stdin_statements(tokens)?
+        } else {
+            Parser::new(&DIALECT)
+                .with_tokens_with_locations(tokens)
+                .parse_statements()?
+        };
 
         counter!(STATEMENTS_TOTAL).increment(statement.len() as u64);
 
@@ -98,6 +112,64 @@ impl SqlParser {
     }
 }
 
+fn tokenize(sql: &str) -> Result<Vec<TokenWithSpan>, ParserError> {
+    Ok(Tokenizer::new(&DIALECT, sql).tokenize_with_location()?)
+}
+
+/// The SQL parser expects the copy data of a `COPY ... FROM STDIN` to follow it in the SQL, as
+/// in a `psql` script. It refuses the statement without a `;` after `STDIN`, and parses the rest
+/// of the SQL after one as copy data. A client sends the copy data in CopyData messages, so a
+/// statement after the `COPY` in a Query is a statement, which Proxy must check.
+fn contains_copy_from_stdin(tokens: &[TokenWithSpan]) -> bool {
+    tokens
+        .split(|token| token.token == Token::SemiColon)
+        .any(is_copy_from_stdin)
+}
+
+fn is_copy_from_stdin(tokens: &[TokenWithSpan]) -> bool {
+    let mut words = tokens
+        .iter()
+        .filter(|token| !matches!(token.token, Token::Whitespace(_)))
+        .map(|token| match &token.token {
+            Token::Word(word) => word.keyword,
+            _ => Keyword::NoKeyword,
+        });
+    if words.next() != Some(Keyword::COPY) {
+        return false;
+    }
+    let mut after_from = false;
+    for keyword in words {
+        if after_from && keyword == Keyword::STDIN {
+            return true;
+        }
+        after_from = keyword == Keyword::FROM;
+    }
+    false
+}
+
+/// Parse each statement on its own, ending each `COPY ... FROM STDIN` with the `;` the SQL
+/// parser expects before its copy data, which is empty. A `;` splits statements wherever it is
+/// outside a literal, quoted identifier or comment, which is right for every statement but one
+/// with a body of several statements, such as a `BEGIN ATOMIC` function, which then fails to
+/// parse.
+fn parse_copy_from_stdin_statements(
+    tokens: Vec<TokenWithSpan>,
+) -> Result<Vec<ast::Statement>, ParserError> {
+    let mut statements = vec![];
+    for tokens in tokens.split(|token| token.token == Token::SemiColon) {
+        let mut tokens = tokens.to_vec();
+        if is_copy_from_stdin(&tokens) {
+            tokens.push(TokenWithSpan::wrap(Token::SemiColon));
+        }
+        statements.extend(
+            Parser::new(&DIALECT)
+                .with_tokens_with_locations(tokens)
+                .parse_statements()?,
+        );
+    }
+    Ok(statements)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ResetStatement, SqlParser};
@@ -151,5 +223,50 @@ mod tests {
     #[test]
     fn the_sql_parser_rejects_reset() {
         assert!(SqlParser::parse_statements("RESET ALL").is_err());
+    }
+
+    /// A client sends the copy data of a `COPY ... FROM STDIN` in CopyData messages, so the
+    /// statements after it in the SQL are statements
+    #[test]
+    fn statements_after_copy_from_stdin_are_statements() {
+        let sql = |statements: Vec<sqltk::parser::ast::Statement>| {
+            statements
+                .iter()
+                .map(|statement| match statement {
+                    sqltk::parser::ast::Statement::Copy { values, .. } => {
+                        assert!(values.is_empty());
+                        "COPY".to_owned()
+                    }
+                    statement => statement.to_string(),
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            sql(SqlParser::parse_statements("COPY users (email) FROM STDIN").unwrap()),
+            vec!["COPY"]
+        );
+        assert_eq!(
+            sql(
+                SqlParser::parse_statements("COPY first FROM STDIN; COPY second FROM STDIN")
+                    .unwrap()
+            ),
+            vec!["COPY", "COPY"]
+        );
+        assert_eq!(
+            sql(SqlParser::parse_statements(
+                "copy users from stdin with (format csv);\n INSERT INTO t VALUES ('a;b'); "
+            )
+            .unwrap()),
+            vec!["COPY", "INSERT INTO t VALUES ('a;b')"]
+        );
+        assert_eq!(
+            sql(vec![SqlParser::parse_statement(
+                "/* bulk */ COPY users FROM STDIN CSV"
+            )
+            .unwrap()]),
+            vec!["COPY"]
+        );
+        assert!(SqlParser::parse_statements("COPY users FROM STDIN; SELECT 1 2").is_err());
     }
 }

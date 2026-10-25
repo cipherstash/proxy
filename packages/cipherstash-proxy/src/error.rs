@@ -98,6 +98,18 @@ pub enum MappingError {
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
     StatementCouldNotBeTypeChecked(String),
 
+    #[error("COPY into encrypted column '{column}' of table '{table}' is not supported, as Proxy does not encrypt COPY data. For help visit {}#mapping-copy-into-encrypted-column", ERROR_DOC_BASE_URL)]
+    CopyIntoEncryptedColumn { table: String, column: String },
+
+    #[error("COPY into table '{table}' is not supported, as Proxy cannot tell which of its columns are encrypted. For help visit {}#mapping-copy-into-unknown-table", ERROR_DOC_BASE_URL)]
+    CopyIntoUnknownTable { table: String },
+
+    #[error("COPY of a query that writes is not supported, as Proxy does not encrypt the query of a COPY. For help visit {}#mapping-copy-of-query-that-writes", ERROR_DOC_BASE_URL)]
+    CopyOfQueryThatWrites,
+
+    #[error("COPY must be sent in a query of its own when the query has a statement that uses an encrypted column. For help visit {}#mapping-copy-with-encrypted-statement", ERROR_DOC_BASE_URL)]
+    CopyWithEncryptedStatement,
+
     #[error("Statement could not be transformed: {0}")]
     StatementCouldNotBeTransformed(String),
 
