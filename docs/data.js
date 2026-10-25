@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792968062980,
+  "lastUpdate": 1792968086646,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29006,6 +29006,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.401948,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "e4cad150c95785c988498e6698f5465e4279cdf0",
+          "message": "fix(proxy): refuse COPY FROM into encrypted columns, check statements after COPY FROM STDIN",
+          "timestamp": "2026-10-23T08:10:31Z",
+          "url": "https://github.com/cipherstash/proxy/pull/488/commits/e4cad150c95785c988498e6698f5465e4279cdf0"
+        },
+        "date": 1792968085118,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.983316,
             "unit": "Number"
           }
         ]
