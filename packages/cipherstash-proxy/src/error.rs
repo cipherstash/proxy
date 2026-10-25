@@ -148,6 +148,15 @@ pub enum MappingError {
     #[error("Statement refers to table '{table}', which names both a temporary table and a permanent table, so Proxy cannot tell which one it writes to. Qualify the name, as in 'pg_temp.{table}'. For help visit {}#mapping-ambiguous-table", ERROR_DOC_BASE_URL)]
     AmbiguousTable { table: String },
 
+    #[error("COPY into encrypted column '{table}.{column}' is not supported, as Proxy does not encrypt COPY data. For help visit {}#mapping-copy-into-encrypted-column", ERROR_DOC_BASE_URL)]
+    CopyIntoEncryptedColumn { table: String, column: String },
+
+    #[error("COPY into column '{table}.{column}', which is not in the database schema Proxy has loaded, is not supported, as Proxy cannot tell whether it is encrypted. For help visit {}#mapping-copy-into-unknown-column", ERROR_DOC_BASE_URL)]
+    CopyIntoUnknownColumn { table: String, column: String },
+
+    #[error("COPY must be sent in a query of its own when the query has a statement that uses an encrypted column. For help visit {}#mapping-copy-with-encrypted-statement", ERROR_DOC_BASE_URL)]
+    CopyWithEncryptedStatement,
+
     #[error("Statement uses an operation that an encrypted column's EQL type does not support: {}. For help visit {}#mapping-unsupported-encrypted-operation", _0, ERROR_DOC_BASE_URL)]
     UnsupportedEncryptedOperation(String),
 

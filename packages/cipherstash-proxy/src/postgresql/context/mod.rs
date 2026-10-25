@@ -1539,7 +1539,7 @@ where
         for (statement, _, changes) in
             settings_protocol::project_settings_effects(&state.settings, statements)?
         {
-            if changed && eql_mapper::requires_type_check(statement) {
+            if changed && eql_mapper::requires_schema(statement) {
                 return Ok(true);
             }
             changed |= changes;

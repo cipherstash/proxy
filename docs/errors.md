@@ -19,6 +19,9 @@
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Unresolvable table](#mapping-unresolvable-table)
   - [Ambiguous table](#mapping-ambiguous-table)
+  - [COPY into encrypted column](#mapping-copy-into-encrypted-column)
+  - [COPY into unknown column](#mapping-copy-into-unknown-column)
+  - [COPY with a statement that uses an encrypted column](#mapping-copy-with-encrypted-statement)
   - [Unsupported encrypted operation](#mapping-unsupported-encrypted-operation)
   - [Unknown prepared statement](#mapping-unknown-prepared-statement)
   - [Internal Error](#mapping-internal-error)
@@ -483,6 +486,79 @@ Alternatively, give the temporary table a name no permanent table uses.
 
 Proxy assumes PostgreSQL's default search order, in which `pg_temp` comes first.
 It does not track `SET search_path`, so a client that puts `pg_temp` later in its search path should qualify table names.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into encrypted column <a id='mapping-copy-into-encrypted-column'></a>
+
+A `COPY ... FROM` statement would load data into an encrypted column.
+CipherStash Proxy does not encrypt `COPY` data, so it refuses the statement rather than store plaintext in the encrypted column.
+
+### Error message
+
+```
+COPY into encrypted column 'users.encrypted_email' is not supported, as Proxy does not encrypt COPY data.
+```
+
+### Notes
+
+The refusal applies to a `COPY ... FROM STDIN`, and to a `COPY ... FROM` a file or a program.
+A `COPY` with no column list loads every column of the table, so it is refused when the table has any encrypted column.
+A `COPY ... FROM` into a table with no encrypted columns, or into only the plaintext columns of a table, is forwarded to PostgreSQL with its data.
+A `COPY ... TO` of a table or of a query that reads is forwarded, and returns encrypted columns as ciphertext, as Proxy does not decrypt `COPY` data.
+A `COPY ... FROM` into a table Proxy cannot resolve is refused as an [Unresolvable table](#mapping-unresolvable-table) or an [Ambiguous table](#mapping-ambiguous-table).
+That includes a table created with `CREATE TABLE ... (LIKE ...)` or `CREATE TABLE ... AS`, whose columns Proxy does not know.
+When no columns are encrypted, Proxy forwards every `COPY`.
+
+### How to fix
+
+Load the encrypted columns with `INSERT` statements through CipherStash Proxy, which encrypts the values.
+Use `COPY` only for columns that are not encrypted.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into unknown column <a id='mapping-copy-into-unknown-column'></a>
+
+A `COPY ... FROM` statement names a column that is not in the database schema CipherStash Proxy has loaded for its table.
+Proxy cannot tell whether the column is encrypted, so it refuses the statement.
+
+### Error message
+
+```
+COPY into column 'users.nickname', which is not in the database schema Proxy has loaded, is not supported, as Proxy cannot tell whether it is encrypted.
+```
+
+### Notes
+
+The refusal applies only when any column is encrypted, and whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to.
+
+### How to fix
+
+Check that the column exists and that its name is spelled as PostgreSQL resolves it.
+If the column was added on another connection, retry once Proxy has reloaded the database schema.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY with a statement that uses an encrypted column <a id='mapping-copy-with-encrypted-statement'></a>
+
+A simple query contains a `COPY` together with a statement that uses an encrypted column.
+CipherStash Proxy rewrites such a query to encrypt it, and cannot keep the `COPY` in the rewritten query.
+
+### Error message
+
+```
+COPY must be sent in a query of its own when the query has a statement that uses an encrypted column.
+```
+
+### How to fix
+
+Send the `COPY` in a query of its own.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

@@ -910,6 +910,7 @@ dependencies = [
  "cipherstash-config",
  "cipherstash-proxy",
  "fake 4.2.0",
+ "futures-util",
  "hex",
  "postgres-types",
  "rand 0.9.3",
