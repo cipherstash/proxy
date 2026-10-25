@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792969960923,
+  "lastUpdate": 1792970048855,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29106,6 +29106,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.762343,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "26116c3b4ba97afba562cb5ac7fb3607fb0f7b5d",
+          "message": "test(integration): prove PostgreSQL rejects plaintext on stale routes",
+          "timestamp": "2026-10-23T08:10:31Z",
+          "url": "https://github.com/cipherstash/proxy/pull/489/commits/26116c3b4ba97afba562cb5ac7fb3607fb0f7b5d"
+        },
+        "date": 1792970047298,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.128074,
             "unit": "Number"
           }
         ]
