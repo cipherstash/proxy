@@ -68,7 +68,7 @@ Out:
 | S1 | Proxy never forwards plaintext for a column that its schema said was encrypted when it routed the statement, unless mapping was disabled. | Safety | Core promise of refuse-by-default routing. | Intended. Violated as built (F3); holds with the D2 candidate fix. |
 | S2 | While encrypted columns are configured, Proxy never forwards plaintext for a column whose table it cannot resolve. | Safety | Unresolvable-table refusal (#486). | Intended and implemented on #484. |
 | S3 | No write stores plaintext in a column that is encrypted at the time of the write, except a write made with mapping disabled. Values already in a column when DDL later makes it encrypted are out of scope. | Safety | The end-to-end promise. | Holds with a stable schema on Proxy alone once D2 is fixed; with concurrent DDL it rests on A4 (F1). |
-| S4 | Proxy never forwards plaintext for a column that its schema says is encrypted at the moment it sends the write. | Safety | Stronger than S1: also covers routes that went stale. | Unresolved (D1). Violated by F1. |
+| S4 | Proxy never forwards plaintext for a column that its schema says is encrypted at the moment it sends the write. | Safety | Stronger than S1: also covers routes that went stale. | Not required for now (D1 decided). Violated by F1. |
 
 ## Findings
 
@@ -80,6 +80,6 @@ None of these is confirmed as a reachable plaintext leak in production: each nee
 
 ## Open decisions
 
-- **D1**: Should Proxy route a prepared statement again at Bind, or invalidate prepared routes when it adopts a new snapshot, so S4 holds? Or is relying on PostgreSQL's type and domain checks for cross-connection DDL acceptable and to be documented as such?
+- **D1** (decided 2026-10-25): For now, PostgreSQL's type and domain checks (A4) are the accepted guard against routes made stale by concurrent DDL. Proxy will not route again at Bind or invalidate prepared routes, so S4 is not a requirement. An integration test that proves PostgreSQL rejects the stale write is planned. Revisit if A4 stops holding, for example for a domain whose CHECK accepts arbitrary JSON.
 - **D2**: What should a Bind do with a statement whose Parse was passed through only because mapping was disabled, once mapping is enabled again? The model's candidate (`BIND_RECHECKS_MAPPING`) refuses it, which makes S1 and S3 hold. Routing it at Bind is the alternative.
 - **D3**: Should Proxy refuse, or type check, writes by statement kinds it does not type check today (A3, F2)?
