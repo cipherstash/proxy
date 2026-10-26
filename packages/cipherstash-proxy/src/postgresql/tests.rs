@@ -2791,6 +2791,25 @@ mod type_check_fallback {
         }
     }
 
+    /// `CREATE TABLE ... AS` creates columns Proxy does not see, so it cannot tell that the table
+    /// has no encrypted columns
+    #[tokio::test]
+    async fn a_write_to_a_table_with_no_known_columns_that_fails_type_checking_is_refused() {
+        for sql in [
+            "CREATE TABLE staging AS SELECT * FROM users; \
+             INSERT INTO staging (id, email) SELECT id, 'a@example.com' FROM notes \
+             WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "CREATE TABLE staging AS SELECT * FROM users; \
+             UPDATE staging SET email = 'a@example.com' WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            assert_eq!(refused(&mut connection).await, 1, "{sql}");
+        }
+    }
+
     #[tokio::test]
     async fn an_extended_write_that_fails_type_checking_is_refused_with_encrypted_columns() {
         let mut connection = connection().await;
