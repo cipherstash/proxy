@@ -45,4 +45,4 @@ If that model change means a recorded finding no longer reproduces, `check.sh tl
 ## Tooling notes
 
 - `npm audit` reports two high-severity advisories in `adm-zip`, which Quint uses to unpack the Apalache download. They concern extracting untrusted archives; Quint only extracts its own release download.
-- Quint's LLM Kit skills (`quint-co/quint-llm-kit`) were not installed for this pilot.
+- Agent skills for these models are in `.claude/skills/`: `proxy-quint`, plus `quint-lang` and `quint-modeling` vendored from the Quint LLM Kit (see `.claude/skills/VENDORED.md`).
