@@ -547,7 +547,7 @@ where
                     // type check: their values would reach PostgreSQL as plaintext
                     if self.context.mapping_errors_enabled()
                         || mapped
-                        || self.writes_encrypted(statement)
+                        || self.may_write_encrypted(statement)
                     {
                         return Err(err);
                     }
@@ -558,8 +558,10 @@ where
                         .zip(&statement_settings)
                         .skip(index + 1)
                     {
-                        // PostgreSQL stops at the failed statement, so a `CREATE` after it
-                        // is not run, and is not recorded
+                        // A `CREATE` after the failed statement is not recorded. PostgreSQL
+                        // stops at the statement if it rejects it too, but runs the `CREATE` if
+                        // only Proxy failed to type check it, so a later statement may refer to
+                        // a table Proxy does not know. A write to one is refused.
                         if *mapping_disabled {
                             continue;
                         }
@@ -576,7 +578,7 @@ where
                                     return Err(err);
                                 }
                             }
-                            Err(err) if self.writes_encrypted(statement) => return Err(err),
+                            Err(err) if self.may_write_encrypted(statement) => return Err(err),
                             Err(_) => (),
                         }
                     }
@@ -964,7 +966,7 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.context.mapping_errors_enabled() || self.writes_encrypted(&statement) {
+                if self.context.mapping_errors_enabled() || self.may_write_encrypted(&statement) {
                     return Err(err);
                 }
                 return Ok(None);
@@ -1054,7 +1056,7 @@ where
     /// Whether `statement` writes rows while encrypted columns are configured, to a table Proxy
     /// does not know has no encrypted columns. Such a write is refused when it fails type checking,
     /// whatever the mapping errors setting, as it may put plaintext in an encrypted column.
-    fn writes_encrypted(&self, statement: &ast::Statement) -> bool {
+    fn may_write_encrypted(&self, statement: &ast::Statement) -> bool {
         if self.context.is_passthrough() || !eql_mapper::writes_data(statement) {
             return false;
         }
