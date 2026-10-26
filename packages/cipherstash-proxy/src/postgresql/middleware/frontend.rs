@@ -1503,9 +1503,11 @@ fn to_writing_preparation(statement: &ast::Statement) -> Option<Name> {
     }
 }
 
-/// The name of the SQL prepared statement an `EXECUTE` runs, if any
+/// The name of the SQL prepared statement an `EXECUTE` runs, if any, including
+/// one under `EXPLAIN`, which runs it with `ANALYZE`
 fn to_execution(statement: &ast::Statement) -> Option<Name> {
     match statement {
+        ast::Statement::Explain { statement, .. } => to_execution(statement),
         ast::Statement::Execute {
             name: Some(ast::ObjectName(parts)),
             ..
@@ -4501,6 +4503,10 @@ mod unresolvable_table_tests {
             "mapping is still disabled: {reprepared}"
         );
         assert_execute_refused(&query(&mut frontend, "EXECUTE p('plaintext')").await);
+        // `EXPLAIN ANALYZE` runs the statement it explains
+        assert_execute_refused(
+            &query(&mut frontend, "EXPLAIN ANALYZE EXECUTE p('plaintext')").await,
+        );
     }
 
     /// A deallocation removes only statements prepared before it, even when a
