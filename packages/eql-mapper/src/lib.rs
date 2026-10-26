@@ -153,6 +153,28 @@ mod test {
     }
 
     #[test]
+    fn writes_data_finds_nested_writes() {
+        for sql in [
+            "INSERT INTO users (id) VALUES (1)",
+            "UPDATE users SET id = 1",
+            "DELETE FROM users",
+            "MERGE INTO users USING accounts ON users.id = accounts.id WHEN MATCHED THEN DELETE",
+            "PREPARE p AS INSERT INTO users (id) VALUES ($1)",
+            "EXPLAIN ANALYZE DELETE FROM users",
+            "WITH moved AS (DELETE FROM users RETURNING id) SELECT id FROM moved",
+        ] {
+            assert!(crate::writes_data(&parse(sql)), "{sql}");
+        }
+        for sql in [
+            "SELECT id FROM users",
+            "WITH c AS (SELECT id FROM users) SELECT id FROM c",
+            "EXPLAIN SELECT id FROM users",
+        ] {
+            assert!(!crate::writes_data(&parse(sql)), "{sql}");
+        }
+    }
+
+    #[test]
     fn insert_with_values_no_explicit_columns() {
         // init_tracing();
         let schema = resolver(schema! {

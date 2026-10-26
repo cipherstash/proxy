@@ -511,6 +511,8 @@ where
 
         let mut portal = Portal::passthrough(Some(session_id));
         let mut encrypted = false;
+        // Whether a statement so far needs mapping
+        let mut mapped = false;
         let mut parse_duration_recorded = false;
 
         for (index, (statement, (mapping_disabled, keyset))) in parsed_statements
@@ -540,24 +542,45 @@ where
             let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.context.mapping_errors_enabled() {
+                    // The type-check fallback forwards the Query as the client wrote it, so it
+                    // must not carry a statement that needs mapping, or a write Proxy cannot
+                    // type check: their values would reach PostgreSQL as plaintext
+                    if self.context.mapping_errors_enabled()
+                        || mapped
+                        || self.writes_encrypted(statement)
+                    {
                         return Err(err);
-                    } else {
-                        // The Query is forwarded unchanged, so the settings commands after
-                        // this statement still run, in order. A COPY after it is still checked.
-                        for (statement, (mapping_disabled, _)) in parsed_statements
-                            .iter()
-                            .zip(&statement_settings)
-                            .skip(index + 1)
-                        {
-                            // PostgreSQL stops at the failed statement, so a `CREATE` after it
-                            // is not run, and is not recorded
-                            if !mapping_disabled {
-                                self.check_copy(statement)?;
-                            }
+                    }
+                    // The settings commands after this statement still run, in order. A COPY
+                    // after it is still checked.
+                    for (statement, (mapping_disabled, _)) in parsed_statements
+                        .iter()
+                        .zip(&statement_settings)
+                        .skip(index + 1)
+                    {
+                        // PostgreSQL stops at the failed statement, so a `CREATE` after it
+                        // is not run, and is not recorded
+                        if *mapping_disabled {
+                            continue;
                         }
-                        return Ok(None);
-                    };
+                        self.check_copy(statement)?;
+                        if !eql_mapper::requires_type_check(statement) {
+                            continue;
+                        }
+                        match self.type_check(statement) {
+                            Ok(typed_statement) => {
+                                if self
+                                    .to_encryptable_statement(&typed_statement, vec![])?
+                                    .is_some()
+                                {
+                                    return Err(err);
+                                }
+                            }
+                            Err(err) if self.writes_encrypted(statement) => return Err(err),
+                            Err(_) => (),
+                        }
+                    }
+                    return Ok(None);
                 }
             };
 
@@ -606,6 +629,7 @@ where
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal and mark as mapped
+                    mapped = true;
                     portal = Portal::encrypted(Arc::new(encryptable), Some(session_id));
                     self.context.update_statement_metadata(session_id, |m| {
                         m.encrypted = true;
@@ -940,11 +964,10 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.context.mapping_errors_enabled() {
+                if self.context.mapping_errors_enabled() || self.writes_encrypted(&statement) {
                     return Err(err);
-                } else {
-                    return Ok(None);
-                };
+                }
+                return Ok(None);
             }
         };
 
@@ -1026,6 +1049,13 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    /// Whether `statement` writes rows while encrypted columns are configured. Such a write is
+    /// refused when it fails type checking, whatever the mapping errors setting, as Proxy cannot
+    /// tell whether it puts plaintext in an encrypted column.
+    fn writes_encrypted(&self, statement: &ast::Statement) -> bool {
+        !self.context.is_passthrough() && eql_mapper::writes_data(statement)
     }
 
     ///

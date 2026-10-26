@@ -8,7 +8,8 @@ use crate::{
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -68,6 +69,30 @@ pub fn requires_type_check(statement: &Statement) -> bool {
             | Statement::Prepare { .. }
             | Statement::Explain { .. }
     )
+}
+
+/// Returns whether the [`Statement`] writes rows: an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one nested
+/// in a `PREPARE`, an `EXPLAIN` or a data-modifying CTE.
+pub fn writes_data(statement: &Statement) -> bool {
+    struct FindWrite;
+
+    impl<'ast> Visitor<'ast> for FindWrite {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(
+                    Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Merge { .. },
+                ) => ControlFlow::Break(Break::Finished),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    statement.accept(&mut FindWrite).is_break()
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
