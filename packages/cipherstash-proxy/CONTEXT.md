@@ -67,6 +67,7 @@ reason, or refuse it. Refusing is the default. A failed type check falls back to
 forwarding only for a coverage gap (the statement could not be type checked, or an
 internal mapper error), only while mapping errors are off, and never in a simple Query with another statement to map.
 When encrypted columns are configured, a write never falls back.
+A `COPY ... FROM` is not type checked: when encrypted columns are configured, it is forwarded only if every column it fills resolves to a native column.
 Each statement in a simple Query is type checked against a **batch view**: the effective schema plus the encryption-neutral DDL of the statements before it.
 
 **Connection temporary tables**:

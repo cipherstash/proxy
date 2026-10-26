@@ -28,8 +28,8 @@ use crate::proxy::EncryptionService;
 use crate::{EqlOutput, EqlQueryPayload};
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{
-    self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TableResolver, TypeCheckedStatement,
-    UnresolvedTable,
+    self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, SchemaError, TableResolver,
+    TypeCheckedStatement, UnresolvedTable,
 };
 use metrics::{counter, histogram};
 use pg_proto::{Describe, Execute, FrontendMessage, FrontendMiddlewareOutput, Parse};
@@ -432,10 +432,7 @@ impl<S: EncryptionService> Frontend<S> {
         {
             return Err(MappingError::DependentStatementAfterDdl.into());
         }
-        if parsed_statements
-            .iter()
-            .any(eql_mapper::requires_type_check)
-        {
+        if parsed_statements.iter().any(eql_mapper::requires_schema) {
             self.context.wait_for_schema_execution().await;
             self.context.ensure_schema_modelled()?;
         }
@@ -453,6 +450,16 @@ impl<S: EncryptionService> Frontend<S> {
             .zip(self.context.batch_table_resolvers(&parsed_statements))
             .map(|(statement, resolver)| self.route(statement, vec![], &resolver))
             .collect::<Result<Vec<_>, _>>()?;
+
+        // Proxy writes out every statement again when it rewrites a Query, and
+        // a `COPY` written out again is not the one the client sent.
+        if routes.iter().any(Route::is_map)
+            && parsed_statements
+                .iter()
+                .any(|statement| matches!(statement, ast::Statement::Copy { .. }))
+        {
+            return Err(MappingError::CopyWithEncryptedStatement.into());
+        }
 
         // A fallback forwards the whole Query as the client wrote it, so it
         // must not carry a statement that needs mapping: that statement's
@@ -1247,6 +1254,12 @@ impl<S: EncryptionService> Frontend<S> {
         if self.context.unsafe_disable_mapping()? {
             return Ok(Route::Forward(Forward::MappingDisabled));
         }
+        if let Some((table_name, columns)) = eql_mapper::copies_into_table(statement) {
+            if self.context.has_encrypted_columns() {
+                check_copy_into(table_name, columns, resolver)?;
+            }
+            return Ok(Route::Forward(Forward::NothingEncrypted));
+        }
         if !eql_mapper::requires_type_check(statement) {
             // A write nested in a statement the type checker skips, such as
             // `COPY (INSERT ... RETURNING ...) TO STDOUT`, is never mapped.
@@ -1378,6 +1391,67 @@ impl<S: EncryptionService> Frontend<S> {
             }
         }
     }
+}
+
+/// Refuses a `COPY ... FROM` into `columns` of `table_name`, or every column
+/// when `columns` is empty, unless `resolver` shows none of them is encrypted.
+/// Proxy does not encrypt copy data, and cannot tell whether a table or column
+/// it has not loaded is encrypted.
+fn check_copy_into(
+    table_name: &ast::ObjectName,
+    columns: &[ast::Ident],
+    resolver: &TableResolver,
+) -> Result<(), Error> {
+    let table = resolver.resolve_table(table_name).map_err(|err| {
+        let table = table_name.to_string();
+        match err {
+            SchemaError::AmbiguousTable(_) => MappingError::AmbiguousTable { table },
+            _ => MappingError::UnresolvableTable { table },
+        }
+    })?;
+    let unknown = |column: &ast::Ident| MappingError::CopyIntoUnknownColumn {
+        table: table.name.value.clone(),
+        column: column.value.clone(),
+    };
+
+    let targets = if columns.is_empty() {
+        table.columns.clone()
+    } else {
+        columns
+            .iter()
+            .map(|column| table.get_column(column).map_err(|_| unknown(column)))
+            .collect::<Result<_, _>>()?
+    };
+    // A defence: a table with no columns Proxy knows. A loaded table has its
+    // columns, and DDL that leaves a table's columns unknown, such as
+    // `CREATE TABLE ... AS`, fails closed before a `COPY` in the same Query.
+    if targets.is_empty() {
+        return Err(MappingError::UnresolvableTable {
+            table: table_name.to_string(),
+        }
+        .into());
+    }
+
+    for column in targets {
+        // The parser reads the `LIKE` clause of `CREATE TABLE t (LIKE u)` as a
+        // column named `LIKE`, so Proxy does not know the columns it copies.
+        // PostgreSQL reserves `LIKE`, so an unquoted column of that name is
+        // always the clause.
+        if column.name.quote_style.is_none() && column.name.value.eq_ignore_ascii_case("like") {
+            return Err(MappingError::UnresolvableTable {
+                table: table_name.to_string(),
+            }
+            .into());
+        }
+        if !matches!(column.kind, eql_mapper::ColumnKind::Native) {
+            return Err(MappingError::CopyIntoEncryptedColumn {
+                table: table.name.value.clone(),
+                column: column.name.value.clone(),
+            }
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// The prepared statements a `DEALLOCATE` or `DISCARD ALL` statement removes, if any
@@ -4404,5 +4478,180 @@ mod unresolvable_table_tests {
         let (mut frontend, _) = encrypted_client();
         let sql = "SELECT * FROM unknown_view; SELECT id FROM encrypted";
         assert_eq!(query(&mut frontend, sql).await, sql);
+    }
+
+    fn copy_into_encrypted_column(table: &str, column: &str) -> String {
+        MappingError::CopyIntoEncryptedColumn {
+            table: table.to_owned(),
+            column: column.to_owned(),
+        }
+        .to_string()
+    }
+
+    /// Whether `forwarded` is the refusal Proxy sends for `message`, quoted once
+    /// in the DO block's body and again as the DO block's literal.
+    fn is_refusal(forwarded: &str, message: &str) -> bool {
+        forwarded.contains("RAISE EXCEPTION") && forwarded.contains(&message.replace('\'', "''''"))
+    }
+
+    /// Proxy does not encrypt copy data, so a `COPY ... FROM` that fills an
+    /// encrypted column would store plaintext in it, from a client stream, a
+    /// file or a program alike.
+    #[tokio::test]
+    async fn copy_into_an_encrypted_column_is_refused() {
+        for sql in [
+            "COPY encrypted FROM STDIN",
+            "COPY encrypted (secret) FROM STDIN;",
+            "COPY public.encrypted (id, SECRET) FROM STDIN WITH (FORMAT csv)",
+            "COPY encrypted (id, secret) FROM '/tmp/secrets.csv'",
+            "COPY encrypted FROM PROGRAM 'cat /tmp/secrets.csv'",
+            "COPY notes FROM STDIN; COPY encrypted FROM STDIN",
+        ] {
+            let (mut frontend, _) = encrypted_client();
+            let forwarded = query(&mut frontend, sql).await;
+            assert!(
+                is_refusal(
+                    &forwarded,
+                    &copy_into_encrypted_column("encrypted", "secret")
+                ),
+                "{sql}: {forwarded}"
+            );
+        }
+
+        let (mut frontend, _) = encrypted_client();
+        let result = frontend
+            .parse_handler(operation_id(), parse("COPY encrypted FROM STDIN"))
+            .await;
+        assert!(
+            matches!(
+                &result,
+                Err(Error::Mapping(MappingError::CopyIntoEncryptedColumn { table, column }))
+                    if table == "encrypted" && column == "secret"
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn copy_into_native_columns_is_forwarded() {
+        for sql in [
+            "COPY notes FROM STDIN",
+            "COPY notes (body) FROM STDIN;",
+            "COPY encrypted (id) FROM STDIN WITH (FORMAT csv)",
+            "COPY notes FROM '/tmp/notes.csv'",
+            "COPY encrypted TO STDOUT",
+            "CREATE TEMPORARY TABLE names (name text); COPY names FROM STDIN",
+            "CREATE TABLE names (name text); COPY names (name) FROM STDIN",
+        ] {
+            let (mut frontend, _) = encrypted_client();
+            assert_eq!(query(&mut frontend, sql).await, sql, "{sql}");
+        }
+
+        let (mut frontend, _) = encrypted_client();
+        let result = frontend
+            .parse_handler(operation_id(), parse("COPY notes FROM STDIN"))
+            .await;
+        assert!(matches!(result, Ok(None)), "{result:?}");
+    }
+
+    /// Proxy cannot tell whether a table or column it has not loaded is
+    /// encrypted, so with encrypted columns configured, a `COPY` into one is
+    /// refused, whatever the mapping errors setting.
+    #[tokio::test]
+    async fn copy_into_a_table_or_column_proxy_cannot_resolve_is_refused() {
+        for (sql, message) in [
+            ("COPY accounts FROM STDIN", unresolvable("accounts")),
+            (
+                "COPY archive.encrypted FROM STDIN",
+                unresolvable("archive.encrypted"),
+            ),
+            (
+                "CREATE TABLE IF NOT EXISTS late (secret text); COPY late FROM STDIN",
+                unresolvable("late"),
+            ),
+            (
+                "COPY notes (missing) FROM STDIN",
+                MappingError::CopyIntoUnknownColumn {
+                    table: "notes".to_owned(),
+                    column: "missing".to_owned(),
+                }
+                .to_string(),
+            ),
+            // The parser reads `CREATE TABLE t (LIKE u)` as a column named
+            // `LIKE`, so Proxy does not know the columns such a table has.
+            (
+                "CREATE TABLE copied (LIKE encrypted); COPY copied FROM STDIN",
+                unresolvable("copied"),
+            ),
+        ] {
+            let (mut frontend, _) = encrypted_client();
+            let forwarded = query(&mut frontend, sql).await;
+            assert!(is_refusal(&forwarded, &message), "{sql}: {forwarded}");
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_is_forwarded_without_encrypted_columns() {
+        for sql in ["COPY accounts FROM STDIN", "COPY encrypted FROM STDIN"] {
+            let (mut frontend, _) = client(TandemConfig::for_testing(), false);
+            assert_eq!(query(&mut frontend, sql).await, sql, "{sql}");
+        }
+    }
+
+    /// A statement after a `COPY ... FROM STDIN` is a statement, not copy data,
+    /// so it is checked and encrypted like any other.
+    #[tokio::test]
+    async fn statements_after_copy_from_stdin_are_checked() {
+        let (mut frontend, _) = encrypted_client();
+        let forwarded = query(
+            &mut frontend,
+            "COPY notes FROM STDIN; INSERT INTO accounts (secret) VALUES ('plaintext')",
+        )
+        .await;
+        assert!(
+            is_refusal(&forwarded, &unresolvable("accounts")) && !forwarded.contains("plaintext"),
+            "{forwarded}"
+        );
+    }
+
+    /// Proxy writes out every statement again when it rewrites a Query, and a
+    /// `COPY` written out again is not the one the client sent, so a `COPY`
+    /// must be sent in a Query of its own.
+    #[tokio::test]
+    async fn copy_in_a_query_proxy_maps_is_refused() {
+        for sql in [
+            "COPY notes FROM STDIN; INSERT INTO encrypted (secret) VALUES ('plaintext')",
+            "INSERT INTO encrypted (secret) VALUES ('plaintext'); COPY notes TO STDOUT",
+        ] {
+            let (mut frontend, counter) = encrypted_client();
+            let forwarded = query(&mut frontend, sql).await;
+            assert!(
+                is_refusal(
+                    &forwarded,
+                    &MappingError::CopyWithEncryptedStatement.to_string()
+                ) && !forwarded.contains("plaintext"),
+                "{sql}: {forwarded}"
+            );
+            assert_eq!(counter.encrypted.load(Ordering::SeqCst), 0, "{sql}");
+        }
+    }
+
+    /// DDL that may change which columns are encrypted leaves the schema a
+    /// later `COPY` in the same Query is checked against unknown.
+    #[tokio::test]
+    async fn copy_after_ddl_that_may_change_encryption_is_refused() {
+        let (mut frontend, _) = encrypted_client();
+        let forwarded = query(
+            &mut frontend,
+            "CREATE TABLE IF NOT EXISTS encrypted (id int); COPY notes FROM STDIN",
+        )
+        .await;
+        assert!(
+            is_refusal(
+                &forwarded,
+                &MappingError::DependentStatementAfterDdl.to_string()
+            ),
+            "{forwarded}"
+        );
     }
 }

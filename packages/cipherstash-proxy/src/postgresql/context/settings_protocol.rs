@@ -170,7 +170,7 @@ impl SettingsProtocol {
             Prepared {
                 operation,
                 command,
-                needs_mapping: eql_mapper::requires_type_check(statement),
+                needs_mapping: eql_mapper::requires_schema(statement),
                 settings,
                 literal_sensitive: false,
             },

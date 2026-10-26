@@ -542,7 +542,7 @@ impl SchemaMiddleware {
         let mut encryption_changing_ddl_seen = false;
 
         for statement in statements {
-            if encryption_changing_ddl_seen && eql_mapper::requires_type_check(statement) {
+            if encryption_changing_ddl_seen && eql_mapper::requires_schema(statement) {
                 return true;
             }
             encryption_changing_ddl_seen |= self.ddl_may_change_encryption(statement);

@@ -95,6 +95,32 @@ pub fn writes_data(statement: &Statement) -> bool {
     statement.accept(&mut FindWrite).is_break()
 }
 
+/// Returns the table and column list a `COPY ... FROM` (a client stream, a file
+/// or a program) fills, or `None` for any other statement. An empty column list
+/// fills every column of the table.
+///
+/// A `COPY` is not type checked, so it is checked against the schema on its own.
+pub fn copies_into_table(statement: &Statement) -> Option<(&ast::ObjectName, &[ast::Ident])> {
+    match statement {
+        Statement::Copy {
+            source:
+                ast::CopySource::Table {
+                    table_name,
+                    columns,
+                },
+            to: false,
+            ..
+        } => Some((table_name, columns)),
+        _ => None,
+    }
+}
+
+/// Returns whether checking the [`Statement`] needs the schema: it is type
+/// checked, or it is a `COPY ... FROM` into a table.
+pub fn requires_schema(statement: &Statement) -> bool {
+    requires_type_check(statement) || copies_into_table(statement).is_some()
+}
+
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {

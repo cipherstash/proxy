@@ -146,7 +146,7 @@ impl<S: EncryptionService> Context<S> {
             }
         };
         self.prepare_schema_for_statement().await?;
-        if eql_mapper::requires_type_check(statement) {
+        if eql_mapper::requires_schema(statement) {
             self.wait_for_schema_execution().await;
             self.ensure_schema_modelled()?;
         }
