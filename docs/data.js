@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792976679838,
+  "lastUpdate": 1792979871125,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29314,6 +29314,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.726975,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ccbf2f61e32f75d58f481c6d43dc5b2f6372e31c",
+          "message": "docs(specs): pilot a Quint model of statement routing",
+          "timestamp": "2026-10-26T00:42:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/485/commits/ccbf2f61e32f75d58f481c6d43dc5b2f6372e31c"
+        },
+        "date": 1792979869487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.100686,
             "unit": "Number"
           }
         ]
