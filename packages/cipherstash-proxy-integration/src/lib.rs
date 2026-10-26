@@ -29,6 +29,8 @@ mod pipeline;
 /// Connection pooler compatibility matrix; see `mise run test:poolers`.
 #[cfg(all(test, feature = "pooler-tests"))]
 mod pooler;
+/// Guards against plaintext written on a stale route.
+mod postgres_rejects_plaintext;
 /// Database-backed transaction-aware schema middleware regressions.
 mod schema_change;
 mod select;

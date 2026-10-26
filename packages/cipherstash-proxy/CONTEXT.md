@@ -70,6 +70,15 @@ When encrypted columns are configured, a write never falls back.
 A `COPY ... FROM` is not type checked: when encrypted columns are configured, it is forwarded only if every column it fills resolves to a native column.
 Each statement in a simple Query is type checked against a **batch view**: the effective schema plus the encryption-neutral DDL of the statements before it.
 
+**Stale route**:
+A route chosen against a schema that another connection's committed DDL has since changed.
+A prepared statement keeps the route chosen at its Parse, and a transaction routes against the schema pinned when it started, so neither sees a column that became encrypted after that.
+Proxy does not route a statement again for this.
+For a write, PostgreSQL is the guard: an EQL v3 column is a domain over `jsonb` whose CHECK accepts only an EQL payload, so a plaintext stored through a stale route is rejected.
+That check runs only when a value is stored, so it does not guard reads or predicates on a stale route, which is a known limitation.
+A stale `SELECT` of the column returns the EQL ciphertext to the client undecrypted, and a stale predicate such as `WHERE secret = $1` sends its plaintext parameter to PostgreSQL, where it matches nothing and may be logged.
+`packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` tests the write guard.
+
 **Connection temporary tables**:
 The native temporary tables one connection has created, which the type checker resolves before permanent tables, as `pg_temp` is searched first.
 A table is added when PostgreSQL confirms its `CREATE`, and removed by `DROP`, `DISCARD`, `ON COMMIT DROP` at commit, or rollback of the transaction or savepoint that created it.
