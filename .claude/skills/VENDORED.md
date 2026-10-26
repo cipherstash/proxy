@@ -8,3 +8,4 @@
 
 To update, copy both directories from a newer commit, keep the `LICENSE` files, update the commit above, and rerun `specs/quint/check.sh all`.
 Put Proxy-specific rules in `proxy-quint/`, not in the vendored files.
+The kit's third skill, `quint-execute-spec`, is not vendored, so `quint-modeling`'s pointers to it lead nowhere here.

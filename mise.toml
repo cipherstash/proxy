@@ -163,7 +163,8 @@ run = "npm ci --ignore-scripts"
 [tasks."quint:check"]
 description = "Run the Quint model checks (stage: basic, tlc, mutations or all)"
 dir = "{{config_root}}/specs/quint"
-run = './check.sh {{arg(name="stage", default="basic")}}'
+usage = 'arg "[stage]" default="basic" { choices "basic" "tlc" "mutations" "all" }'
+run = './check.sh "${usage_stage}"'
 
 [tasks."reset"]
 alias = 'r'
