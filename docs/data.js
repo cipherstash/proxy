@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792979887101,
+  "lastUpdate": 1792980939828,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29364,6 +29364,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.752594,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "1d1993c6a76dc7090be8a884b2e63088c184d81d",
+          "message": "chore(agents): add Quint skills, mise tasks and docs",
+          "timestamp": "2026-10-26T00:42:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/490/commits/1d1993c6a76dc7090be8a884b2e63088c184d81d"
+        },
+        "date": 1792980938338,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.230365,
             "unit": "Number"
           }
         ]
