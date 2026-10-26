@@ -1,11 +1,12 @@
-use cipherstash_proxy::config::TandemConfig;
+use cipherstash_proxy::config::{InboundTls, TandemConfig};
 use cipherstash_proxy::connect;
 use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
-use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
+use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, Args};
 use clap::Parser;
 use metrics::gauge;
+use std::io::IsTerminal;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
@@ -23,7 +24,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    log::init(config.log.clone());
+    // Quiet by default when run by hand in a terminal: log errors only, unless
+    // a log level was set explicitly (--log-level / CS_LOG__LEVEL), --debug is
+    // passed, or a config file is present. Without a terminal (a container or
+    // service), the loaded log config applies unchanged.
+    let log_config = config.log.for_startup(
+        args.log_level.is_some() || std::env::var("CS_LOG__LEVEL").is_ok(),
+        std::path::Path::new(&args.config_file_path).exists(),
+        args.debug,
+        std::io::stdout().is_terminal(),
+    );
+    log::init(log_config);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(config.server.worker_threads)
@@ -52,9 +63,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.block_on(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
 
-        let mut proxy = init(config).await;
+        let mut proxy = init(config, args.no_tls, true).await;
 
-        let listener = connect::bind_with_retry(&proxy.config.server).await;
+        // If the listen port is just the default (not set via CS_SERVER__PORT or
+        // a config file) and it's already in use, fall back to an OS-assigned
+        // port rather than failing. An explicitly configured port is respected.
+        let port_configured = std::env::var("CS_SERVER__PORT").is_ok()
+            || std::path::Path::new(&args.config_file_path).exists();
+        let listener = connect::bind_with_retry(&proxy.config.server, !port_configured).await;
         let tracker = TaskTracker::new();
 
         let mut client_id = 0;
@@ -144,7 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Validate various configuration options and
 /// Init the Proxy service
 ///
-async fn init(mut config: TandemConfig) -> Proxy {
+/// `startup` is false on a SIGHUP reload, so notices print once per run.
+async fn init(config: TandemConfig, no_tls: bool, startup: bool) -> Proxy {
     if config.encrypt.default_keyset_id.is_none() {
         warn!(msg = "Default Keyset Id has not been configured");
         warn!(msg = "A Keyset Identifier must be set using the `SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` commands");
@@ -182,34 +199,26 @@ async fn init(mut config: TandemConfig) -> Proxy {
             std::process::exit(exitcode::CONFIG);
         });
 
-    match config.tls {
-        Some(ref mut tls) => {
-            _ = tls.check_cert().inspect_err(|err| {
-                error!(msg = err.to_string());
-                std::process::exit(exitcode::CONFIG);
-            });
-
-            _ = tls.check_private_key().inspect_err(|err| {
-                error!(msg = err.to_string());
-                std::process::exit(exitcode::CONFIG);
-            });
-
-            match tls::configure_server(tls) {
-                Ok(_) => {
-                    info!(msg = "Server Transport Layer Security (TLS) configuration validated");
-                }
-                Err(err) => {
-                    error!(
-                        msg = "Server Transport Layer Security (TLS) configuration error",
-                        error = err.to_string()
-                    );
-                    std::process::exit(exitcode::CONFIG);
+    match config.resolve_inbound_tls() {
+        Ok(InboundTls::Enabled) => {
+            info!(msg = "Server Transport Layer Security (TLS) configuration validated");
+        }
+        Ok(InboundTls::NotConfigured) => {
+            warn!(msg = "Transport Layer Security (TLS) is not configured");
+            warn!(msg = "Listening on an unsafe connection");
+            if let Some(notice) = InboundTls::NotConfigured.notice(no_tls) {
+                if startup && std::io::stderr().is_terminal() {
+                    eprintln!("{notice}");
                 }
             }
         }
-        None => {
-            warn!(msg = "Transport Layer Security (TLS) is not configured");
-            warn!(msg = "Listening on an unsafe connection");
+        Err(err) => {
+            error!(
+                msg = "Server Transport Layer Security (TLS) configuration error",
+                error = %ErrorChain(&err)
+            );
+            eprintln!("{err}");
+            std::process::exit(exitcode::CONFIG);
         }
     }
 
@@ -287,6 +296,6 @@ async fn reload_application_config(config: &TandemConfig, args: &Args) -> Result
     }
 
     info!(msg = "Configuration reloaded");
-    let proxy = init(new_config).await;
+    let proxy = init(new_config, args.no_tls, false).await;
     Ok(proxy)
 }

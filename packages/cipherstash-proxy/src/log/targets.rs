@@ -33,6 +33,19 @@ macro_rules! define_log_targets {
                 }
             }
 
+            /// These levels, with every level still at its default set to `level`.
+            pub fn with_default_level(&self, level: LogLevel) -> Self {
+                LogTargetLevels {
+                    $(
+                        $field_name: if self.$field_name == Self::default_target_level() {
+                            level
+                        } else {
+                            self.$field_name
+                        },
+                    )*
+                }
+            }
+
             pub const fn default_target_level() -> LogLevel {
                 LogLevel::Info
             }
