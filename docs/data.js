@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792975651466,
+  "lastUpdate": 1792975758444,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29214,6 +29214,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.431706,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "7bf6b86d3540081b5e972c8647aab6884dd3f6db",
+          "message": "Close test gaps for transaction-scoped CIPHERSTASH settings",
+          "timestamp": "2026-10-26T00:42:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/487/commits/7bf6b86d3540081b5e972c8647aab6884dd3f6db"
+        },
+        "date": 1792975756930,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.554032,
             "unit": "Number"
           }
         ]
