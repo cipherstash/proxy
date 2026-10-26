@@ -2,21 +2,13 @@
 /// End-to-end schema-change tests through Proxy and directly against PostgreSQL.
 mod tests {
     use crate::common::{
-        configure_test_client, connect, connect_with_tls, connection_config, get_database_port,
-        random_id, PROXY,
+        configure_test_client, connect_for_test, connection_config, get_database_port, random_id,
+        PROXY,
     };
     use std::sync::Arc;
     use tokio::sync::Barrier;
     use tokio::time::{timeout, Duration, Instant};
     use tokio_postgres::Client;
-
-    async fn connect_for_test(port: u16) -> Client {
-        if std::env::var("CS_TEST_USE_TLS").as_deref() == Ok("false") {
-            connect(port).await
-        } else {
-            connect_with_tls(port).await
-        }
-    }
 
     async fn connect_for_disconnect_test(port: u16) -> (Client, tokio::task::JoinHandle<()>) {
         let config = connection_config(port);
