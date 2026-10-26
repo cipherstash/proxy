@@ -13,7 +13,7 @@ This skill holds only what is specific to Proxy, and wins where it differs from 
 ## Running the checks
 
 - Iterate with `./check.sh` from `specs/quint`: typecheck, scenario tests, and simulation with every witness required to be reached.
-- Before pushing a model change, run `./check.sh all` in the background (about 11 minutes) and wait for exit 0. TLC is part of Proxy's checks, unlike the kit's sampled-only workflow.
+- Before pushing a model change, run `./check.sh all` in the background (about 6 minutes) and wait for exit 0. TLC is part of Proxy's checks, unlike the kit's sampled-only workflow.
 - Record the new state counts, timings and witness counts in `verification.md` in the same change.
 - When you run `quint` yourself, use the pinned CLI (`npx --no-install quint` in `specs/quint`, or bare `quint` under mise) and pass `--backend typescript` to `run` and `test`: the default Rust backend downloads through the GitHub API, which cloud sessions block.
 
