@@ -32,7 +32,7 @@ use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, TransactionStatus};
 use serde_json::json;
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
@@ -160,6 +160,11 @@ struct ConnectionProtocolState<K = OperationId> {
     prepared_statements: PreparedStatements<K>,
     portals: HashMap<Name, Arc<Portal>>,
     portal_operations: HashMap<Name, PortalOwner<K>>,
+    /// SQL `PREPARE` statements that write data, forwarded while mapping was
+    /// disabled. They were never mapped, so `EXECUTE` of one is refused once
+    /// mapping is enabled again. A name leaves only when PostgreSQL confirms a
+    /// `DEALLOCATE` or `DISCARD ALL` that removes it.
+    unmapped_sql_statements: HashSet<Name>,
 }
 
 /// The Bind operation that created a portal, and the SQL deallocation it runs when executed
@@ -180,6 +185,7 @@ impl<K> Default for ConnectionProtocolState<K> {
             prepared_statements: PreparedStatements::default(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
+            unmapped_sql_statements: HashSet::new(),
         }
     }
 }
@@ -810,6 +816,28 @@ where
         Ok(())
     }
 
+    /// Record that the SQL prepared statement `name`, which writes data, was
+    /// forwarded without mapping.
+    pub fn set_unmapped_sql_statement(&self, name: Name) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .unmapped_sql_statements
+            .insert(name);
+        Ok(())
+    }
+
+    /// Whether the SQL prepared statement `name` writes data and was forwarded
+    /// without mapping.
+    pub fn is_unmapped_sql_statement(&self, name: &Name) -> Result<bool, Error> {
+        Ok(self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .unmapped_sql_statements
+            .contains(name))
+    }
+
     /// Carry the deallocation of `statement`, if any, onto the portal just bound from it.
     pub fn bind_statement_effects(&self, portal: &Name, statement: &Name) -> Result<(), Error> {
         let mut state = self
@@ -887,6 +915,13 @@ where
             }
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
+
+            match &deallocation {
+                Deallocation::Statement(name) => {
+                    state.unmapped_sql_statements.remove(name);
+                }
+                Deallocation::AllStatements => state.unmapped_sql_statements.clear(),
+            }
 
             let names = state.prepared_statements.deallocation_names(deallocation);
             for name in &names {

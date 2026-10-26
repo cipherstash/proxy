@@ -1252,7 +1252,30 @@ impl<S: EncryptionService> Frontend<S> {
         resolver: &Arc<TableResolver>,
     ) -> Result<Route<'a>, Error> {
         if self.context.unsafe_disable_mapping()? {
+            if let ast::Statement::Prepare { name, .. } = statement {
+                if eql_mapper::writes_data(statement) {
+                    self.context
+                        .set_unmapped_sql_statement(sql_statement_name(name))?;
+                }
+            }
             return Ok(Route::Forward(Forward::MappingDisabled));
+        }
+        // Like the Bind settings check, for a statement prepared with SQL.
+        if let ast::Statement::Execute {
+            name: Some(name), ..
+        } = statement
+        {
+            if let [part] = name.0.as_slice() {
+                if let Some(name) = part.as_ident() {
+                    if self.context.has_encrypted_columns()
+                        && self
+                            .context
+                            .is_unmapped_sql_statement(&sql_statement_name(name))?
+                    {
+                        return Err(MappingError::PreparedSettingsChanged.into());
+                    }
+                }
+            }
         }
         if let Some((table_name, columns)) = eql_mapper::copies_into_table(statement) {
             if self.context.has_encrypted_columns() {
@@ -1460,20 +1483,25 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
         ast::Statement::Deallocate { name, .. } => {
             if name.quote_style.is_none() && name.value.eq_ignore_ascii_case("all") {
                 Some(Deallocation::AllStatements)
-            } else if name.quote_style.is_none() {
-                // Unquoted identifiers are folded to lower case by PostgreSQL
-                // (ASCII letters only, as `downcase_identifier` does for UTF-8)
-                Some(Deallocation::Statement(Name::from(
-                    name.value.to_ascii_lowercase(),
-                )))
             } else {
-                Some(Deallocation::Statement(Name::from(name.value.clone())))
+                Some(Deallocation::Statement(sql_statement_name(name)))
             }
         }
         ast::Statement::Discard {
             object_type: ast::DiscardObject::ALL,
         } => Some(Deallocation::AllStatements),
         _ => None,
+    }
+}
+
+/// The name PostgreSQL gives a SQL prepared statement named `name`.
+fn sql_statement_name(name: &ast::Ident) -> Name {
+    if name.quote_style.is_none() {
+        // Unquoted identifiers are folded to lower case by PostgreSQL
+        // (ASCII letters only, as `downcase_identifier` does for UTF-8)
+        Name::from(name.value.to_ascii_lowercase())
+    } else {
+        Name::from(name.value.clone())
     }
 }
 
@@ -4417,9 +4445,57 @@ mod unresolvable_table_tests {
         );
         let forwarded = query(&mut frontend, "EXECUTE p('plaintext')").await;
         assert!(
-            forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+            forwarded.contains("RAISE EXCEPTION")
+                && forwarded.contains("no longer match confirmed connection state")
+                && !forwarded.contains("plaintext"),
             "{forwarded}"
         );
+    }
+
+    /// Once PostgreSQL confirms the statement is gone, its name is free again.
+    #[tokio::test]
+    async fn sql_execute_after_deallocating_a_statement_prepared_without_mapping_is_forwarded() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        config.development.as_mut().unwrap().disable_mapping = false;
+        let (context, _) = client_context(config, true);
+        let mut frontend = Frontend::new(context.clone());
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        for (sql, tag) in [
+            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET"),
+            (
+                "PREPARE p (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
+                "PREPARE",
+            ),
+            ("DEALLOCATE p", "DEALLOCATE"),
+            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET"),
+        ] {
+            let operation = operation_id();
+            frontend
+                .intercept(
+                    operation,
+                    FrontendMessage::Query(Bytes::copy_from_slice(sql.as_bytes())),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(
+                    Some(operation),
+                    pg_proto::BackendMessage::CommandComplete(Bytes::copy_from_slice(
+                        tag.as_bytes(),
+                    )),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(
+                    Some(operation),
+                    pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+                )
+                .await
+                .unwrap();
+        }
+        assert_eq!(query(&mut frontend, "EXECUTE p(1)").await, "EXECUTE p(1)");
     }
 
     #[tokio::test]

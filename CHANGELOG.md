@@ -47,6 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **SQL `EXECUTE` after `UNSAFE_DISABLE_MAPPING`**: Proxy now refuses `EXECUTE` of a statement that writes data and was prepared with SQL `PREPARE` while `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` was on, once mapping is enabled again. It was forwarded with its arguments as written, so only PostgreSQL's type check stopped plaintext reaching an encrypted column. `DEALLOCATE` the statement and prepare it again. This matches the check Proxy already makes for statements prepared with the extended protocol.
+
 - **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
 - **Unknown column error message**: the type-checking error for a column a table does not have now names the column and the table the right way round, for example `Column: email not found for table: users`. It previously swapped them.
