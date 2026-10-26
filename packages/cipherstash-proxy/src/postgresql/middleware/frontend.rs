@@ -425,6 +425,11 @@ impl<S: EncryptionService> Frontend<S> {
                 .filter_map(to_deallocation)
                 .collect(),
         )?;
+        if self.context.unsafe_disable_mapping()? {
+            for name in parsed_statements.iter().filter_map(to_writing_preparation) {
+                self.context.set_unmapped_sql_statement(name, operation)?;
+            }
+        }
         self.context.prepare_schema_for_statement().await?;
         if self
             .context
@@ -818,6 +823,15 @@ impl<S: EncryptionService> Frontend<S> {
         if let Some(deallocation) = to_deallocation(&statement) {
             self.context
                 .set_statement_deallocation(message.statement.to_owned(), deallocation)?;
+        }
+        if self.context.unsafe_disable_mapping()? {
+            if let Some(prepares) = to_writing_preparation(&statement) {
+                // Recorded again when it is executed, in execution order
+                self.context
+                    .set_unmapped_sql_statement(prepares.clone(), operation)?;
+                self.context
+                    .set_statement_preparation(message.statement.to_owned(), prepares)?;
+            }
         }
 
         self.context
@@ -1252,9 +1266,6 @@ impl<S: EncryptionService> Frontend<S> {
         resolver: &Arc<TableResolver>,
     ) -> Result<Route<'a>, Error> {
         if self.context.unsafe_disable_mapping()? {
-            if let Some(name) = to_writing_preparation(statement) {
-                self.context.set_unmapped_sql_statement(name)?;
-            }
             return Ok(Route::Forward(Forward::MappingDisabled));
         }
         // Like the Bind settings check, for a statement prepared with SQL.
@@ -2158,7 +2169,7 @@ mod tests {
         frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: vec![],
@@ -2244,7 +2255,7 @@ mod tests {
         let output = frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: vec![],
@@ -2290,7 +2301,7 @@ mod tests {
             frontend
                 .intercept(
                     bind,
-                    FrontendMessage::Bind(Bind {
+                    FrontendMessage::Bind(pg_proto::Bind {
                         portal: bytes::Bytes::copy_from_slice(name),
                         statement: bytes::Bytes::copy_from_slice(name),
                         parameter_formats: vec![],
@@ -2442,7 +2453,7 @@ mod tests {
         let output = frontend
             .intercept(
                 bind,
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: vec![],
@@ -2614,7 +2625,7 @@ mod tests {
         let output = frontend
             .intercept(
                 bind,
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: vec![],
@@ -2710,7 +2721,7 @@ mod tests {
         frontend
             .intercept(
                 bind,
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: vec![],
@@ -2786,7 +2797,7 @@ mod tests {
         frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: name.clone(),
                     statement: name.clone(),
                     parameter_formats: Vec::new(),
@@ -2942,7 +2953,7 @@ mod tests {
         frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: portal.clone(),
                     statement: statement.clone(),
                     parameter_formats: Vec::new(),
@@ -2992,7 +3003,7 @@ mod tests {
             frontend
                 .intercept(
                     operation_id(),
-                    FrontendMessage::Bind(Bind {
+                    FrontendMessage::Bind(pg_proto::Bind {
                         portal,
                         statement: statement.clone(),
                         parameter_formats: Vec::new(),
@@ -3080,7 +3091,7 @@ mod tests {
         frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: bytes::Bytes::from_static(b"portal"),
                     statement: statement_name,
                     parameter_formats: Vec::new(),
@@ -3131,7 +3142,7 @@ mod tests {
         frontend
             .intercept(
                 operation,
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: bytes::Bytes::from_static(b"portal"),
                     statement: bytes::Bytes::from_static(b"statement"),
                     parameter_formats: Vec::new(),
@@ -3183,7 +3194,7 @@ mod tests {
         frontend
             .intercept(
                 operation_id(),
-                FrontendMessage::Bind(Bind {
+                FrontendMessage::Bind(pg_proto::Bind {
                     portal: portal.clone(),
                     statement: bytes::Bytes::from_static(b"unknown_statement"),
                     parameter_formats: Vec::new(),
@@ -4402,25 +4413,29 @@ mod unresolvable_table_tests {
         }
     }
 
-    /// A statement prepared with SQL `PREPARE` while mapping is disabled was
-    /// never mapped, so executing it once mapping is enabled again would write
-    /// its arguments as written.
-    #[tokio::test]
-    async fn sql_execute_of_a_statement_prepared_without_mapping_is_refused() {
+    /// A connection with encrypted columns that may set `UNSAFE_DISABLE_MAPPING`.
+    fn unsafe_mapping_client() -> (
+        Frontend<Counter>,
+        crate::postgresql::middleware::Backend<Counter>,
+    ) {
         let mut config = TandemConfig::for_testing();
         config.disable_mapping_for_testing();
         config.development.as_mut().unwrap().disable_mapping = false;
         let (context, _) = client_context(config, true);
-        let mut frontend = Frontend::new(context.clone());
-        let mut backend = crate::postgresql::middleware::Backend::new(context);
-        for (sql, tag) in [
-            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET"),
-            (
-                "PREPARE p (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
-                "PREPARE",
-            ),
-            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET"),
-        ] {
+        (
+            Frontend::new(context.clone()),
+            crate::postgresql::middleware::Backend::new(context),
+        )
+    }
+
+    /// Sends each simple Query, and completes each of its statements in
+    /// PostgreSQL with the given command tags.
+    async fn complete_queries(
+        frontend: &mut Frontend<Counter>,
+        backend: &mut crate::postgresql::middleware::Backend<Counter>,
+        queries: &[(&str, &[&str])],
+    ) {
+        for (sql, tags) in queries {
             let operation = operation_id();
             frontend
                 .intercept(
@@ -4429,15 +4444,17 @@ mod unresolvable_table_tests {
                 )
                 .await
                 .unwrap();
-            backend
-                .intercept(
-                    Some(operation),
-                    pg_proto::BackendMessage::CommandComplete(Bytes::copy_from_slice(
-                        tag.as_bytes(),
-                    )),
-                )
-                .await
-                .unwrap();
+            for tag in *tags {
+                backend
+                    .intercept(
+                        Some(operation),
+                        pg_proto::BackendMessage::CommandComplete(Bytes::copy_from_slice(
+                            tag.as_bytes(),
+                        )),
+                    )
+                    .await
+                    .unwrap();
+            }
             backend
                 .intercept(
                     Some(operation),
@@ -4446,6 +4463,34 @@ mod unresolvable_table_tests {
                 .await
                 .unwrap();
         }
+    }
+
+    const UNSAFE_ON: (&str, &[&str]) = ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", &["SET"]);
+    const UNSAFE_OFF: (&str, &[&str]) =
+        ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", &["SET"]);
+    const PREPARE_INSERT: &str = "PREPARE p (text) AS INSERT INTO encrypted (secret) VALUES ($1)";
+
+    fn assert_execute_refused(forwarded: &str) {
+        assert!(
+            forwarded.contains("RAISE EXCEPTION")
+                && forwarded.contains("no longer match confirmed connection state")
+                && !forwarded.contains("plaintext"),
+            "{forwarded}"
+        );
+    }
+
+    /// A statement prepared with SQL `PREPARE` while mapping is disabled was
+    /// never mapped, so executing it once mapping is enabled again would write
+    /// its arguments as written.
+    #[tokio::test]
+    async fn sql_execute_of_a_statement_prepared_without_mapping_is_refused() {
+        let (mut frontend, mut backend) = unsafe_mapping_client();
+        complete_queries(
+            &mut frontend,
+            &mut backend,
+            &[UNSAFE_ON, (PREPARE_INSERT, &["PREPARE"]), UNSAFE_OFF],
+        )
+        .await;
         let reprepared = query(
             &mut frontend,
             "PREPARE q (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
@@ -4455,58 +4500,123 @@ mod unresolvable_table_tests {
             reprepared.contains("RAISE EXCEPTION"),
             "mapping is still disabled: {reprepared}"
         );
-        let forwarded = query(&mut frontend, "EXECUTE p('plaintext')").await;
-        assert!(
-            forwarded.contains("RAISE EXCEPTION")
-                && forwarded.contains("no longer match confirmed connection state")
-                && !forwarded.contains("plaintext"),
-            "{forwarded}"
-        );
+        assert_execute_refused(&query(&mut frontend, "EXECUTE p('plaintext')").await);
+    }
+
+    /// A deallocation removes only statements prepared before it, even when a
+    /// later statement in the same Query prepares the name again.
+    #[tokio::test]
+    async fn sql_execute_of_a_statement_prepared_after_a_deallocation_in_the_same_query_is_refused()
+    {
+        for (deallocation, tag) in [
+            ("DEALLOCATE ALL", "DEALLOCATE ALL"),
+            ("DEALLOCATE p", "DEALLOCATE"),
+        ] {
+            let (mut frontend, mut backend) = unsafe_mapping_client();
+            let both = format!("{deallocation}; {PREPARE_INSERT}");
+            complete_queries(
+                &mut frontend,
+                &mut backend,
+                &[
+                    UNSAFE_ON,
+                    (PREPARE_INSERT, &["PREPARE"]),
+                    (&both, &[tag, "PREPARE"]),
+                    UNSAFE_OFF,
+                ],
+            )
+            .await;
+            assert_execute_refused(&query(&mut frontend, "EXECUTE p('plaintext')").await);
+        }
+    }
+
+    /// The extended protocol runs a `PREPARE` when its portal is executed, so
+    /// a pipelined deallocation executed before it does not remove it.
+    #[tokio::test]
+    async fn sql_execute_of_a_statement_prepared_after_a_pipelined_deallocation_is_refused() {
+        let (mut frontend, mut backend) = unsafe_mapping_client();
+        complete_queries(&mut frontend, &mut backend, &[UNSAFE_ON]).await;
+        for (name, sql) in [("d", "DEALLOCATE ALL"), ("pp", PREPARE_INSERT)] {
+            frontend
+                .intercept(
+                    operation_id(),
+                    FrontendMessage::Parse(Parse {
+                        statement: Bytes::copy_from_slice(name.as_bytes()),
+                        query: Bytes::copy_from_slice(sql.as_bytes()),
+                        parameter_types: vec![],
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+        let mut executions = vec![];
+        for name in ["d", "pp"] {
+            let name = Bytes::copy_from_slice(name.as_bytes());
+            frontend
+                .intercept(
+                    operation_id(),
+                    FrontendMessage::Bind(pg_proto::Bind {
+                        portal: name.clone(),
+                        statement: name.clone(),
+                        parameter_formats: vec![],
+                        parameters: vec![],
+                        result_formats: vec![],
+                    }),
+                )
+                .await
+                .unwrap();
+            let execute = operation_id();
+            frontend
+                .intercept(
+                    execute,
+                    FrontendMessage::Execute(pg_proto::Execute {
+                        portal: name,
+                        max_rows: 0,
+                    }),
+                )
+                .await
+                .unwrap();
+            executions.push(execute);
+        }
+        for (execute, tag) in executions.into_iter().zip(["DEALLOCATE ALL", "PREPARE"]) {
+            backend
+                .intercept(
+                    Some(execute),
+                    pg_proto::BackendMessage::CommandComplete(Bytes::from_static(tag.as_bytes())),
+                )
+                .await
+                .unwrap();
+        }
+        let sync = operation_id();
+        frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        complete_queries(&mut frontend, &mut backend, &[UNSAFE_OFF]).await;
+        assert_execute_refused(&query(&mut frontend, "EXECUTE p('plaintext')").await);
     }
 
     /// Once PostgreSQL confirms the statement is gone, its name is free again.
     #[tokio::test]
     async fn sql_execute_after_deallocating_a_statement_prepared_without_mapping_is_forwarded() {
-        let mut config = TandemConfig::for_testing();
-        config.disable_mapping_for_testing();
-        config.development.as_mut().unwrap().disable_mapping = false;
-        let (context, _) = client_context(config, true);
-        let mut frontend = Frontend::new(context.clone());
-        let mut backend = crate::postgresql::middleware::Backend::new(context);
-        for (sql, tag) in [
-            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET"),
-            (
-                "PREPARE p (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
-                "PREPARE",
-            ),
-            ("DEALLOCATE p", "DEALLOCATE"),
-            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET"),
-        ] {
-            let operation = operation_id();
-            frontend
-                .intercept(
-                    operation,
-                    FrontendMessage::Query(Bytes::copy_from_slice(sql.as_bytes())),
-                )
-                .await
-                .unwrap();
-            backend
-                .intercept(
-                    Some(operation),
-                    pg_proto::BackendMessage::CommandComplete(Bytes::copy_from_slice(
-                        tag.as_bytes(),
-                    )),
-                )
-                .await
-                .unwrap();
-            backend
-                .intercept(
-                    Some(operation),
-                    pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
-                )
-                .await
-                .unwrap();
-        }
+        let (mut frontend, mut backend) = unsafe_mapping_client();
+        complete_queries(
+            &mut frontend,
+            &mut backend,
+            &[
+                UNSAFE_ON,
+                (PREPARE_INSERT, &["PREPARE"]),
+                ("DEALLOCATE p", &["DEALLOCATE"]),
+                UNSAFE_OFF,
+            ],
+        )
+        .await;
         assert_eq!(query(&mut frontend, "EXECUTE p(1)").await, "EXECUTE p(1)");
     }
 

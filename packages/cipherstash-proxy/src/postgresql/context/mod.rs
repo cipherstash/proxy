@@ -32,7 +32,7 @@ use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, TransactionStatus};
 use serde_json::json;
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
@@ -161,10 +161,11 @@ struct ConnectionProtocolState<K = OperationId> {
     portals: HashMap<Name, Arc<Portal>>,
     portal_operations: HashMap<Name, PortalOwner<K>>,
     /// SQL `PREPARE` statements that write data, forwarded while mapping was
-    /// disabled. They were never mapped, so `EXECUTE` of one is refused once
-    /// mapping is enabled again. A name leaves only when PostgreSQL confirms a
-    /// `DEALLOCATE` or `DISCARD ALL` that removes it.
-    unmapped_sql_statements: HashSet<Name>,
+    /// disabled, with the latest operation that ran each one. They were never
+    /// mapped, so `EXECUTE` of one is refused once mapping is enabled again. A
+    /// name leaves only when PostgreSQL confirms a `DEALLOCATE` or
+    /// `DISCARD ALL` that removes it, run by a later operation.
+    unmapped_sql_statements: HashMap<Name, K>,
 }
 
 /// The Bind operation that created a portal, and the SQL deallocation it runs when executed
@@ -172,6 +173,8 @@ struct ConnectionProtocolState<K = OperationId> {
 pub(crate) struct PortalOwner<K = OperationId> {
     operation: K,
     deallocation: Option<Deallocation>,
+    /// The unmapped SQL prepared statement it prepares when executed
+    preparation: Option<Name>,
 }
 
 impl<K> Default for ConnectionProtocolState<K> {
@@ -185,7 +188,7 @@ impl<K> Default for ConnectionProtocolState<K> {
             prepared_statements: PreparedStatements::default(),
             portals: HashMap::new(),
             portal_operations: HashMap::new(),
-            unmapped_sql_statements: HashSet::new(),
+            unmapped_sql_statements: HashMap::new(),
         }
     }
 }
@@ -213,6 +216,7 @@ impl ConnectionProtocolState {
             PortalOwner {
                 operation,
                 deallocation: None,
+                preparation: None,
             },
         );
         self.portals.insert(name, Arc::new(portal));
@@ -273,6 +277,16 @@ impl ConnectionProtocolState {
 }
 
 impl ConnectionProtocolState {
+    fn set_unmapped_sql_statement(&mut self, name: Name, operation: OperationId) {
+        let prepared = self
+            .unmapped_sql_statements
+            .entry(name)
+            .or_insert(operation);
+        if *prepared < operation {
+            *prepared = operation;
+        }
+    }
+
     /// Everything Proxy keeps for the named statement, for a rollback to restore
     fn statement_snapshot(&self, name: &Name) -> settings_protocol::MetadataSnapshot {
         settings_protocol::MetadataSnapshot {
@@ -701,10 +715,14 @@ where
                 state.statement_metrics.insert(execution_id, metrics);
                 ExecuteContext::new(name.clone(), portal, Some(execution_id))
             });
-        let deallocation = state
+        let (deallocation, preparation) = state
             .portal_operations
             .get(&name)
-            .and_then(|owner| owner.deallocation.clone());
+            .map(|owner| (owner.deallocation.clone(), owner.preparation.clone()))
+            .unwrap_or_default();
+        if let Some(prepares) = preparation {
+            state.set_unmapped_sql_statement(prepares, operation);
+        }
         let context = state.operations.entry(operation).or_default();
         context.execute = Some(execute);
         context.deallocations.extend(deallocation);
@@ -816,14 +834,29 @@ where
         Ok(())
     }
 
-    /// Record that the SQL prepared statement `name`, which writes data, was
-    /// forwarded without mapping.
-    pub fn set_unmapped_sql_statement(&self, name: Name) -> Result<(), Error> {
+    /// Record that `operation` forwards the SQL prepared statement `name`,
+    /// which writes data, without mapping.
+    pub fn set_unmapped_sql_statement(
+        &self,
+        name: Name,
+        operation: OperationId,
+    ) -> Result<(), Error> {
         self.protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
-            .unmapped_sql_statements
-            .insert(name);
+            .set_unmapped_sql_statement(name, operation);
+        Ok(())
+    }
+
+    /// Record that the SQL of statement `name` is a `PREPARE` of `prepares`, an
+    /// unmapped statement that writes data, so that executing it through the
+    /// extended protocol records `prepares` in execution order.
+    pub fn set_statement_preparation(&self, name: Name, prepares: Name) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .prepared_statements
+            .set_preparation(name, prepares);
         Ok(())
     }
 
@@ -835,18 +868,21 @@ where
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
             .unmapped_sql_statements
-            .contains(name))
+            .contains_key(name))
     }
 
-    /// Carry the deallocation of `statement`, if any, onto the portal just bound from it.
+    /// Carry the deallocation and preparation of `statement`, if any, onto the
+    /// portal just bound from it.
     pub fn bind_statement_effects(&self, portal: &Name, statement: &Name) -> Result<(), Error> {
         let mut state = self
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         let deallocation = state.prepared_statements.deallocation(statement);
+        let preparation = state.prepared_statements.preparation(statement);
         if let Some(owner) = state.portal_operations.get_mut(portal) {
             owner.deallocation = deallocation;
+            owner.preparation = preparation;
         }
         Ok(())
     }
@@ -916,11 +952,20 @@ where
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
+            // Not a statement a later operation prepared again
             match &deallocation {
                 Deallocation::Statement(name) => {
-                    state.unmapped_sql_statements.remove(name);
+                    if state
+                        .unmapped_sql_statements
+                        .get(name)
+                        .is_some_and(|prepared| *prepared < operation)
+                    {
+                        state.unmapped_sql_statements.remove(name);
+                    }
                 }
-                Deallocation::AllStatements => state.unmapped_sql_statements.clear(),
+                Deallocation::AllStatements => state
+                    .unmapped_sql_statements
+                    .retain(|_, prepared| *prepared >= operation),
             }
 
             let names = state.prepared_statements.deallocation_names(deallocation);
