@@ -36,6 +36,10 @@ DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
 CS_EQL_VERSION = "eql-3.0.4"
 
+# The Quint CLI pinned in specs/quint/package-lock.json, for tools that call
+# `quint` from PATH, such as Quint Connect model-based tests.
+_.path = ["{{config_root}}/specs/quint/node_modules/.bin"]
+
 
 [tools]
 "cargo:cargo-binstall" = "1.17.3"
@@ -150,6 +154,16 @@ mise run test:check
 mise run test:format
 mise run test:clippy
 """
+
+[tasks."quint:install"]
+description = "Install the pinned Quint CLI into specs/quint"
+dir = "{{config_root}}/specs/quint"
+run = "npm ci --ignore-scripts"
+
+[tasks."quint:check"]
+description = "Run the Quint model checks (stage: basic, tlc, mutations or all)"
+dir = "{{config_root}}/specs/quint"
+run = './check.sh {{arg(name="stage", default="basic")}}'
 
 [tasks."reset"]
 alias = 'r'

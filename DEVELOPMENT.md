@@ -479,6 +479,25 @@ To run language-specific integration tests, call:
 - `mise run test:integration:lang:golang`
 - `mise run test:integration:lang:python`
 
+#### Quint specifications
+
+`specs/quint/` holds design-level Quint models of Proxy behaviour; see `specs/quint/README.md` for what each check shows.
+They need Node 22 and Java 21.
+
+```shell
+# install the pinned Quint CLI
+mise run quint:install
+
+# typecheck, scenario tests and simulation (about 20 s)
+mise run quint:check
+
+# everything, including exhaustive TLC checks (about 10 min)
+mise run quint:check all
+```
+
+mise puts `specs/quint/node_modules/.bin` on `PATH`, so tools that call `quint` directly, such as Quint Connect model-based tests, use the pinned version.
+Quint's default Rust simulator backend downloads a binary through the GitHub API on first use; where that API is blocked, as in Claude Code cloud sessions, pass `--backend typescript`.
+
 
 ### Working with Encrypt Query Language (EQL)
 
