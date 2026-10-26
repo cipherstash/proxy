@@ -31,6 +31,7 @@ mod pipeline;
 mod pooler;
 /// Database-backed transaction-aware schema middleware regressions.
 mod schema_change;
+mod schema_loader;
 mod select;
 mod set_keyset_error;
 mod simple_protocol;
