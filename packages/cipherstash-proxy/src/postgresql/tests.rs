@@ -109,7 +109,8 @@ impl Connection {
         Self::with_schema(config, EncryptConfig::default(), Schema::new("public"))
     }
 
-    /// A started connection to a Proxy with no default keyset that encrypts `users.email`
+    /// A started connection to a Proxy with no default keyset that encrypts `users.email`, with a
+    /// plaintext table `notes`
     async fn encrypted() -> Self {
         let mut config = TandemConfig::for_testing();
         config.encrypt.default_keyset_id = None;
@@ -126,8 +127,15 @@ impl Connection {
             Ident::with_quote('"', "email"),
             EqlTraits::all(),
         )));
+        let mut notes = Table::new(Ident::new("notes"));
+        for column in ["id", "body"] {
+            notes.add_column(Arc::new(eql_mapper::Column::native(Ident::with_quote(
+                '"', column,
+            ))));
+        }
         let mut schema = Schema::new("public");
         schema.add_table(users);
+        schema.add_table(notes);
 
         let mut connection = Self::with_schema(config, encrypt_config, schema);
         connection.server(ready(b'I')).await;
@@ -2734,6 +2742,46 @@ mod type_check_fallback {
             "PREPARE p AS INSERT INTO users (email) VALUES ('a@example.com')",
             "SELECT 1; INSERT INTO no_such_table (email) VALUES ('a@example.com')",
             "SELECT * FROM no_such_table; INSERT INTO no_such_table (email) VALUES ('a@example.com')",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            assert_eq!(refused(&mut connection).await, 1, "{sql}");
+        }
+    }
+
+    /// Proxy knows the table has no encrypted columns, so the write cannot put plaintext in one.
+    /// 2.2's type checker does not support `ANY` over an array.
+    #[tokio::test]
+    async fn a_write_to_a_plaintext_table_that_fails_type_checking_is_forwarded_unchanged() {
+        for sql in [
+            "INSERT INTO notes (id, body) SELECT id + 1, body FROM notes \
+             WHERE id = ANY(ARRAY[1::int8, 2::int8]) ON CONFLICT DO NOTHING",
+            "UPDATE notes SET body = 'a@example.com' WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "SELECT id FROM users; \
+             DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            forwarded_unchanged(&mut connection, sql).await;
+        }
+    }
+
+    /// A write Proxy cannot type check that writes to an encrypted table, or to a target Proxy
+    /// cannot name, is refused
+    #[tokio::test]
+    async fn a_write_beside_a_plaintext_target_that_fails_type_checking_is_refused() {
+        for sql in [
+            "INSERT INTO users (id, email) SELECT id, body FROM notes \
+             WHERE id = ANY(ARRAY[1::int8, 2::int8]) AND body = 'a@example.com'",
+            "WITH i AS (INSERT INTO users (email) VALUES ('a@example.com') RETURNING id) \
+             DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "MERGE INTO notes USING users ON notes.id = users.id \
+             WHEN NOT MATCHED THEN INSERT (id, body) VALUES (users.id, 'a@example.com')",
         ] {
             let mut connection = connection().await;
 

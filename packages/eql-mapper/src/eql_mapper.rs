@@ -95,6 +95,64 @@ pub fn writes_data(statement: &Statement) -> bool {
     statement.accept(&mut FindWrite).is_break()
 }
 
+/// Returns the tables the [`Statement`] writes rows to, including the writes [`writes_data`] finds nested in it.
+///
+/// Returns `None` when a write's target is not a plain table name, as with `MERGE`.
+pub fn write_targets(statement: &Statement) -> Option<Vec<ast::ObjectName>> {
+    #[derive(Default)]
+    struct FindTargets {
+        targets: Vec<ast::ObjectName>,
+    }
+
+    impl FindTargets {
+        fn add_relation(&mut self, table: &ast::TableWithJoins) -> ControlFlow<Break<()>> {
+            match &table.relation {
+                ast::TableFactor::Table { name, .. } if table.joins.is_empty() => {
+                    self.targets.push(name.clone());
+                    ControlFlow::Continue(())
+                }
+                _ => ControlFlow::Break(Break::Err(())),
+            }
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for FindTargets {
+        type Error = ();
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(Statement::Insert(insert)) => match &insert.table {
+                    ast::TableObject::TableName(name) => {
+                        self.targets.push(name.clone());
+                        ControlFlow::Continue(())
+                    }
+                    _ => ControlFlow::Break(Break::Err(())),
+                },
+                Some(Statement::Update { table, .. }) => self.add_relation(table),
+                Some(Statement::Delete(delete)) => {
+                    let (ast::FromTable::WithFromKeyword(from)
+                    | ast::FromTable::WithoutKeyword(from)) = &delete.from;
+                    if !delete.tables.is_empty() {
+                        return ControlFlow::Break(Break::Err(()));
+                    }
+                    for table in from {
+                        self.add_relation(table)?;
+                    }
+                    ControlFlow::Continue(())
+                }
+                Some(Statement::Merge { .. }) => ControlFlow::Break(Break::Err(())),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    let mut finder = FindTargets::default();
+    match statement.accept(&mut finder) {
+        ControlFlow::Continue(()) => Some(finder.targets),
+        ControlFlow::Break(_) => None,
+    }
+}
+
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {

@@ -175,6 +175,39 @@ mod test {
     }
 
     #[test]
+    fn write_targets_names_each_table_written() {
+        let names = |sql: &str| {
+            crate::write_targets(&parse(sql))
+                .map(|targets| targets.iter().map(ToString::to_string).collect::<Vec<_>>())
+        };
+        assert_eq!(names("SELECT id FROM users"), Some(vec![]));
+        assert_eq!(
+            names("INSERT INTO users (id) SELECT id FROM accounts"),
+            Some(vec!["users".to_string()])
+        );
+        assert_eq!(
+            names("UPDATE public.users SET id = 1 FROM accounts"),
+            Some(vec!["public.users".to_string()])
+        );
+        assert_eq!(
+            names("DELETE FROM users USING accounts WHERE users.id = accounts.id"),
+            Some(vec!["users".to_string()])
+        );
+        assert_eq!(
+            names("WITH d AS (DELETE FROM accounts RETURNING id) INSERT INTO users (id) SELECT id FROM d"),
+            Some(vec!["accounts".to_string(), "users".to_string()])
+        );
+        assert_eq!(
+            names("PREPARE p AS UPDATE users SET id = $1"),
+            Some(vec!["users".to_string()])
+        );
+        assert_eq!(
+            names("MERGE INTO users USING accounts ON users.id = accounts.id WHEN MATCHED THEN DELETE"),
+            None
+        );
+    }
+
+    #[test]
     fn insert_with_values_no_explicit_columns() {
         // init_tracing();
         let schema = resolver(schema! {

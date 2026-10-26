@@ -229,7 +229,9 @@ When `mapping_errors_enabled` is `true`, then type check errors are raised, and 
 When encrypted columns are configured, a statement is passed through only if it cannot put plaintext into an encrypted column, whatever the `mapping_errors_enabled` setting.
 Proxy raises the type check error, and the database does not run the query, when:
 
-- the statement writes data (an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one in a `PREPARE`, an `EXPLAIN` or a `WITH` clause), as Proxy cannot tell which columns it writes to.
+- the statement writes data (an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one in a `PREPARE`, an `EXPLAIN` or a `WITH` clause) to a table that has encrypted columns, or to a table that Proxy has not loaded, as Proxy cannot tell which columns it writes to.
+  A `MERGE` is always refused.
+  A write that Proxy cannot type check is passed through only when Proxy knows that every table it writes to has no encrypted columns.
 - the statement is in a simple query with another statement that Proxy needs to encrypt or decrypt, as passing the statement through sends the whole query to the database as written.
   Send the statement in a query of its own.
 

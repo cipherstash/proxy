@@ -1051,11 +1051,29 @@ where
         }
     }
 
-    /// Whether `statement` writes rows while encrypted columns are configured. Such a write is
-    /// refused when it fails type checking, whatever the mapping errors setting, as Proxy cannot
-    /// tell whether it puts plaintext in an encrypted column.
+    /// Whether `statement` writes rows while encrypted columns are configured, to a table Proxy
+    /// does not know has no encrypted columns. Such a write is refused when it fails type checking,
+    /// whatever the mapping errors setting, as it may put plaintext in an encrypted column.
     fn writes_encrypted(&self, statement: &ast::Statement) -> bool {
-        !self.context.is_passthrough() && eql_mapper::writes_data(statement)
+        if self.context.is_passthrough() || !eql_mapper::writes_data(statement) {
+            return false;
+        }
+        let Some(targets) = eql_mapper::write_targets(statement) else {
+            return true;
+        };
+        targets.iter().any(|target| {
+            let Some(tables) = self.known_tables(target) else {
+                return true;
+            };
+            tables.iter().any(|table| {
+                // A table with no columns Proxy knows, such as one created with `AS`
+                table.columns.is_empty()
+                    || table
+                        .columns
+                        .iter()
+                        .any(|column| !matches!(column.kind, eql_mapper::ColumnKind::Native))
+            })
+        })
     }
 
     ///
@@ -1098,22 +1116,15 @@ where
         }
     }
 
-    /// Refuse a `COPY ... FROM` into `columns` of `table_name` unless Proxy knows none of them is
-    /// encrypted.
+    /// The tables Proxy knows that `table_name` may name, or `None` if it knows none, or does not
+    /// know their columns.
     ///
     /// The schema Proxy loads has the tables of every schema by name, without the schema. A table
     /// created or changed on this connection is known by the name it was given. Proxy records it
     /// before PostgreSQL runs the statement, which may then not create it, as with
-    /// `CREATE TABLE IF NOT EXISTS`, or roll it back. So the `COPY` is refused if either the table
-    /// created with that name or the loaded table of that name has an encrypted column it fills.
-    fn check_copy_into(
-        &self,
-        table_name: &ast::ObjectName,
-        columns: &[ast::Ident],
-    ) -> Result<(), Error> {
-        let unknown = || MappingError::CopyIntoUnknownTable {
-            table: table_name.to_string(),
-        };
+    /// `CREATE TABLE IF NOT EXISTS`, or roll it back. So both the table created with that name and
+    /// the loaded table of that name are returned.
+    fn known_tables(&self, table_name: &ast::ObjectName) -> Option<Vec<Arc<eql_mapper::Table>>> {
         let resolver = self.context.get_table_resolver();
         let name = ast::ObjectName(table_name.0.last().cloned().into_iter().collect());
         let tables: Vec<_> = [
@@ -1132,9 +1143,22 @@ where
                 column.name.quote_style.is_none() && column.name.value.eq_ignore_ascii_case("like")
             })
         });
-        if created_like {
+        (!tables.is_empty() && !created_like).then_some(tables)
+    }
+
+    /// Refuse a `COPY ... FROM` into `columns` of `table_name` unless Proxy knows none of them is
+    /// encrypted, in either of the [`Self::known_tables`] of that name.
+    fn check_copy_into(
+        &self,
+        table_name: &ast::ObjectName,
+        columns: &[ast::Ident],
+    ) -> Result<(), Error> {
+        let unknown = || MappingError::CopyIntoUnknownTable {
+            table: table_name.to_string(),
+        };
+        let Some(tables) = self.known_tables(table_name) else {
             return Err(unknown().into());
-        }
+        };
 
         let mut targets = vec![];
         if columns.is_empty() {
