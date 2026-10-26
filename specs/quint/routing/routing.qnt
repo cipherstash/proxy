@@ -12,8 +12,8 @@
  *
  * Scope: one client connection, a database with a few columns, an optional
  * concurrent DDL actor (another connection whose DDL commits and publishes),
- * simple Query batches, Parse and Bind/Execute, Close, transactions, and
- * `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
+ * simple Query batches, Parse and Bind/Execute, Close, transactions,
+ * `COPY ... FROM`, and `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
  */
 module routing {
   // ---------------------------------------------------------------------
@@ -30,8 +30,8 @@ module routing {
   /// PostgreSQL rejects a plaintext value written to an EQL domain-typed
   /// column (type mismatch or the domain's CHECK constraint). Assumption A4.
   const PG_DOMAIN_CHECK: bool
-  /// Statement kinds Proxy never type checks (`COPY ... FROM STDIN`, `DO`,
-  /// `CALL`) may write data. Assumption A3.
+  /// Statements Proxy cannot inspect (`DO`, `CALL`, SQL `EXECUTE`) may carry
+  /// values for a column. Assumption A3.
   const UNCHECKED_WRITES: bool
 
   // ---------------------------------------------------------------------
@@ -50,8 +50,12 @@ module routing {
   /// What happens when the statement meets EQL Mapper.
   /// `Checked`: Proxy type checks it and the check succeeds whenever the
   /// column is resolvable. `Gap`: a coverage gap, the type check fails on
-  /// valid SQL. `Unchecked`: a kind `requires_type_check` excludes.
-  type Kind = Checked | Gap | Unchecked
+  /// valid SQL. `CopyFrom`: a `COPY ... FROM` (`copies_into_table`), checked
+  /// against the schema but never type checked. `NestedWrite`: a write
+  /// nested in a statement `requires_type_check` excludes, which
+  /// `writes_data` finds, such as `COPY (INSERT ...) TO`. `Opaque`: a
+  /// statement whose values Proxy cannot see, such as `DO` or `CALL`.
+  type Kind = Checked | Gap | CopyFrom | NestedWrite | Opaque
 
   type Stmt = { op: Op, col: str, kind: Kind }
 
@@ -92,6 +96,9 @@ module routing {
   type Outcome =
     | Idle
     | Executed(Set[Route])
+    | BoundExecuted(Route)
+    | Closed
+    | TxEnded
     | Refused(Set[Route])
     | BatchRefused
     | UnknownStatementRefused
@@ -131,15 +138,32 @@ module routing {
   // Pure logic
   // ---------------------------------------------------------------------
 
+  /// `COPY ... FROM` and a nested write always write. A statement that is
+  /// not type checked and writes nothing is an `Opaque` read.
   pure val ALL_STMTS: Set[Stmt] =
-    tuples(Set(Read, Write), COLS, Set(Checked, Gap, Unchecked))
+    tuples(Set(Read, Write), COLS, Set(Checked, Gap, CopyFrom, NestedWrite, Opaque))
       .map(((op, col, kind)) => { op: op, col: col, kind: kind })
+      .filter(s => s.op == Write or not(s.kind == CopyFrom or s.kind == NestedWrite))
 
-  /// Statements a client may send. Under assumption A3 the kinds Proxy never
-  /// type checks carry no values for a column.
+  /// Statements a client may send. Under assumption A3 an `Opaque` statement
+  /// carries no values for a column.
   pure val STMTS: Set[Stmt] =
     if (UNCHECKED_WRITES) ALL_STMTS
-    else ALL_STMTS.filter(s => not(s.kind == Unchecked and s.op == Write))
+    else ALL_STMTS.filter(s => not(s.kind == Opaque and s.op == Write))
+
+  /// Two-statement simple Query batches: two different statements that are
+  /// type checked. The batch rule concerns only those, and sending the other
+  /// kinds alone keeps the state space small enough for TLC.
+  pure val BATCHES: Set[List[Stmt]] =
+    STMTS.filter(s => s.kind == Checked or s.kind == Gap)
+      .powerset()
+      .filter(b => b.size() == 2)
+      .map(b => b.fold(List(), (acc, s) => acc.append(s)))
+
+  /// `eql_mapper::requires_schema`: the statements whose Bind the settings
+  /// check covers.
+  pure def requiresSchema(k: Kind): bool =
+    k == Checked or k == Gap or k == CopyFrom
 
   /// Load a committed schema snapshot from the catalog. The encrypt config is
   /// derived from the catalog's domain types, so it covers encrypted columns
@@ -157,12 +181,22 @@ module routing {
   pure def mayFallBack(mapErrs: bool, writesEncrypted: bool): bool =
     not(mapErrs) and not(writesEncrypted)
 
+  /// `check_copy_into`: while encrypted columns are configured, a
+  /// `COPY ... FROM` into an encrypted column, or into a table Proxy cannot
+  /// resolve, is refused.
+  pure def copyRefused(v: View, encConfigured: bool): bool =
+    encConfigured and v != VNative
+
   /// `Frontend::route`.
   pure def route(s: Stmt, snap: Snapshot, unsafe: bool, mapErrs: bool): Route =
+    val v = snap.view.get(s.col)
     if (unsafe) Forward(MappingDisabled)
-    else if (s.kind == Unchecked) Forward(NotTypeChecked)
+    else if (s.kind == CopyFrom)
+      if (copyRefused(v, snap.encConfigured)) Refuse else Forward(NothingEncrypted)
+    else if (s.kind == NestedWrite)
+      if (snap.encConfigured) Refuse else Forward(NotTypeChecked)
+    else if (s.kind == Opaque) Forward(NotTypeChecked)
     else
-      val v = snap.view.get(s.col)
       // An unresolvable table fails the type check like a coverage gap does.
       val typeCheckFails = s.kind == Gap or v == VUnknown
       if (not(typeCheckFails))
@@ -233,8 +267,8 @@ module routing {
   }
 
   /// The database applies forwarded writes atomically: a rejected value
-  /// rolls the whole message back.
-  action deliver(writes: Set[Sent], unsafe: bool, routes: Set[Route]): bool =
+  /// rolls the whole message back. `done` is the outcome when it accepts.
+  action deliver(writes: Set[Sent], done: Outcome): bool =
     val allAccepted = writes.forall(w => accepts(dbType, w))
     all {
       lastSent' = writes,
@@ -242,9 +276,9 @@ module routing {
         if (allAccepted)
           atRest.union(writes
             .filter(w => dbType.get(w.col) == Encrypted)
-            .map(w => { payload: w.payload, unsafe: unsafe }))
+            .map(w => { payload: w.payload, unsafe: w.unsafe }))
         else atRest,
-      outcome' = if (allAccepted) Executed(routes) else DbRejected,
+      outcome' = if (allAccepted) done else DbRejected,
     }
 
   /// A simple Query carrying one or two statements.
@@ -257,6 +291,8 @@ module routing {
       .filter(i => stmts[i].op == Write)
       .map(i => sent(stmts[i], routes[i], asWritten, conn.unsafe, snap, snap))
     all {
+      stmts.length() > 0,
+      stmts.foldl(true, (acc, s) => acc and STMTS.contains(s)),
       conn' = conn,
       dbType' = dbType,
       unresolvable' = unresolvable,
@@ -267,15 +303,20 @@ module routing {
       else if (batchRefused(routes))
         all { lastSent' = Set(), atRest' = atRest, outcome' = BatchRefused }
       else
-        deliver(writes, conn.unsafe, routeSet),
+        deliver(writes, Executed(routeSet)),
     }
 
-  /// Parse: route against the effective schema and remember the decision.
-  /// A refused Parse forgets the name (`Context::refuse_parse`).
+  /// Parse of a name not in use: route against the effective schema and
+  /// remember the decision. PostgreSQL rejects a Parse of a name in use, and
+  /// Proxy then restores the statement it held (`SettingsProtocol::failed`),
+  /// so that Parse changes nothing and is left out. A refused Parse leaves
+  /// the name unused (`Context::refuse_parse`).
   action parse(name: str, s: Stmt): bool =
     val snap = effective
     val r = route(s, snap, conn.unsafe, mappingErrors)
     all {
+      STMTS.contains(s),
+      conn.prepared.get(name) == Empty,
       dbType' = dbType,
       unresolvable' = unresolvable,
       mappingErrors' = mappingErrors,
@@ -284,7 +325,7 @@ module routing {
       atRest' = atRest,
       if (r == Refuse)
         all {
-          conn' = { ...conn, prepared: conn.prepared.set(name, Empty) },
+          conn' = conn,
           outcome' = Refused(Set(r)),
         }
       else
@@ -294,10 +335,13 @@ module routing {
         },
     }
 
-  /// Bind and Execute a prepared statement. Bind reuses the route its Parse
-  /// took; it does not route again. It refuses a statement Proxy type checks
-  /// when the mapping setting differs from the one at Parse
-  /// (`SettingsProtocol::bind`, `MappingError::PreparedSettingsChanged`).
+  /// Bind and Execute a prepared statement, as one step. Bind reuses the
+  /// route its Parse took; it does not route again. It refuses a statement
+  /// `requires_schema` accepts when the mapping setting differs from the one
+  /// at Parse (`SettingsProtocol::bind`, `MappingError::PreparedSettingsChanged`).
+  /// `SettingsProtocol::execute` makes the same check between Bind and
+  /// Execute, so a `SET` between them, which this step leaves out, is refused
+  /// the same way.
   action bindExecute(name: str): bool = all {
     conn' = conn,
     dbType' = dbType,
@@ -306,19 +350,27 @@ module routing {
     published' = published,
     match conn.prepared.get(name) {
       | Empty =>
-        // An unknown name is refused, since its values might need encrypting.
-        all { lastSent' = Set(), atRest' = atRest, outcome' = UnknownStatementRefused }
+        // With mapping disabled the Bind is forwarded, and PostgreSQL reports
+        // the unknown name. Otherwise it is refused, since its values might
+        // need encrypting (`Context::is_prepared`).
+        if (conn.unsafe)
+          all { lastSent' = Set(), atRest' = atRest, outcome' = DbRejected }
+        else
+          all { lastSent' = Set(), atRest' = atRest, outcome' = UnknownStatementRefused }
       | Held(p) =>
         // `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` passes the Bind through.
         val r = if (conn.unsafe) Forward(MappingDisabled) else p.route
+        // A nested write takes no parameters, so its values crossed Proxy in
+        // the Parse's SQL text, under the setting at Parse (assumption A6).
+        val valuesUnsafe = if (p.stmt.kind == NestedWrite) p.unsafeAtParse else conn.unsafe
         val writes =
-          if (p.stmt.op == Write) Set(sent(p.stmt, r, false, conn.unsafe, p.routedAt, effective))
+          if (p.stmt.op == Write) Set(sent(p.stmt, r, false, valuesUnsafe, p.routedAt, effective))
           else Set()
-        val settingsChanged = p.stmt.kind != Unchecked and conn.unsafe != p.unsafeAtParse
+        val settingsChanged = requiresSchema(p.stmt.kind) and conn.unsafe != p.unsafeAtParse
         if (settingsChanged)
           all { lastSent' = Set(), atRest' = atRest, outcome' = SettingsChangedRefused }
         else
-          deliver(writes, conn.unsafe, Set(r))
+          deliver(writes, BoundExecuted(r))
     },
   }
 
@@ -330,7 +382,7 @@ module routing {
     published' = published,
     lastSent' = Set(),
     atRest' = atRest,
-    outcome' = Idle,
+    outcome' = Closed,
   }
 
   /// BEGIN pins the latest published snapshot for the transaction.
@@ -359,7 +411,7 @@ module routing {
     published' = published,
     lastSent' = Set(),
     atRest' = atRest,
-    outcome' = Idle,
+    outcome' = TxEnded,
   }
 
   /// A successfully executed `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
@@ -394,9 +446,9 @@ module routing {
 
   action step = any {
     nondet s1 = STMTS.oneOf()
-    nondet s2 = STMTS.oneOf()
-    nondet two = Set(false, true).oneOf()
-    simpleQuery(if (two) [s1, s2] else [s1]),
+    simpleQuery([s1]),
+    nondet batch = BATCHES.oneOf()
+    simpleQuery(batch),
     nondet name = NAMES.oneOf()
     nondet s = STMTS.oneOf()
     parse(name, s),
@@ -447,16 +499,16 @@ module routing {
   }
 
   // ---------------------------------------------------------------------
-  // Witnesses: write them as negations, so a violation is a trace that
-  // reaches the state. `quint run --witnesses` counts traces that reach it.
+  // Witnesses: positive predicates for `quint run --witnesses`, which counts
+  // the traces that reach each state.
   // ---------------------------------------------------------------------
 
   /// A mapped write stored ciphertext in an encrypted column.
   val ciphertextStored: bool =
     atRest.exists(r => r.payload == Cipher)
 
-  /// A read fell back to forwarding as written.
-  val readFellBack: bool = match outcome {
+  /// A statement fell back to forwarding as written.
+  val fellBack: bool = match outcome {
     | Executed(rs) => rs.contains(Forward(Fallback))
     | _ => false
   }
@@ -499,6 +551,21 @@ module routing {
       | Held(p) => p.routedAt != effective
       | Empty => false
     })
+
+  /// A Bind executed a prepared statement.
+  val boundExecuted: bool = match outcome {
+    | BoundExecuted(_) => true
+    | _ => false
+  }
+
+  /// A Close forgot a statement name.
+  val statementClosed: bool = outcome == Closed
+
+  /// A transaction ended.
+  val transactionEnded: bool = outcome == TxEnded
+
+  /// Mapping is disabled for the connection.
+  val mappingDisabled: bool = conn.unsafe
 }
 
 /// As built, with a stable schema and PostgreSQL's domain check switched
@@ -536,7 +603,7 @@ module concurrentDdlNoDomainCheck {
   ).*
 }
 
-/// Statement kinds Proxy never type checks may write: S1 fails (F2).
+/// Statements Proxy cannot inspect (`DO`, `CALL`) carry values: S1 fails (F2).
 module uncheckedWrites {
   import routing(
     COLS = Set("a", "b"),

@@ -491,7 +491,7 @@ mise run quint:install
 # typecheck, scenario tests and simulation (about 20 s)
 mise run quint:check
 
-# everything, including exhaustive TLC checks (about 10 min)
+# everything, including exhaustive TLC checks (about 6 min)
 mise run quint:check all
 ```
 

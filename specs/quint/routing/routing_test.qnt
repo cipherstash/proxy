@@ -5,8 +5,10 @@
  * deterministically rather than by sampling.
  */
 
-/// Scenarios against the behaviour as built (cipherstash/proxy#484).
-module routingAsBuiltTest {
+/// Scenarios against the behaviour as built (cipherstash/proxy#484). The
+/// configuration enables concurrent DDL and `Opaque` writes, unlike the
+/// `asBuilt` instance, so that the F1 and F2 scenarios can run.
+module routingScenarioTest {
   import routing(
     COLS = Set("a", "b"),
     NAMES = Set("s"),
@@ -53,7 +55,7 @@ module routingAsBuiltTest {
   run coverageGapReadFallsBackTest =
     initWith(aEncrypted, Set(), false)
       .then(simpleQuery([stmt(Read, "a", Gap)]))
-      .expect(and { readFellBack, lastSent == Set() })
+      .expect(and { fellBack, lastSent == Set() })
 
   run coverageGapReadRefusedWithMappingErrorsTest =
     initWith(aEncrypted, Set(), true)
@@ -76,7 +78,7 @@ module routingAsBuiltTest {
     initWith(aEncrypted, Set(), false)
       .then(parse("s", stmt(Write, "a", Checked)))
       .then(bindExecute("s"))
-      .expect(and { outcome == Executed(Set(Mapped)), atRest == Set({ payload: Cipher, unsafe: false }) })
+      .expect(and { outcome == BoundExecuted(Mapped), atRest == Set({ payload: Cipher, unsafe: false }) })
 
   run unknownStatementRefusedAtBindTest =
     initWith(aEncrypted, Set(), false)
@@ -90,12 +92,91 @@ module routingAsBuiltTest {
       .then(bindExecute("s"))
       .expect(unknownBindRefused)
 
-  run refusedParseForgetsTheNameTest =
+  run refusedParseLeavesTheNameUnusedTest =
     initWith(aEncrypted, Set(), false)
-      .then(parse("s", stmt(Write, "a", Checked)))
       .then(parse("s", stmt(Write, "a", Gap)))
+      .expect(statementRefused)
       .then(bindExecute("s"))
       .expect(unknownBindRefused)
+
+  run parseOfANameInUseIsLeftOutTest =
+    // PostgreSQL rejects it and Proxy restores the statement it held.
+    initWith(aEncrypted, Set(), false)
+      .then(parse("s", stmt(Write, "a", Checked)))
+      .then(parse("s", stmt(Write, "b", Checked)))
+      .fail()
+
+  run unknownStatementForwardedWhileUnsafeTest =
+    // `bind_handler` passes the Bind through before `is_prepared`.
+    initWith(aEncrypted, Set(), false)
+      .then(setUnsafe(true))
+      .then(bindExecute("s"))
+      .expect(and { dbRejected, lastSent == Set() })
+
+  run copyFromIntoEncryptedRefusedTest =
+    initWith(aEncrypted, Set(), false)
+      .then(simpleQuery([stmt(Write, "a", CopyFrom)]))
+      .expect(and { outcome == Refused(Set(Refuse)), lastSent == Set() })
+
+  run copyFromIntoUnresolvableRefusedTest =
+    initWith(aEncrypted, Set("b"), false)
+      .then(simpleQuery([stmt(Write, "b", CopyFrom)]))
+      .expect(outcome == Refused(Set(Refuse)))
+
+  run copyFromIntoNativeForwardedTest =
+    initWith(aEncrypted, Set(), false)
+      .then(simpleQuery([stmt(Write, "b", CopyFrom)]))
+      .expect(and { outcome == Executed(Set(Forward(NothingEncrypted))), safety })
+
+  run copyFromWithoutEncryptionForwardedTest =
+    // `check_copy_into` runs only while encrypted columns are configured.
+    initWith(allNative, Set("a"), false)
+      .then(simpleQuery([stmt(Write, "a", CopyFrom)]))
+      .expect(outcome == Executed(Set(Forward(NothingEncrypted))))
+
+  run preparedCopyFromSettingsChangedRefusedTest =
+    // `requires_schema` covers `COPY ... FROM`, so the Bind check does too.
+    initWith(aEncrypted, Set(), false)
+      .then(setUnsafe(true))
+      .then(parse("s", stmt(Write, "a", CopyFrom)))
+      .then(setUnsafe(false))
+      .then(bindExecute("s"))
+      .expect(and { settingsChangedRefused, safety })
+
+  run nestedWriteRefusedTest =
+    initWith(aEncrypted, Set(), false)
+      .then(simpleQuery([stmt(Write, "b", NestedWrite)]))
+      .expect(outcome == Refused(Set(Refuse)))
+
+  run preparedNestedWriteKeepsItsParseSettingTest =
+    // `requires_schema` leaves nested writes out of the Bind check, so the
+    // Bind is forwarded; its values were sent with mapping disabled (A6).
+    initWith(aEncrypted, Set(), false)
+      .then(setUnsafe(true))
+      .then(parse("s", stmt(Write, "a", NestedWrite)))
+      .then(setUnsafe(false))
+      .then(bindExecute("s"))
+      .expect(and {
+        outcome == BoundExecuted(Forward(MappingDisabled)),
+        lastSent.forall(w => w.unsafe),
+        safety,
+      })
+
+  run nestedWriteWithoutEncryptionForwardedTest =
+    initWith(allNative, Set(), false)
+      .then(simpleQuery([stmt(Write, "a", NestedWrite)]))
+      .expect(outcome == Executed(Set(Forward(NotTypeChecked))))
+
+  run closeTransactionAndSettingWitnessesTest =
+    initWith(aEncrypted, Set(), false)
+      .then(parse("s", stmt(Read, "a", Checked)))
+      .then(close("s"))
+      .expect(statementClosed)
+      .then(begin)
+      .then(endTx)
+      .expect(transactionEnded)
+      .then(setUnsafe(true))
+      .expect(mappingDisabled)
 
   run unsafeDisableMappingStoresPlaintextTest =
     initWith(aEncrypted, Set(), false)
@@ -155,10 +236,10 @@ module routingAsBuiltTest {
       .then(simpleQuery([stmt(Write, "a", Checked)]))
       .expect(and { outcome == Executed(Set(Mapped)), safety })
 
-  /// Finding F2: a statement kind Proxy never type checks writes as written.
-  run f2UncheckedWriteTest =
+  /// Finding F2: a statement Proxy cannot inspect writes as written.
+  run f2OpaqueWriteTest =
     initWith(aEncrypted, Set(), false)
-      .then(simpleQuery([stmt(Write, "a", Unchecked)]))
+      .then(simpleQuery([stmt(Write, "a", Opaque)]))
       .expect(and {
         outcome == Executed(Set(Forward(NotTypeChecked))),
         not(noPlaintextToKnownEncrypted),

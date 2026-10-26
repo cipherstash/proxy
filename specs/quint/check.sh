@@ -75,14 +75,15 @@ basic() {
   "${QUINT[@]}" typecheck "$TESTS"
 
   echo "== scenario tests"
-  for main in routingAsBuiltTest routingDomainCheckTest; do
+  for main in routingScenarioTest routingDomainCheckTest; do
     "${QUINT[@]}" test "$TESTS" --main "$main" --backend typescript --seed "$SEED"
   done
 
   echo "== simulation"
-  simulate asBuilt ciphertextStored readFellBack statementRefused batchRuleFired \
+  simulate asBuilt ciphertextStored fellBack statementRefused batchRuleFired \
     unknownBindRefused settingsChangedRefused unsafePlaintextStored \
-    statementPrepared inTransaction
+    statementPrepared inTransaction boundExecuted statementClosed \
+    transactionEnded mappingDisabled
   simulate concurrentDdl ciphertextStored dbRejected txSnapshotStale \
     preparedRouteStale
 }
@@ -132,8 +133,28 @@ mutations() {
     noPlaintextToKnownEncrypted
   # M4: Bind ignores a change to the mapping setting since Parse.
   mutate M4-no-bind-settings-check \
-    "val settingsChanged = p.stmt.kind != Unchecked and conn.unsafe != p.unsafeAtParse" \
+    "val settingsChanged = requiresSchema(p.stmt.kind) and conn.unsafe != p.unsafeAtParse" \
     "val settingsChanged = false" \
+    noPlaintextToKnownEncrypted
+  # M5: a refused statement in a simple Query is forwarded anyway.
+  mutate M5-refusal-ignored \
+    "if (routeSet.contains(Refuse))" \
+    "if (false)" \
+    noPlaintextToKnownEncrypted
+  # M6: COPY ... FROM into an encrypted column is forwarded (#488).
+  mutate M6-copy-into-encrypted \
+    "encConfigured and v != VNative" \
+    "encConfigured and v == VUnknown" \
+    noPlaintextToKnownEncrypted
+  # M7: a write nested in a statement Proxy does not type check is forwarded.
+  mutate M7-nested-write-forwarded \
+    "if (snap.encConfigured) Refuse else Forward(NotTypeChecked)" \
+    "Forward(NotTypeChecked)" \
+    noPlaintextToKnownEncrypted
+  # M8: the Bind settings check leaves out COPY ... FROM (requires_schema).
+  mutate M8-settings-check-skips-copy \
+    "k == Checked or k == Gap or k == CopyFrom" \
+    "k == Checked or k == Gap" \
     noPlaintextToKnownEncrypted
 }
 
