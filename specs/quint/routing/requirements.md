@@ -19,6 +19,24 @@ It does not execute Proxy's Rust code.
 - The Proxy glossary in `packages/cipherstash-proxy/CONTEXT.md`: effective schema, committed schema snapshot, schema publication, passthrough conditions.
 - #486 (refuse writes to a table Proxy cannot resolve) and the batch DDL and temporary table work on #484 (temporary tables in the effective schema).
 
+## Source-file correspondence
+
+Each model element stands for the Rust code below, as merged to `main` with #484.
+When a change touches one of these functions, check the model element beside it: update the model and rerun `./check.sh all` in the same change, or say in the PR why the model is unaffected.
+
+| Model element (`routing.qnt`) | Rust code |
+|---|---|
+| `route`, `mayFallBack` | `Frontend::route`, `Frontend::may_fall_back`, `Frontend::mapping_error` in `packages/cipherstash-proxy/src/postgresql/middleware/frontend.rs` |
+| `Kind` (`Checked`, `Gap`, `Unchecked`), `Op` | `eql_mapper::requires_type_check`, `eql_mapper::writes_data` in `packages/eql-mapper/src/eql_mapper.rs` |
+| `simpleQuery`, `batchRefused` | `Frontend::query_handler` in `frontend.rs` |
+| `parse` | `Frontend::parse_handler` in `frontend.rs`; `Context::begin_parse`, `Context::finish_parse`, `Context::refuse_parse` in `packages/cipherstash-proxy/src/postgresql/context/lifecycle.rs` |
+| `bindExecute`, `settingsChanged` | `Frontend::bind_handler` in `frontend.rs`; `Context::begin_bind` in `lifecycle.rs`; `Context::bind_settings_statement` in `packages/cipherstash-proxy/src/postgresql/context/mod.rs`; `SettingsProtocol::bind` in `packages/cipherstash-proxy/src/postgresql/context/settings_protocol.rs` |
+| `close` | `Context::close` in `lifecycle.rs` |
+| `begin`, `endTx`, `effective` | `SchemaMiddleware::before_statement`, `SchemaMiddleware::ready_for_query`, `SchemaMiddleware::adopt_latest` in `packages/cipherstash-proxy/src/proxy/schema/middleware.rs` |
+| `concurrentDdl`, `published`, `load` | `SchemaManager::reload` in `packages/cipherstash-proxy/src/proxy/schema/manager.rs`; `Context::reload_schema`, `Context::publish_schema_if_changed` in `context/mod.rs` |
+| `unresolvable`, `VUnknown` | `UnresolvedTable` handling in `Frontend::mapping_error` (`MappingError::UnresolvableTable`, `MappingError::AmbiguousTable`) |
+| `setUnsafe`, `conn.unsafe` | `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` handling in `settings_protocol.rs` |
+
 ## Scope
 
 In:
