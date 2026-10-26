@@ -29,7 +29,7 @@ The first `quint verify` downloads the Apalache distribution, which bundles TLC,
 
 - `quint typecheck`: the model is well formed. Nothing more.
 - `quint test`: the named scenarios behave as written.
-- `quint run`: no violation in the sampled traces. Not a proof.
+- `quint run`: no violation in the sampled traces, and every named witness is reached in at least one trace. Not a proof.
 - `quint verify --backend=tlc`: the property holds in every reachable state of that finite instance. Not a proof for larger instances.
 - Mutations: each injected fault produces a counterexample, so the properties are not vacuous.
 

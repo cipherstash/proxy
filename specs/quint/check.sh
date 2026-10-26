@@ -50,6 +50,25 @@ verify_violated() {
   echo "counterexample found, as expected"
 }
 
+# simulate INSTANCE WITNESS...: sample traces, require no violation of safety,
+# and require every witness to be reached in at least one trace. A witness
+# reached in 0 traces means the state is dead, so the model is over-constrained.
+simulate() {
+  local main=$1 out
+  shift
+  echo "== simulation: $main"
+  if ! out=$("${QUINT[@]}" run "$MODEL" --main "$main" --backend typescript \
+    --max-samples=2000 --max-steps=12 --seed="$SEED" --invariant safety \
+    --witnesses "$@" 2>&1); then
+    echo "$out" >&2
+    fail "$main should satisfy safety in simulation"
+  fi
+  grep -E "was witnessed in" <<<"$out"
+  if grep -qE "was witnessed in 0 trace" <<<"$out"; then
+    fail "$main: a witness was never reached"
+  fi
+}
+
 basic() {
   echo "== typecheck"
   "${QUINT[@]}" typecheck "$MODEL"
@@ -61,13 +80,11 @@ basic() {
   done
 
   echo "== simulation"
-  "${QUINT[@]}" run "$MODEL" --main asBuilt --backend typescript \
-    --max-samples=2000 --max-steps=12 --seed="$SEED" --invariant safety \
-    --witnesses ciphertextStored readFellBack statementRefused batchRuleFired \
-      unknownBindRefused settingsChangedRefused unsafePlaintextStored
-  "${QUINT[@]}" run "$MODEL" --main concurrentDdl --backend typescript \
-    --max-samples=2000 --max-steps=12 --seed="$SEED" --invariant safety \
-    --witnesses ciphertextStored dbRejected
+  simulate asBuilt ciphertextStored readFellBack statementRefused batchRuleFired \
+    unknownBindRefused settingsChangedRefused unsafePlaintextStored \
+    statementPrepared inTransaction
+  simulate concurrentDdl ciphertextStored dbRejected txSnapshotStale \
+    preparedRouteStale
 }
 
 tlc() {

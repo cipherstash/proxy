@@ -482,6 +482,23 @@ module routing {
 
   /// PostgreSQL rejected a forwarded write.
   val dbRejected: bool = outcome == DbRejected
+
+  /// A Parse stored a route under a statement name.
+  val statementPrepared: bool =
+    NAMES.exists(n => conn.prepared.get(n) != Empty)
+
+  /// A transaction is open, so Proxy routes against its pinned snapshot.
+  val inTransaction: bool = conn.inTx
+
+  /// Concurrent DDL was published while a transaction kept the old snapshot.
+  val txSnapshotStale: bool = conn.inTx and conn.snap != published
+
+  /// A prepared route was decided against a snapshot Proxy no longer uses.
+  val preparedRouteStale: bool =
+    NAMES.exists(n => match conn.prepared.get(n) {
+      | Held(p) => p.routedAt != effective
+      | Empty => false
+    })
 }
 
 /// As built, with a stable schema and PostgreSQL's domain check switched

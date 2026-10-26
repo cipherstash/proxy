@@ -61,11 +61,16 @@ M4 is the model as first written, which reported a finding (F3) that Proxy does 
 | `asBuilt` | `unknownBindRefused` | 1,498 |
 | `asBuilt` | `settingsChangedRefused` | 59 |
 | `asBuilt` | `unsafePlaintextStored` | 270 |
+| `asBuilt` | `statementPrepared` | 1,499 |
+| `asBuilt` | `inTransaction` | 1,769 |
 | `concurrentDdl` | `ciphertextStored` | 124 |
 | `concurrentDdl` | `dbRejected` | 261 |
+| `concurrentDdl` | `txSnapshotStale` | 403 |
+| `concurrentDdl` | `preparedRouteStale` | 208 |
 
-Witness counts are reported, not enforced.
-The scenario tests in `routing_test.qnt` reach each of these states deterministically, and those do fail CI.
+`check.sh` fails if any witness is reached in 0 traces, since that means the state is dead and the model is over-constrained.
+The exact counts depend on the seed and are not enforced.
+The scenario tests in `routing_test.qnt` also reach these states deterministically.
 
 ## Scenario tests
 
