@@ -8,7 +8,8 @@ use crate::{
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -68,6 +69,88 @@ pub fn requires_type_check(statement: &Statement) -> bool {
             | Statement::Prepare { .. }
             | Statement::Explain { .. }
     )
+}
+
+/// Returns whether the [`Statement`] writes rows: an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one nested
+/// in a `PREPARE`, an `EXPLAIN` or a data-modifying CTE.
+pub fn writes_data(statement: &Statement) -> bool {
+    struct FindWrite;
+
+    impl<'ast> Visitor<'ast> for FindWrite {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(
+                    Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Merge { .. },
+                ) => ControlFlow::Break(Break::Finished),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    statement.accept(&mut FindWrite).is_break()
+}
+
+/// Returns the tables the [`Statement`] writes rows to, including the writes [`writes_data`] finds nested in it.
+///
+/// Returns `None` when a write's target is not a plain table name, as with `MERGE`.
+pub fn write_targets(statement: &Statement) -> Option<Vec<ast::ObjectName>> {
+    #[derive(Default)]
+    struct FindTargets {
+        targets: Vec<ast::ObjectName>,
+    }
+
+    impl FindTargets {
+        fn add_relation(&mut self, table: &ast::TableWithJoins) -> ControlFlow<Break<()>> {
+            match &table.relation {
+                ast::TableFactor::Table { name, .. } if table.joins.is_empty() => {
+                    self.targets.push(name.clone());
+                    ControlFlow::Continue(())
+                }
+                _ => ControlFlow::Break(Break::Err(())),
+            }
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for FindTargets {
+        type Error = ();
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(Statement::Insert(insert)) => match &insert.table {
+                    ast::TableObject::TableName(name) => {
+                        self.targets.push(name.clone());
+                        ControlFlow::Continue(())
+                    }
+                    _ => ControlFlow::Break(Break::Err(())),
+                },
+                Some(Statement::Update { table, .. }) => self.add_relation(table),
+                Some(Statement::Delete(delete)) => {
+                    let (ast::FromTable::WithFromKeyword(from)
+                    | ast::FromTable::WithoutKeyword(from)) = &delete.from;
+                    if !delete.tables.is_empty() {
+                        return ControlFlow::Break(Break::Err(()));
+                    }
+                    for table in from {
+                        self.add_relation(table)?;
+                    }
+                    ControlFlow::Continue(())
+                }
+                Some(Statement::Merge { .. }) => ControlFlow::Break(Break::Err(())),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    let mut finder = FindTargets::default();
+    match statement.accept(&mut finder) {
+        ControlFlow::Continue(()) => Some(finder.targets),
+        ControlFlow::Break(_) => None,
+    }
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.

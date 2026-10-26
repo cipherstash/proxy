@@ -109,7 +109,8 @@ impl Connection {
         Self::with_schema(config, EncryptConfig::default(), Schema::new("public"))
     }
 
-    /// A started connection to a Proxy with no default keyset that encrypts `users.email`
+    /// A started connection to a Proxy with no default keyset that encrypts `users.email`, with a
+    /// plaintext table `notes`
     async fn encrypted() -> Self {
         let mut config = TandemConfig::for_testing();
         config.encrypt.default_keyset_id = None;
@@ -126,8 +127,15 @@ impl Connection {
             Ident::with_quote('"', "email"),
             EqlTraits::all(),
         )));
+        let mut notes = Table::new(Ident::new("notes"));
+        for column in ["id", "body"] {
+            notes.add_column(Arc::new(eql_mapper::Column::native(Ident::with_quote(
+                '"', column,
+            ))));
+        }
         let mut schema = Schema::new("public");
         schema.add_table(users);
+        schema.add_table(notes);
 
         let mut connection = Self::with_schema(config, encrypt_config, schema);
         connection.server(ready(b'I')).await;
@@ -2633,6 +2641,218 @@ mod copy_from_stdin {
         let mut connection = Connection::started().await;
         let sql =
             "COPY (INSERT INTO users (email) VALUES ('alice@example.com') RETURNING id) TO STDOUT";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+}
+
+/// With mapping errors off, a statement that fails type checking is forwarded unchanged: the
+/// type-check fallback. The fallback forwards the whole Query as the client wrote it, so it is
+/// refused when another statement in the Query needs mapping, and a write that falls back is
+/// refused while encrypted columns are configured, as either would send plaintext to PostgreSQL.
+mod type_check_fallback {
+    use super::*;
+
+    /// A connection that encrypts `users.email`, with stub ciphertexts
+    async fn connection() -> Connection {
+        let connection = Connection::encrypted().await;
+        connection
+            .encrypts
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        connection
+    }
+
+    /// Check that Proxy refused what the client sent: it forwarded only a message PostgreSQL
+    /// rejects in its place, and none of the client's plaintext. PostgreSQL then rejects it, and
+    /// the number of errors the client got is returned.
+    async fn refused(connection: &mut Connection) -> usize {
+        connection.errors_sent_to_client();
+        let forwarded = connection.forwarded().await;
+        assert!(!forwarded.is_empty());
+        for (_, body) in &forwarded {
+            let body = String::from_utf8_lossy(body);
+            assert!(!body.contains("a@example.com"), "{body}");
+        }
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        connection.errors_sent_to_client()
+    }
+
+    /// The Query was forwarded unchanged
+    async fn forwarded_unchanged(connection: &mut Connection, sql: &str) {
+        assert_eq!(
+            connection.forwarded().await,
+            vec![(b'Q', format!("{sql}\0").into_bytes())]
+        );
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_encrypted_insert_after_a_statement_that_fails_type_checking_is_refused() {
+        let mut connection = connection().await;
+
+        connection
+            .client(query(
+                "SELECT * FROM no_such_table; INSERT INTO users (email) VALUES ('a@example.com')",
+            ))
+            .await;
+
+        assert_eq!(refused(&mut connection).await, 1);
+    }
+
+    #[tokio::test]
+    async fn an_encrypted_insert_before_a_statement_that_fails_type_checking_is_refused() {
+        let mut connection = connection().await;
+
+        connection
+            .client(query(
+                "INSERT INTO users (email) VALUES ('a@example.com'); SELECT * FROM no_such_table",
+            ))
+            .await;
+
+        assert_eq!(refused(&mut connection).await, 1);
+    }
+
+    /// Forwarded unchanged, the encrypted column's values would reach the client undecrypted
+    #[tokio::test]
+    async fn a_read_of_an_encrypted_column_beside_a_statement_that_fails_type_checking_is_refused()
+    {
+        for sql in [
+            "SELECT * FROM no_such_table; SELECT email FROM users",
+            "SELECT email FROM users; SELECT * FROM no_such_table",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            assert_eq!(refused(&mut connection).await, 1, "{sql}");
+        }
+    }
+
+    /// Proxy cannot tell which columns a write it cannot type check writes to
+    #[tokio::test]
+    async fn a_write_that_fails_type_checking_is_refused_with_encrypted_columns() {
+        for sql in [
+            "INSERT INTO no_such_table (email) VALUES ('a@example.com')",
+            "UPDATE no_such_table SET email = 'a@example.com'",
+            "WITH i AS (INSERT INTO no_such_table (email) VALUES ('a@example.com') RETURNING id) \
+             SELECT id FROM i",
+            "PREPARE p AS INSERT INTO users (email) VALUES ('a@example.com')",
+            "SELECT 1; INSERT INTO no_such_table (email) VALUES ('a@example.com')",
+            "SELECT * FROM no_such_table; INSERT INTO no_such_table (email) VALUES ('a@example.com')",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            assert_eq!(refused(&mut connection).await, 1, "{sql}");
+        }
+    }
+
+    /// Proxy knows the table has no encrypted columns, so the write cannot put plaintext in one.
+    /// 2.2's type checker does not support `ANY` over an array.
+    #[tokio::test]
+    async fn a_write_to_a_plaintext_table_that_fails_type_checking_is_forwarded_unchanged() {
+        for sql in [
+            "INSERT INTO notes (id, body) SELECT id + 1, body FROM notes \
+             WHERE id = ANY(ARRAY[1::int8, 2::int8]) ON CONFLICT DO NOTHING",
+            "UPDATE notes SET body = 'a@example.com' WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "SELECT id FROM users; \
+             DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            forwarded_unchanged(&mut connection, sql).await;
+        }
+    }
+
+    /// A write Proxy cannot type check that writes to an encrypted table, or to a target Proxy
+    /// cannot name, is refused
+    #[tokio::test]
+    async fn a_write_beside_a_plaintext_target_that_fails_type_checking_is_refused() {
+        for sql in [
+            "INSERT INTO users (id, email) SELECT id, body FROM notes \
+             WHERE id = ANY(ARRAY[1::int8, 2::int8]) AND body = 'a@example.com'",
+            "WITH i AS (INSERT INTO users (email) VALUES ('a@example.com') RETURNING id) \
+             DELETE FROM notes WHERE id = ANY(ARRAY[1::int8, 2::int8])",
+            "MERGE INTO notes USING users ON notes.id = users.id \
+             WHEN NOT MATCHED THEN INSERT (id, body) VALUES (users.id, 'a@example.com')",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            assert_eq!(refused(&mut connection).await, 1, "{sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_extended_write_that_fails_type_checking_is_refused_with_encrypted_columns() {
+        let mut connection = connection().await;
+
+        connection
+            .client(parse(
+                "",
+                "INSERT INTO no_such_table (email) VALUES ('a@example.com')",
+            ))
+            .await;
+        connection.client(bind("", "")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        assert_eq!(refused(&mut connection).await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_read_that_fails_type_checking_is_forwarded_unchanged() {
+        for sql in [
+            "SELECT * FROM no_such_table",
+            "SELECT * FROM no_such_table; SELECT id FROM users",
+            "SELECT id FROM users; SELECT * FROM no_such_table",
+            "SET search_path TO public; SELECT * FROM no_such_table; DISCARD PLANS",
+        ] {
+            let mut connection = connection().await;
+
+            connection.client(query(sql)).await;
+
+            forwarded_unchanged(&mut connection, sql).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_extended_read_that_fails_type_checking_is_forwarded_unchanged() {
+        let mut connection = connection().await;
+
+        connection
+            .client(parse("", "SELECT * FROM no_such_table"))
+            .await;
+
+        assert_eq!(connection.forwarded_codes().await, vec![b'P']);
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    /// Mapping is disabled on purpose, so the statement after it is forwarded as written
+    #[tokio::test]
+    async fn a_write_after_mapping_is_disabled_is_forwarded_beside_a_statement_that_fails_type_checking(
+    ) {
+        let mut connection = connection().await;
+        let sql = "SELECT * FROM no_such_table; SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; \
+                   INSERT INTO users (email) VALUES ('a@example.com')";
+
+        connection.client(query(sql)).await;
+
+        forwarded_unchanged(&mut connection, sql).await;
+    }
+
+    #[tokio::test]
+    async fn a_write_that_fails_type_checking_is_forwarded_with_no_encrypted_columns() {
+        let mut connection = Connection::started().await;
+        let sql = "INSERT INTO no_such_table (email) VALUES ('a@example.com')";
 
         connection.client(query(sql)).await;
 

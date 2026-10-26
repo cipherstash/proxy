@@ -511,6 +511,8 @@ where
 
         let mut portal = Portal::passthrough(Some(session_id));
         let mut encrypted = false;
+        // Whether a statement so far needs mapping
+        let mut mapped = false;
         let mut parse_duration_recorded = false;
 
         for (index, (statement, (mapping_disabled, keyset))) in parsed_statements
@@ -540,24 +542,47 @@ where
             let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.context.mapping_errors_enabled() {
+                    // The type-check fallback forwards the Query as the client wrote it, so it
+                    // must not carry a statement that needs mapping, or a write Proxy cannot
+                    // type check: their values would reach PostgreSQL as plaintext
+                    if self.context.mapping_errors_enabled()
+                        || mapped
+                        || self.may_write_encrypted(statement)
+                    {
                         return Err(err);
-                    } else {
-                        // The Query is forwarded unchanged, so the settings commands after
-                        // this statement still run, in order. A COPY after it is still checked.
-                        for (statement, (mapping_disabled, _)) in parsed_statements
-                            .iter()
-                            .zip(&statement_settings)
-                            .skip(index + 1)
-                        {
-                            // PostgreSQL stops at the failed statement, so a `CREATE` after it
-                            // is not run, and is not recorded
-                            if !mapping_disabled {
-                                self.check_copy(statement)?;
-                            }
+                    }
+                    // The settings commands after this statement still run, in order. A COPY
+                    // after it is still checked.
+                    for (statement, (mapping_disabled, _)) in parsed_statements
+                        .iter()
+                        .zip(&statement_settings)
+                        .skip(index + 1)
+                    {
+                        // A `CREATE` after the failed statement is not recorded. PostgreSQL
+                        // stops at the statement if it rejects it too, but runs the `CREATE` if
+                        // only Proxy failed to type check it, so a later statement may refer to
+                        // a table Proxy does not know. A write to one is refused.
+                        if *mapping_disabled {
+                            continue;
                         }
-                        return Ok(None);
-                    };
+                        self.check_copy(statement)?;
+                        if !eql_mapper::requires_type_check(statement) {
+                            continue;
+                        }
+                        match self.type_check(statement) {
+                            Ok(typed_statement) => {
+                                if self
+                                    .to_encryptable_statement(&typed_statement, vec![])?
+                                    .is_some()
+                                {
+                                    return Err(err);
+                                }
+                            }
+                            Err(err) if self.may_write_encrypted(statement) => return Err(err),
+                            Err(_) => (),
+                        }
+                    }
+                    return Ok(None);
                 }
             };
 
@@ -606,6 +631,7 @@ where
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal and mark as mapped
+                    mapped = true;
                     portal = Portal::encrypted(Arc::new(encryptable), Some(session_id));
                     self.context.update_statement_metadata(session_id, |m| {
                         m.encrypted = true;
@@ -940,11 +966,10 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.context.mapping_errors_enabled() {
+                if self.context.mapping_errors_enabled() || self.may_write_encrypted(&statement) {
                     return Err(err);
-                } else {
-                    return Ok(None);
-                };
+                }
+                return Ok(None);
             }
         };
 
@@ -1028,6 +1053,31 @@ where
         }
     }
 
+    /// Whether `statement` writes rows while encrypted columns are configured, to a table Proxy
+    /// does not know has no encrypted columns. Such a write is refused when it fails type checking,
+    /// whatever the mapping errors setting, as it may put plaintext in an encrypted column.
+    fn may_write_encrypted(&self, statement: &ast::Statement) -> bool {
+        if self.context.is_passthrough() || !eql_mapper::writes_data(statement) {
+            return false;
+        }
+        let Some(targets) = eql_mapper::write_targets(statement) else {
+            return true;
+        };
+        targets.iter().any(|target| {
+            let Some(tables) = self.known_tables(target) else {
+                return true;
+            };
+            tables.iter().any(|table| {
+                // A table with no columns Proxy knows, such as one created with `AS`
+                table.columns.is_empty()
+                    || table
+                        .columns
+                        .iter()
+                        .any(|column| !matches!(column.kind, eql_mapper::ColumnKind::Native))
+            })
+        })
+    }
+
     ///
     /// Check the Statement AST for DDL
     /// Sets a schema changed flag in the Context
@@ -1068,22 +1118,15 @@ where
         }
     }
 
-    /// Refuse a `COPY ... FROM` into `columns` of `table_name` unless Proxy knows none of them is
-    /// encrypted.
+    /// The tables Proxy knows that `table_name` may name, or `None` if it knows none, or does not
+    /// know their columns.
     ///
     /// The schema Proxy loads has the tables of every schema by name, without the schema. A table
     /// created or changed on this connection is known by the name it was given. Proxy records it
     /// before PostgreSQL runs the statement, which may then not create it, as with
-    /// `CREATE TABLE IF NOT EXISTS`, or roll it back. So the `COPY` is refused if either the table
-    /// created with that name or the loaded table of that name has an encrypted column it fills.
-    fn check_copy_into(
-        &self,
-        table_name: &ast::ObjectName,
-        columns: &[ast::Ident],
-    ) -> Result<(), Error> {
-        let unknown = || MappingError::CopyIntoUnknownTable {
-            table: table_name.to_string(),
-        };
+    /// `CREATE TABLE IF NOT EXISTS`, or roll it back. So both the table created with that name and
+    /// the loaded table of that name are returned.
+    fn known_tables(&self, table_name: &ast::ObjectName) -> Option<Vec<Arc<eql_mapper::Table>>> {
         let resolver = self.context.get_table_resolver();
         let name = ast::ObjectName(table_name.0.last().cloned().into_iter().collect());
         let tables: Vec<_> = [
@@ -1102,9 +1145,22 @@ where
                 column.name.quote_style.is_none() && column.name.value.eq_ignore_ascii_case("like")
             })
         });
-        if created_like {
+        (!tables.is_empty() && !created_like).then_some(tables)
+    }
+
+    /// Refuse a `COPY ... FROM` into `columns` of `table_name` unless Proxy knows none of them is
+    /// encrypted, in either of the [`Self::known_tables`] of that name.
+    fn check_copy_into(
+        &self,
+        table_name: &ast::ObjectName,
+        columns: &[ast::Ident],
+    ) -> Result<(), Error> {
+        let unknown = || MappingError::CopyIntoUnknownTable {
+            table: table_name.to_string(),
+        };
+        let Some(tables) = self.known_tables(table_name) else {
             return Err(unknown().into());
-        }
+        };
 
         let mut targets = vec![];
         if columns.is_empty() {

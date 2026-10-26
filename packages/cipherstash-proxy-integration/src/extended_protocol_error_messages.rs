@@ -33,14 +33,14 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            assert_eq!(msg, "db error: ERROR: column \"encrypted_unconfigured\" of relation \"encrypted\" does not exist");
-        } else {
-            unreachable!();
-        }
+        // EQL Mapper cannot type check a write to a column it does not know, so Proxy refuses it
+        // rather than forward the values as written
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.starts_with("db error: ERROR: Statement could not be type checked:"),
+            "{msg}"
+        );
+        assert!(msg.contains("encrypted_unconfigured"), "{msg}");
     }
 
     #[tokio::test]
