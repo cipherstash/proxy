@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792979871125,
+  "lastUpdate": 1792979887101,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29339,6 +29339,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.100686,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "16ecb9f5044d9d01f0623905d5f218a70d808383",
+          "message": "chore(specs): adopt Quint skills and tighten the routing model checks",
+          "timestamp": "2026-10-26T00:42:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/490/commits/16ecb9f5044d9d01f0623905d5f218a70d808383"
+        },
+        "date": 1792979885451,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.752594,
             "unit": "Number"
           }
         ]
