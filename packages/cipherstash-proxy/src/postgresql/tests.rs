@@ -1876,6 +1876,8 @@ mod encrypted {
             .to_owned()
     }
 
+    /// Covers each passthrough path in `query_handler`: a statement that is not type checked
+    /// (`SET`, `DISCARD`) and a type-checked statement with no encrypted column (`SELECT id`)
     #[tokio::test]
     async fn statements_beside_an_encrypted_statement_are_forwarded_in_order() {
         let mut connection = Connection::encrypted().await;
@@ -1886,6 +1888,7 @@ mod encrypted {
             .client(query(
                 "SET search_path TO public; \
                  INSERT INTO users (email) VALUES ('a@example.com'); \
+                 SELECT id FROM users; \
                  DISCARD PLANS",
             ))
             .await;
@@ -1897,10 +1900,15 @@ mod encrypted {
             sql.starts_with("SET search_path = public;INSERT INTO users"),
             "{sql}"
         );
-        assert!(sql.ends_with(";DISCARD PLANS"), "{sql}");
+        assert!(
+            sql.ends_with(";SELECT id FROM users;DISCARD PLANS"),
+            "{sql}"
+        );
         assert_eq!(connection.errors_sent_to_client(), 0);
     }
 
+    /// Covers the mapping-disabled passthrough path in `query_handler`. Forwarding plaintext into
+    /// the encrypted column is the intended, documented effect of `UNSAFE_DISABLE_MAPPING`.
     #[tokio::test]
     async fn a_statement_after_mapping_is_disabled_is_forwarded_beside_an_encrypted_statement() {
         let mut connection = Connection::encrypted().await;
