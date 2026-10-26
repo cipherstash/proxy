@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792986487960,
+  "lastUpdate": 1792989234239,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29439,6 +29439,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 42.07863,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "519e1a4e8cc3cab8c38ad6d9f085f411838af15f",
+          "message": "fix(proxy): refuse SQL EXECUTE of a statement prepared without mapping",
+          "timestamp": "2026-10-26T00:42:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/492/commits/519e1a4e8cc3cab8c38ad6d9f085f411838af15f"
+        },
+        "date": 1792989232753,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.697779,
             "unit": "Number"
           }
         ]
