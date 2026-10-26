@@ -230,6 +230,15 @@ pub async fn connect_with_tls_and_task(port: u16) -> (Client, tokio::task::JoinH
     (client, connection_task)
 }
 
+/// Connects with TLS unless `CS_TEST_USE_TLS` is `false`, matching the Proxy under test.
+pub async fn connect_for_test(port: u16) -> Client {
+    if std::env::var("CS_TEST_USE_TLS").as_deref() == Ok("false") {
+        connect(port).await
+    } else {
+        connect_with_tls(port).await
+    }
+}
+
 pub async fn connect(port: u16) -> Client {
     let connection_config = connection_config(port);
     let (client, connection) = connection_config.connect(NoTls).await.unwrap();
