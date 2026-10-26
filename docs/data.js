@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792999770026,
+  "lastUpdate": 1793054879565,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29672,6 +29672,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.647197,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dfcb8c1c6988a8cef00ca06b9502bd640611c0bd",
+          "message": "fix(proxy): close two plaintext paths found by the Quint routing review",
+          "timestamp": "2026-10-26T13:23:14Z",
+          "url": "https://github.com/cipherstash/proxy/pull/492/commits/dfcb8c1c6988a8cef00ca06b9502bd640611c0bd"
+        },
+        "date": 1793054877740,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.608224,
             "unit": "Number"
           }
         ]
