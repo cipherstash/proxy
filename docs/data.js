@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792975646525,
+  "lastUpdate": 1792975651466,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29185,6 +29185,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.15847,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a0a4691e8ee795790c4bc2b1e5971e678b6d777",
+          "message": "Merge pull request #488 from cipherstash/claude/project-thread-ajkwfx\n\nfix(proxy): refuse COPY FROM into encrypted columns, check statements after COPY FROM STDIN",
+          "timestamp": "2026-10-26T11:42:22+11:00",
+          "tree_id": "44b9e237b6feb23dd243b1f9e70a7288c95172cd",
+          "url": "https://github.com/cipherstash/proxy/commit/2a0a4691e8ee795790c4bc2b1e5971e678b6d777"
+        },
+        "date": 1792975650031,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.431706,
             "unit": "Number"
           }
         ]
