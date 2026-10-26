@@ -1252,29 +1252,17 @@ impl<S: EncryptionService> Frontend<S> {
         resolver: &Arc<TableResolver>,
     ) -> Result<Route<'a>, Error> {
         if self.context.unsafe_disable_mapping()? {
-            if let ast::Statement::Prepare { name, .. } = statement {
-                if eql_mapper::writes_data(statement) {
-                    self.context
-                        .set_unmapped_sql_statement(sql_statement_name(name))?;
-                }
+            if let Some(name) = to_writing_preparation(statement) {
+                self.context.set_unmapped_sql_statement(name)?;
             }
             return Ok(Route::Forward(Forward::MappingDisabled));
         }
         // Like the Bind settings check, for a statement prepared with SQL.
-        if let ast::Statement::Execute {
-            name: Some(name), ..
-        } = statement
-        {
-            if let [part] = name.0.as_slice() {
-                if let Some(name) = part.as_ident() {
-                    if self.context.has_encrypted_columns()
-                        && self
-                            .context
-                            .is_unmapped_sql_statement(&sql_statement_name(name))?
-                    {
-                        return Err(MappingError::PreparedSettingsChanged.into());
-                    }
-                }
+        if let Some(name) = to_execution(statement) {
+            if self.context.has_encrypted_columns()
+                && self.context.is_unmapped_sql_statement(&name)?
+            {
+                return Err(MappingError::PreparedSettingsChanged.into());
             }
         }
         if let Some((table_name, columns)) = eql_mapper::copies_into_table(statement) {
@@ -1490,6 +1478,30 @@ fn to_deallocation(statement: &ast::Statement) -> Option<Deallocation> {
         ast::Statement::Discard {
             object_type: ast::DiscardObject::ALL,
         } => Some(Deallocation::AllStatements),
+        _ => None,
+    }
+}
+
+/// The name of a SQL `PREPARE` that prepares a statement that writes data, if any
+fn to_writing_preparation(statement: &ast::Statement) -> Option<Name> {
+    match statement {
+        ast::Statement::Prepare { name, .. } if eql_mapper::writes_data(statement) => {
+            Some(sql_statement_name(name))
+        }
+        _ => None,
+    }
+}
+
+/// The name of the SQL prepared statement an `EXECUTE` runs, if any
+fn to_execution(statement: &ast::Statement) -> Option<Name> {
+    match statement {
+        ast::Statement::Execute {
+            name: Some(ast::ObjectName(parts)),
+            ..
+        } => match parts.as_slice() {
+            [ast::ObjectNamePart::Identifier(name)] => Some(sql_statement_name(name)),
+            _ => None,
+        },
         _ => None,
     }
 }
