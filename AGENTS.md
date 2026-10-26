@@ -11,8 +11,11 @@ architecture, domain boundaries, request flow, and vocabulary.
 
 ## Formal models
 
-Before changing `specs/quint/`, or Rust code named in a model's source-file
-correspondence table, use the `proxy-quint` skill.
+Before changing `specs/quint/`, or Proxy's statement routing, Parse/Bind
+lifecycle, settings protocol or schema reload (`frontend.rs`,
+`context/{lifecycle,mod,settings_protocol}.rs` and
+`schema/{middleware,manager}.rs` in `packages/cipherstash-proxy/src/`, and
+`packages/eql-mapper/src/eql_mapper.rs`), use the `proxy-quint` skill.
 
 ## Development workflow
 
