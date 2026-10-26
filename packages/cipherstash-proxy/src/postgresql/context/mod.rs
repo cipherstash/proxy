@@ -1346,9 +1346,10 @@ where
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable.into())
     }
 
-    /// Returns the resolver for this connection's effective schema snapshot.
+    /// Returns the resolver for this connection's effective schema snapshot,
+    /// with its native temporary tables.
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
-        self.schema_middleware.resolver()
+        self.schema_middleware.effective_resolver()
     }
 
     /// Records schema intent for a parsed prepared statement.
@@ -1449,8 +1450,7 @@ where
         let settings = settings_protocol::EffectiveSettings::new(&state.settings);
         state
             .settings_protocol
-            .prepare(operation, name, statement, settings);
-        Ok(())
+            .prepare(operation, name, statement, settings)
     }
 
     fn bind_settings_statement(
@@ -1525,26 +1525,26 @@ where
             settings_protocol,
             ..
         } = &mut *state;
-        Ok(settings_protocol.simple_query(operation, statements, settings))
+        settings_protocol.simple_query(operation, statements, settings)
     }
 
     pub fn settings_simple_query_requires_fail_closed(
         &self,
         statements: &[sqltk::parser::ast::Statement],
-    ) -> bool {
+    ) -> Result<bool, Error> {
         let Ok(state) = self.protocol_state.read() else {
-            return true;
+            return Ok(true);
         };
         let mut changed = false;
         for (statement, _, changes) in
-            settings_protocol::project_settings_effects(&state.settings, statements)
+            settings_protocol::project_settings_effects(&state.settings, statements)?
         {
-            if changed && eql_mapper::requires_type_check(statement) {
-                return true;
+            if changed && eql_mapper::requires_schema(statement) {
+                return Ok(true);
             }
             changed |= changes;
         }
-        false
+        Ok(false)
     }
 
     pub fn discarding_extended_messages(&self) -> Result<bool, Error> {
@@ -1731,6 +1731,23 @@ where
 
         self.schema_middleware.publication_succeeded();
         Ok(())
+    }
+
+    /// The resolver to type check each statement of a simple-query batch with,
+    /// which sees the encryption-neutral schema changes of the statements
+    /// before it.
+    pub fn batch_table_resolvers(
+        &self,
+        statements: &[sqltk::parser::ast::Statement],
+    ) -> Vec<Arc<TableResolver>> {
+        self.schema_middleware.batch_resolvers(statements)
+    }
+
+    /// Whether any column is encrypted. A column can be encrypted without
+    /// encrypt config, when same-named tables disagree on its domain.
+    pub fn has_encrypted_columns(&self) -> bool {
+        !self.schema_middleware.encrypt_config().is_empty()
+            || self.schema_middleware.schema_has_encrypted_columns()
     }
 
     pub fn is_passthrough(&self) -> bool {
@@ -2559,9 +2576,11 @@ mod tests {
             "RESET ALL; SELECT 1",
         ] {
             assert!(
-                context.settings_simple_query_requires_fail_closed(
-                    &crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap()
-                ),
+                context
+                    .settings_simple_query_requires_fail_closed(
+                        &crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap()
+                    )
+                    .unwrap(),
                 "{sql}"
             );
         }
@@ -2629,9 +2648,11 @@ mod tests {
         })
         .join();
 
-        assert!(context.settings_simple_query_requires_fail_closed(
-            &crate::postgresql::parser::SqlParser::parse_statements("SELECT 1").unwrap()
-        ));
+        assert!(context
+            .settings_simple_query_requires_fail_closed(
+                &crate::postgresql::parser::SqlParser::parse_statements("SELECT 1").unwrap()
+            )
+            .unwrap());
     }
 
     #[test]
@@ -2662,7 +2683,9 @@ mod tests {
         ] {
             let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
             assert!(
-                !context.settings_simple_query_requires_fail_closed(&statements),
+                !context
+                    .settings_simple_query_requires_fail_closed(&statements)
+                    .unwrap(),
                 "{sql}"
             );
         }

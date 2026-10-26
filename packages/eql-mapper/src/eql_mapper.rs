@@ -3,12 +3,13 @@ use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
     DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    TypeRegistry, UnresolvedTable,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -70,6 +71,56 @@ pub fn requires_type_check(statement: &Statement) -> bool {
     )
 }
 
+/// Returns whether the [`Statement`] writes rows: an `INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one nested
+/// in a `PREPARE`, an `EXPLAIN` or a data-modifying CTE.
+pub fn writes_data(statement: &Statement) -> bool {
+    struct FindWrite;
+
+    impl<'ast> Visitor<'ast> for FindWrite {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            match node.downcast_ref::<Statement>() {
+                Some(
+                    Statement::Insert(_)
+                    | Statement::Update { .. }
+                    | Statement::Delete(_)
+                    | Statement::Merge { .. },
+                ) => ControlFlow::Break(Break::Finished),
+                _ => ControlFlow::Continue(()),
+            }
+        }
+    }
+
+    statement.accept(&mut FindWrite).is_break()
+}
+
+/// Returns the table and column list a `COPY ... FROM` (a client stream, a file
+/// or a program) fills, or `None` for any other statement. An empty column list
+/// fills every column of the table.
+///
+/// A `COPY` is not type checked, so it is checked against the schema on its own.
+pub fn copies_into_table(statement: &Statement) -> Option<(&ast::ObjectName, &[ast::Ident])> {
+    match statement {
+        Statement::Copy {
+            source:
+                ast::CopySource::Table {
+                    table_name,
+                    columns,
+                },
+            to: false,
+            ..
+        } => Some((table_name, columns)),
+        _ => None,
+    }
+}
+
+/// Returns whether checking the [`Statement`] needs the schema: it is type
+/// checked, or it is a `COPY ... FROM` into a table.
+pub fn requires_schema(statement: &Statement) -> bool {
+    requires_type_check(statement) || copies_into_table(statement).is_some()
+}
+
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {
@@ -116,6 +167,36 @@ impl EqlMapperError {
             EqlMapperError::Import(ImportError::TypeError(err)) => {
                 err.as_unmappable_encrypted_column()
             }
+            _ => None,
+        }
+    }
+
+    /// Whether the statement uses an operation that an encrypted value's EQL
+    /// type does not support. The type checker understood the statement, so
+    /// this is not a gap in its coverage.
+    pub fn is_unsatisfied_bounds(&self) -> bool {
+        match self {
+            EqlMapperError::Type(err) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Scope(err) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Import(ImportError::ScopeError(err)) => err.is_unsatisfied_bounds(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => err.is_unsatisfied_bounds(),
+            _ => false,
+        }
+    }
+
+    /// Returns why, when this error means the statement names a
+    /// table the schema cannot resolve: one that is not loaded, a name that is
+    /// qualified by another schema, or a name more than one table uses.
+    ///
+    /// A caller must not treat such a statement as one that touches nothing
+    /// encrypted, because the type checker never saw the table's columns.
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
+        match self {
+            EqlMapperError::Type(err) => err.as_unresolved_table(),
+            EqlMapperError::Scope(err) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::SchemaError(err)) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::ScopeError(err)) => err.as_unresolved_table(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => err.as_unresolved_table(),
             _ => None,
         }
     }

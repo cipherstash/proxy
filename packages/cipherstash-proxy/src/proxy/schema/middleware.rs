@@ -43,7 +43,8 @@
 //!   encryption metadata and then perform schema-dependent work are rejected. Explicitly native
 //!   table DDL remains compatible because it cannot create an encryption obligation.
 //! * Temporary and other connection-local catalog objects are invisible to the separate
-//!   publication connection. Native temporary-table batches may pass through, but encrypted
+//!   publication connection. Native temporary tables are modelled per connection instead:
+//!   they survive commit, follow rollback and savepoints, and are never published. Encrypted
 //!   temporary objects cannot be represented or authoritatively published and are unsupported.
 //!   A temporary table that could shadow encrypted metadata leaves the connection fail-closed
 //!   until an earlier savepoint removes it or the connection ends; an authoritative global reload
@@ -69,8 +70,8 @@ use crate::proxy::EncryptConfig;
 use cipherstash_client::eql::Identifier;
 use eql_mapper::{ColumnKind, Schema, SchemaWithEdits, TableResolver};
 use sqltk::parser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, DataType, DropBehavior, Ident,
-    ObjectName, ObjectNamePart, ObjectType, Statement,
+    AlterColumnOperation, AlterTableOperation, ColumnDef, DataType, DiscardObject, DropBehavior,
+    Ident, ObjectName, ObjectNamePart, ObjectType, OnCommit, Statement,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{
@@ -85,6 +86,172 @@ struct Intent {
     statement: Statement,
     ddl: bool,
     modelled: bool,
+    /// Changes only this connection's native temporary tables.
+    temporary: bool,
+}
+
+impl Intent {
+    /// Whether schema-dependent work must wait for this execution's outcome:
+    /// catalog DDL, or a temporary table a later statement may use. Work after
+    /// `DISCARD` need not wait, since a temporary table it removes can only
+    /// make a later statement resolve a table that PostgreSQL then rejects.
+    fn changes_schema(&self) -> bool {
+        self.ddl || (self.temporary && matches!(self.statement, Statement::CreateTable(_)))
+    }
+}
+
+/// Where one confirmed schema change lands.
+enum SchemaChange {
+    /// DDL on this connection's native temporary tables.
+    Temporary(Statement),
+    /// `DISCARD TEMP` or `DISCARD ALL`.
+    DiscardTemporary,
+    /// DDL on catalog tables.
+    Catalog(Statement),
+    /// A change Proxy cannot model.
+    Unmodelled { connection_local: bool },
+}
+
+/// A connection's native temporary tables, which outlive its transactions
+/// but not a rollback of the transaction that created them.
+#[derive(Debug)]
+struct Temporary {
+    /// The tables now, for DDL to edit and the type checker to read.
+    resolver: Arc<TableResolver>,
+    /// Tables created `ON COMMIT DROP` in the current transaction.
+    on_commit_drop: Vec<ObjectName>,
+    /// The tables when the current transaction started, which rollback restores.
+    committed: SchemaWithEdits,
+    /// Whether PostgreSQL will roll back the current transaction.
+    failed: bool,
+}
+
+#[derive(Clone, Debug)]
+/// Temporary tables as of a savepoint.
+struct TemporaryCheckpoint {
+    tables: SchemaWithEdits,
+    on_commit_drop: Vec<ObjectName>,
+}
+
+impl Temporary {
+    fn new() -> Self {
+        let resolver = Arc::new(TableResolver::new_temporary());
+        let committed = Self::tables_of(&resolver);
+        Self {
+            resolver,
+            on_commit_drop: Vec::new(),
+            committed,
+            failed: false,
+        }
+    }
+
+    fn tables_of(resolver: &TableResolver) -> SchemaWithEdits {
+        resolver
+            .as_schema_with_edits()
+            .unwrap()
+            .read()
+            .unwrap()
+            .clone()
+    }
+
+    /// Whether `name` resolves to one of these tables.
+    fn checkpoint(&self) -> TemporaryCheckpoint {
+        TemporaryCheckpoint {
+            tables: Self::tables_of(&self.resolver),
+            on_commit_drop: self.on_commit_drop.clone(),
+        }
+    }
+
+    fn restore(&mut self, checkpoint: TemporaryCheckpoint) {
+        *self
+            .resolver
+            .as_schema_with_edits()
+            .unwrap()
+            .write()
+            .unwrap() = checkpoint.tables;
+        self.on_commit_drop = checkpoint.on_commit_drop;
+    }
+
+    /// Applies a confirmed `CREATE TEMPORARY TABLE`, `ALTER TABLE` or
+    /// `DROP TABLE` naming these tables.
+    fn apply(&mut self, statement: &Statement) {
+        apply_to_temporary(&self.resolver, statement);
+        if let Statement::CreateTable(create) = statement {
+            if create.on_commit == Some(OnCommit::Drop) {
+                self.on_commit_drop.push(create.name.clone());
+            }
+        }
+    }
+
+    fn discard(&mut self) {
+        self.restore(TemporaryCheckpoint {
+            tables: Self::tables_of(&TableResolver::new_temporary()),
+            on_commit_drop: Vec::new(),
+        });
+    }
+
+    /// Commits the current transaction's changes, or discards them if
+    /// PostgreSQL rolled it back.
+    fn transaction_ended(&mut self) {
+        if self.failed {
+            self.restore(TemporaryCheckpoint {
+                tables: self.committed.clone(),
+                on_commit_drop: Vec::new(),
+            });
+        } else {
+            for name in std::mem::take(&mut self.on_commit_drop) {
+                apply_to_temporary(&self.resolver, &drop_tables(vec![name]));
+            }
+        }
+        self.committed = Self::tables_of(&self.resolver);
+        self.failed = false;
+    }
+}
+
+/// Applies DDL to a temporary-table resolver. A `DROP` removes the tables
+/// whatever its drop behaviour, since nothing Proxy models depends on them.
+fn apply_to_temporary(resolver: &Arc<TableResolver>, statement: &Statement) {
+    let statement = match statement {
+        Statement::Drop {
+            object_type: ObjectType::Table,
+            names,
+            ..
+        } => drop_tables(names.clone()),
+        statement => statement.clone(),
+    };
+    eql_mapper::collect_ddl_with_column_kind(resolver.clone(), &statement, &column_kind);
+}
+
+/// An editable copy of `resolver`'s tables that later edits to either leave
+/// the other unchanged.
+fn snapshot(resolver: &TableResolver) -> Arc<TableResolver> {
+    Arc::new(TableResolver::ViaSchemaWithEdits(Arc::new(RwLock::new(
+        Temporary::tables_of(resolver),
+    ))))
+}
+
+/// `statement`, with a `CREATE TABLE` in `pg_temp` marked temporary, since
+/// PostgreSQL creates any table there as a temporary table.
+fn mark_temporary(mut statement: Statement) -> Statement {
+    if let Statement::CreateTable(create) = &mut statement {
+        if let [ObjectNamePart::Identifier(qualifier), _] = create.name.0.as_slice() {
+            create.temporary |= postgres_identifier(qualifier) == "pg_temp";
+        }
+    }
+    statement
+}
+
+/// `DROP TABLE` of `names`.
+fn drop_tables(names: Vec<ObjectName>) -> Statement {
+    Statement::Drop {
+        object_type: ObjectType::Table,
+        if_exists: false,
+        names,
+        cascade: false,
+        restrict: false,
+        purge: false,
+        temporary: false,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +271,7 @@ struct Savepoint {
     encrypt_config: EncryptConfig,
     unmodelled: bool,
     local_unmodelled: bool,
+    temporary: TemporaryCheckpoint,
 }
 
 /// PostgreSQL's transaction state carried by a `ReadyForQuery` message.
@@ -158,6 +326,7 @@ pub struct SchemaMiddleware {
     local_unmodelled: Arc<AtomicBool>,
     transaction_active: Arc<AtomicBool>,
     savepoints: Arc<RwLock<Vec<Savepoint>>>,
+    temporary: Arc<RwLock<Temporary>>,
 }
 
 impl SchemaMiddleware {
@@ -190,12 +359,28 @@ impl SchemaMiddleware {
             local_unmodelled: Arc::new(AtomicBool::new(false)),
             transaction_active: Arc::new(AtomicBool::new(false)),
             savepoints: Arc::new(RwLock::new(Vec::new())),
+            temporary: Arc::new(RwLock::new(Temporary::new())),
         }
     }
 
     /// Returns the resolver for the connection's current effective schema.
     pub fn resolver(&self) -> Arc<TableResolver> {
         self.resolver.read().unwrap().clone()
+    }
+
+    /// Returns the resolver the type checker uses: this connection's native
+    /// temporary tables in front of its effective schema.
+    pub fn effective_resolver(&self) -> Arc<TableResolver> {
+        Arc::new(TableResolver::with_temporary(
+            self.temporary.read().unwrap().resolver.clone(),
+            self.resolver(),
+        ))
+    }
+
+    /// Whether the loaded schema has any encrypted column, whether or not the
+    /// encrypt config names it.
+    pub fn schema_has_encrypted_columns(&self) -> bool {
+        self.base.read().unwrap().has_encrypted_columns()
     }
 
     /// Returns encryption metadata aligned with the current effective schema.
@@ -265,21 +450,41 @@ impl SchemaMiddleware {
         self.discard_skipped_executions();
         self.transaction_active
             .store(!status.is_idle(), Ordering::Release);
+        if status.is_idle() {
+            self.temporary.write().unwrap().transaction_ended();
+        }
         if status.is_idle() && !self.needs_publication() {
             self.adopt_latest();
         }
     }
 
+    /// Classifies what executing `statement` would do to schema state.
+    fn intent(&self, statement: Statement) -> Intent {
+        let statement = mark_temporary(statement);
+        Intent {
+            ddl: self.is_schema_ddl(&statement),
+            modelled: self.models_ddl(&statement),
+            temporary: self.changes_only_temporary_tables(&statement),
+            statement,
+        }
+    }
+
+    /// Whether `statement` changes only native temporary tables: creates one
+    /// that cannot shadow an encrypted table, or discards them all.
+    fn changes_only_temporary_tables(&self, statement: &Statement) -> bool {
+        match statement {
+            Statement::CreateTable(create) if create.temporary => !self.is_schema_ddl(statement),
+            Statement::Discard {
+                object_type: DiscardObject::TEMP | DiscardObject::ALL,
+            } => true,
+            _ => false,
+        }
+    }
+
     /// Records schema intent for a named prepared statement.
     pub fn prepare(&self, name: Name, statement: Statement) {
-        self.prepared.write().unwrap().insert(
-            name,
-            Intent {
-                ddl: self.is_schema_ddl(&statement),
-                modelled: self.models_ddl(&statement),
-                statement,
-            },
-        );
+        let intent = self.intent(statement);
+        self.prepared.write().unwrap().insert(name, intent);
     }
 
     /// Associates a portal with the schema intent of its prepared statement.
@@ -305,7 +510,7 @@ impl SchemaMiddleware {
     /// the protocol adapter must flush DDL immediately to unblock dependent work.
     pub fn execute(&self, portal: &Name) -> bool {
         let intent = self.portals.read().unwrap().get(portal).cloned();
-        let executes_ddl = intent.as_ref().is_some_and(|intent| intent.ddl);
+        let executes_ddl = intent.as_ref().is_some_and(Intent::changes_schema);
         self.transaction_active.store(true, Ordering::Release);
         if executes_ddl {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
@@ -322,12 +527,8 @@ impl SchemaMiddleware {
         self.transaction_active.store(true, Ordering::Release);
         let mut executions = self.executions.write().unwrap();
         for statement in statements {
-            let intent = Intent {
-                ddl: self.is_schema_ddl(statement),
-                modelled: self.models_ddl(statement),
-                statement: statement.clone(),
-            };
-            if intent.ddl {
+            let intent = self.intent(statement.clone());
+            if intent.changes_schema() {
                 self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
             }
             executions.push_back(PendingExecution::Execute(Some(Box::new(intent))));
@@ -341,7 +542,7 @@ impl SchemaMiddleware {
         let mut encryption_changing_ddl_seen = false;
 
         for statement in statements {
-            if encryption_changing_ddl_seen && eql_mapper::requires_type_check(statement) {
+            if encryption_changing_ddl_seen && eql_mapper::requires_schema(statement) {
                 return true;
             }
             encryption_changing_ddl_seen |= self.ddl_may_change_encryption(statement);
@@ -489,25 +690,21 @@ impl SchemaMiddleware {
     #[cfg(test)]
     /// Records a direct statement execution for state-machine tests.
     pub fn execution_started(&self, statement: Statement) {
-        let ddl = self.is_schema_ddl(&statement);
-        if ddl {
+        let intent = self.intent(statement);
+        if intent.changes_schema() {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
         }
         self.executions
             .write()
             .unwrap()
-            .push_back(PendingExecution::Execute(Some(Box::new(Intent {
-                modelled: self.models_ddl(&statement),
-                statement,
-                ddl,
-            }))));
+            .push_back(PendingExecution::Execute(Some(Box::new(intent))));
     }
 
     /// Applies the next queued execution after PostgreSQL confirms success.
     pub fn execution_succeeded(&self) {
         if let Some(Some(intent)) = self.pop_execution() {
-            let statement = intent.statement;
-            match statement {
+            let changes_schema = intent.changes_schema();
+            match intent.statement.clone() {
                 Statement::Savepoint { name } => {
                     let resolver = self.resolver();
                     let overlay = resolver.as_schema_with_edits().unwrap();
@@ -518,6 +715,7 @@ impl SchemaMiddleware {
                         encrypt_config: (*self.encrypt_config()).clone(),
                         unmodelled: self.unmodelled.load(Ordering::Acquire),
                         local_unmodelled: self.local_unmodelled.load(Ordering::Acquire),
+                        temporary: self.temporary.read().unwrap().checkpoint(),
                     });
                 }
                 Statement::ReleaseSavepoint { name } => {
@@ -544,6 +742,10 @@ impl SchemaMiddleware {
                         let encrypt_config = savepoints[index].encrypt_config.clone();
                         let unmodelled = savepoints[index].unmodelled;
                         let local_unmodelled = savepoints[index].local_unmodelled;
+                        let mut temporary = self.temporary.write().unwrap();
+                        temporary.restore(savepoints[index].temporary.clone());
+                        temporary.failed = false;
+                        drop(temporary);
                         savepoints.truncate(index + 1);
                         let resolver = self.resolver();
                         let overlay = resolver.as_schema_with_edits().unwrap();
@@ -571,21 +773,37 @@ impl SchemaMiddleware {
                     self.savepoints.write().unwrap().clear();
                     self.dirty.store(false, Ordering::Release);
                     self.unmodelled.store(false, Ordering::Release);
+                    self.temporary.write().unwrap().failed = true;
                 }
-                statement if intent.ddl => {
-                    if !intent.modelled {
-                        let local_only = matches!(
-                            statement,
-                            Statement::CreateTable(ref create) if create.temporary
-                        );
-                        self.mark_unmodelled(local_only);
-                    } else {
-                        self.apply_ddl(&statement);
+                _ if intent.ddl || intent.temporary => {
+                    let temporary = self.temporary.read().unwrap().resolver.clone();
+                    for change in self.split_change(&temporary, &intent.statement) {
+                        match change {
+                            SchemaChange::Temporary(statement) => {
+                                self.temporary.write().unwrap().apply(&statement)
+                            }
+                            SchemaChange::DiscardTemporary => {
+                                self.temporary.write().unwrap().discard()
+                            }
+                            SchemaChange::Catalog(statement) if self.models_ddl(&statement) => {
+                                self.apply_ddl(&statement)
+                            }
+                            SchemaChange::Catalog(statement) => {
+                                let local_only = matches!(
+                                    statement,
+                                    Statement::CreateTable(ref create) if create.temporary
+                                );
+                                self.mark_unmodelled(local_only);
+                            }
+                            SchemaChange::Unmodelled { connection_local } => {
+                                self.mark_unmodelled(connection_local)
+                            }
+                        }
                     }
                 }
                 _ => {}
             }
-            if intent.ddl {
+            if changes_schema {
                 self.dirty.store(
                     self.unmodelled.load(Ordering::Acquire) || self.resolver().has_schema_changed(),
                     Ordering::Release,
@@ -594,6 +812,116 @@ impl SchemaMiddleware {
                 self.execution_finished.notify_waiters();
             }
         }
+    }
+
+    /// Splits the change `statement` makes between this connection's
+    /// temporary tables, which `temporary` resolves, and the catalog. A
+    /// `DROP TABLE` or `ALTER TABLE` naming a temporary table changes the
+    /// temporary table, as it does in PostgreSQL.
+    fn split_change(&self, temporary: &TableResolver, statement: &Statement) -> Vec<SchemaChange> {
+        if self.changes_only_temporary_tables(statement) {
+            return vec![match statement {
+                Statement::Discard { .. } => SchemaChange::DiscardTemporary,
+                statement => SchemaChange::Temporary(statement.clone()),
+            }];
+        }
+        if !self.is_schema_ddl(statement) {
+            return vec![];
+        }
+        let is_temporary = |name: &ObjectName| temporary.resolve_table(name).is_ok();
+        match statement {
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                names,
+                ..
+            } => {
+                let (temporary_names, catalog_names): (Vec<_>, Vec<_>) =
+                    names.iter().cloned().partition(is_temporary);
+                let mut changes = vec![];
+                if !temporary_names.is_empty() {
+                    changes.push(SchemaChange::Temporary(drop_tables(temporary_names)));
+                }
+                if !catalog_names.is_empty() {
+                    let mut statement = statement.clone();
+                    if let Statement::Drop { names, .. } = &mut statement {
+                        *names = catalog_names;
+                    }
+                    changes.push(SchemaChange::Catalog(statement));
+                }
+                changes
+            }
+            Statement::AlterTable { name, .. } if is_temporary(name) => {
+                vec![if self.ddl_may_change_encryption(statement) {
+                    SchemaChange::Unmodelled {
+                        connection_local: true,
+                    }
+                } else {
+                    SchemaChange::Temporary(statement.clone())
+                }]
+            }
+            statement => vec![SchemaChange::Catalog(statement.clone())],
+        }
+    }
+
+    /// The resolver to type check each statement of a simple-query batch with:
+    /// the effective schema plus the encryption-neutral schema changes of the
+    /// statements before it. PostgreSQL stops a batch at its first error, so a
+    /// statement runs only once the changes before it have been made. A batch
+    /// that changes encryption metadata before a dependent statement is refused
+    /// by [`Self::simple_query_requires_fail_closed`].
+    pub fn batch_resolvers(&self, statements: &[Statement]) -> Vec<Arc<TableResolver>> {
+        let mut resolver = self.effective_resolver();
+        let mut scratch: Option<(Arc<TableResolver>, Arc<TableResolver>)> = None;
+        statements
+            .iter()
+            .map(|statement| {
+                let current = resolver.clone();
+                let statement = &mark_temporary(statement.clone());
+                if self.ddl_may_change_encryption(statement) {
+                    return current;
+                }
+                let changes = match &scratch {
+                    Some((temporary, _)) => self.split_change(temporary, statement),
+                    None => self.split_change(&self.temporary.read().unwrap().resolver, statement),
+                };
+                if changes.is_empty() {
+                    return current;
+                }
+                let (temporary, catalog) = scratch.get_or_insert_with(|| self.scratch());
+                for change in changes {
+                    match change {
+                        SchemaChange::Temporary(statement) => {
+                            apply_to_temporary(temporary, &statement)
+                        }
+                        SchemaChange::DiscardTemporary => {
+                            *temporary = Arc::new(TableResolver::new_temporary())
+                        }
+                        SchemaChange::Catalog(statement) if self.models_ddl(&statement) => {
+                            eql_mapper::collect_ddl_with_column_kind(
+                                catalog.clone(),
+                                &statement,
+                                &column_kind,
+                            );
+                        }
+                        SchemaChange::Catalog(_) | SchemaChange::Unmodelled { .. } => {}
+                    }
+                }
+                resolver = Arc::new(TableResolver::with_temporary(
+                    snapshot(temporary),
+                    snapshot(catalog),
+                ));
+                current
+            })
+            .collect()
+    }
+
+    /// Copies of the temporary and catalog layers for a batch to change
+    /// without changing this connection's state.
+    fn scratch(&self) -> (Arc<TableResolver>, Arc<TableResolver>) {
+        (
+            snapshot(&self.temporary.read().unwrap().resolver),
+            snapshot(&self.resolver()),
+        )
     }
 
     /// Applies modelled DDL to schema and encryption overlays as one operation.
@@ -609,8 +937,9 @@ impl SchemaMiddleware {
 
     /// Discards the next queued execution after PostgreSQL reports failure.
     pub fn execution_failed(&self) {
+        self.temporary.write().unwrap().failed = true;
         if let Some(Some(intent)) = self.pop_execution() {
-            if intent.ddl {
+            if intent.changes_schema() {
                 self.in_flight_ddl.fetch_sub(1, Ordering::AcqRel);
                 self.execution_finished.notify_waiters();
             }
@@ -636,7 +965,9 @@ impl SchemaMiddleware {
         let mut executions = self.executions.write().unwrap();
         while let Some(execution) = executions.pop_front() {
             match execution {
-                PendingExecution::Execute(Some(intent)) if intent.ddl => discarded_ddl += 1,
+                PendingExecution::Execute(Some(intent)) if intent.changes_schema() => {
+                    discarded_ddl += 1
+                }
                 PendingExecution::Execute(_) => {}
                 PendingExecution::ReadyBoundary => break,
             }
@@ -1601,5 +1932,269 @@ mod tests {
             .resolver()
             .resolve_table(&table("later_table"))
             .is_ok());
+    }
+
+    /// Executes `sql` and reports that PostgreSQL succeeded.
+    fn run(middleware: &SchemaMiddleware, sql: &str) {
+        middleware.execution_started(parse(sql));
+        middleware.execution_succeeded();
+    }
+
+    fn resolves(middleware: &SchemaMiddleware, name: &str) -> bool {
+        middleware
+            .effective_resolver()
+            .resolve_table(&table(name))
+            .is_ok()
+    }
+
+    fn pg_temp(name: &str) -> ObjectName {
+        ObjectName(vec![
+            ObjectNamePart::Identifier(Ident::new("pg_temp")),
+            ObjectNamePart::Identifier(Ident::new(name)),
+        ])
+    }
+
+    #[test]
+    fn a_temporary_table_resolves_once_its_create_succeeds() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+
+        middleware.execution_started(parse("create temporary table names (name text)"));
+        assert!(!resolves(&middleware, "names"));
+
+        middleware.execution_succeeded();
+        assert!(resolves(&middleware, "names"));
+        assert!(middleware
+            .effective_resolver()
+            .resolve_table(&pg_temp("names"))
+            .is_ok());
+        assert!(!middleware.has_unmodelled_ddl());
+        assert!(!middleware.needs_publication());
+    }
+
+    #[test]
+    fn a_table_created_in_pg_temp_is_temporary() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+
+        run(&middleware, "create table pg_temp.names (name text)");
+
+        assert!(resolves(&middleware, "names"));
+        assert!(!middleware.has_unmodelled_ddl());
+        assert!(!middleware.needs_publication());
+    }
+
+    #[test]
+    fn a_temporary_table_whose_create_failed_does_not_resolve() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+
+        middleware.execution_started(parse("create temporary table names (name text)"));
+        middleware.execution_failed();
+
+        assert!(!resolves(&middleware, "names"));
+    }
+
+    #[tokio::test]
+    async fn dependent_mapping_waits_for_a_temporary_table_create() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse("create temporary table names (name text)"));
+
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            middleware.wait_for_ddl(),
+        )
+        .await
+        .is_err());
+
+        middleware.execution_succeeded();
+        middleware.wait_for_ddl().await;
+        assert!(resolves(&middleware, "names"));
+    }
+
+    #[test]
+    fn a_temporary_table_survives_commit_and_later_transactions() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+
+        run(&middleware, "create temporary table names (name text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+        middleware.publication_succeeded();
+        run(&middleware, "begin");
+        run(&middleware, "commit");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(resolves(&middleware, "names"));
+    }
+
+    #[test]
+    fn dropping_a_temporary_table_removes_it_without_touching_the_catalog() {
+        for drop in ["drop table names", "drop table pg_temp.names"] {
+            let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+            run(&middleware, "create temporary table names (name text)");
+
+            run(&middleware, drop);
+
+            assert!(!resolves(&middleware, "names"), "{drop}");
+            assert!(!middleware.has_unmodelled_ddl(), "{drop}");
+            assert!(!middleware.needs_publication(), "{drop}");
+        }
+    }
+
+    #[test]
+    fn altering_a_temporary_table_changes_it_without_touching_the_catalog() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "create temporary table names (name text)");
+
+        run(&middleware, "alter table names add column nickname text");
+
+        assert!(middleware
+            .effective_resolver()
+            .resolve_table_column(&table("names"), &Ident::new("nickname"))
+            .is_ok());
+        assert!(!middleware.has_unmodelled_ddl());
+        assert!(!middleware.needs_publication());
+    }
+
+    #[test]
+    fn discard_removes_temporary_tables() {
+        for discard in ["discard temp", "discard all"] {
+            let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+            run(&middleware, "create temporary table names (name text)");
+
+            run(&middleware, discard);
+
+            assert!(!resolves(&middleware, "names"), "{discard}");
+        }
+    }
+
+    #[test]
+    fn rollback_removes_a_temporary_table_created_in_the_transaction() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "create temporary table kept (name text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        run(&middleware, "begin");
+        run(&middleware, "create temporary table names (name text)");
+        run(&middleware, "drop table kept");
+        run(&middleware, "rollback");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!resolves(&middleware, "names"));
+        assert!(resolves(&middleware, "kept"));
+    }
+
+    #[test]
+    fn rollback_to_savepoint_restores_temporary_tables() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "begin");
+        run(&middleware, "create temporary table kept (name text)");
+        run(&middleware, "savepoint before_names");
+        run(&middleware, "create temporary table names (name text)");
+        run(&middleware, "rollback to savepoint before_names");
+        run(&middleware, "commit");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!resolves(&middleware, "names"));
+        assert!(resolves(&middleware, "kept"));
+    }
+
+    /// A batch runs in one implicit transaction, so an error later in it
+    /// undoes a temporary table an earlier statement created.
+    #[test]
+    fn a_failed_transaction_removes_its_temporary_tables() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "create temporary table names (name text)");
+        middleware.execution_started(parse("select 1 / 0"));
+        middleware.execution_failed();
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!resolves(&middleware, "names"));
+    }
+
+    #[test]
+    fn a_failure_undone_by_rollback_to_savepoint_keeps_temporary_tables() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "begin");
+        run(&middleware, "create temporary table names (name text)");
+        run(&middleware, "savepoint before_error");
+        middleware.execution_started(parse("select 1 / 0"));
+        middleware.execution_failed();
+        middleware.ready_for_query(TransactionStatus::FailedTransaction);
+        run(&middleware, "rollback to savepoint before_error");
+        run(&middleware, "commit");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(resolves(&middleware, "names"));
+    }
+
+    #[test]
+    fn on_commit_drop_removes_a_temporary_table_at_commit() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "begin");
+        run(
+            &middleware,
+            "create temporary table names (name text) on commit drop",
+        );
+        middleware.ready_for_query(TransactionStatus::InTransaction);
+        assert!(resolves(&middleware, "names"));
+
+        run(&middleware, "commit");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!resolves(&middleware, "names"));
+    }
+
+    /// DDL that may change encryption is left out of a batch view, so a
+    /// statement after it does not type check against encryption Proxy has
+    /// not loaded.
+    #[test]
+    fn a_batch_view_leaves_out_ddl_that_may_change_encryption() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statements = Parser::parse_sql(
+            &PostgreSqlDialect {},
+            "create table secrets (secret eql_v3_text);
+             insert into secrets (secret) values ('a')",
+        )
+        .unwrap();
+
+        let views = middleware.batch_resolvers(&statements);
+
+        assert!(views[1].resolve_table(&table("secrets")).is_err());
+    }
+
+    /// Each statement in a batch sees the DDL before it, and none after it.
+    #[test]
+    fn a_batch_view_reflects_only_earlier_statements() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statements = Parser::parse_sql(
+            &PostgreSqlDialect {},
+            "create table early (id int);
+             insert into names (name) values ('a');
+             create temporary table names (name text);
+             drop table early;
+             insert into names (name) values ('b')",
+        )
+        .unwrap();
+
+        let views = middleware
+            .batch_resolvers(&statements)
+            .iter()
+            .map(|resolver| {
+                (
+                    resolver.resolve_table(&table("early")).is_ok(),
+                    resolver.resolve_table(&table("names")).is_ok(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            views,
+            vec![
+                (false, false),
+                (true, false),
+                (true, false),
+                (true, true),
+                (false, true),
+            ]
+        );
+        assert!(!resolves(&middleware, "early"));
+        assert!(!resolves(&middleware, "names"));
     }
 }

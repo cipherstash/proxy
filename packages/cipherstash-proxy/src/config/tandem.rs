@@ -16,7 +16,6 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -69,6 +68,31 @@ pub struct DevelopmentConfig {
     pub enable_mapping_errors: bool,
 }
 
+/// The outcome of validating the inbound (client-facing) TLS configuration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InboundTls {
+    /// TLS is configured and valid.
+    Enabled,
+    /// TLS is not configured, so the proxy listens in plaintext.
+    NotConfigured,
+}
+
+impl InboundTls {
+    /// A notice for the user, printed regardless of log level.
+    /// `no_tls` is true when plaintext was explicitly requested with --no-tls.
+    pub fn notice(&self, no_tls: bool) -> Option<String> {
+        match self {
+            InboundTls::Enabled => None,
+            InboundTls::NotConfigured if no_tls => None,
+            InboundTls::NotConfigured => Some(
+                "TLS is not configured; listening for client connections in plaintext. \
+                 Pass --no-tls to silence this warning."
+                    .to_string(),
+            ),
+        }
+    }
+}
+
 /// Config defaults to a file called `tandem` in the current directory.
 /// Supports TOML, JSON, YAML
 /// Variable names should match the struct field names.
@@ -88,24 +112,31 @@ impl TandemConfig {
     }
 
     pub fn load(args: &Args) -> Result<TandemConfig, Error> {
-        // Log a warning to user that config file is missing
-        if !PathBuf::from(&args.config_file_path).exists() {
-            println!(
-                "Configuration file was not found: {}",
-                args.config_file_path
-            );
-            println!("Loading config values from environment variables.");
-        }
         let mut config = TandemConfig::build(args)?;
 
         // If log level is default, it has not been set by the user in config
         if config.log.level == LogConfig::default_log_level() {
-            config.log.level = args.log_level;
+            if let Some(log_level) = args.log_level {
+                config.log.level = log_level;
+            }
         }
 
         // If log format is default, it has not been set by the user in config
         if config.log.format == LogConfig::default_log_format() {
             config.log.format = args.log_format;
+        }
+
+        // --no-tls forces a plaintext inbound listener, ignoring any CS_TLS__*
+        // env / config. (Does not affect the proxy -> database connection.)
+        if args.no_tls {
+            config.tls = None;
+            config.server.require_tls = false;
+        }
+
+        // --tls requires inbound TLS: clients that skip SSLRequest are rejected.
+        if args.tls {
+            config.server.require_tls = true;
+            config.validate()?;
         }
 
         Ok(config)
@@ -114,10 +145,16 @@ impl TandemConfig {
     pub fn build_path(path: &str) -> Result<Self, Error> {
         let args = Args {
             config_file_path: path.to_string(),
+            database_url: None,
             db_host: None,
+            db_port: None,
             db_name: None,
             db_user: None,
-            log_level: LogConfig::default_log_level(),
+            db_password: None,
+            no_tls: false,
+            tls: false,
+            debug: false,
+            log_level: None,
             log_format: LogConfig::default_log_format(),
             command: None,
         };
@@ -169,20 +206,31 @@ impl TandemConfig {
                 env
             }));
 
-        // Command line arguments override env vars
+        // Command line arguments override env vars.
+        // A full connection string is applied first; individual flags below
+        // then override matching parts of it.
+        if let Some(url) = &args.database_url {
+            apply_database_url(url)?;
+        }
+
         if let Some(db_host) = &args.db_host {
-            println!("Overriding database host from command line argument");
             env::set_var("CS_DATABASE__HOST", db_host);
         }
 
+        if let Some(db_port) = &args.db_port {
+            env::set_var("CS_DATABASE__PORT", db_port.to_string());
+        }
+
         if let Some(dbname) = &args.db_name {
-            println!("Overriding database name from command line argument");
             env::set_var("CS_DATABASE__NAME", dbname);
         }
 
         if let Some(db_user) = &args.db_user {
-            println!("Overriding database user from command line argument");
-            env::set_var("CS_DATABASE__USER", db_user);
+            env::set_var("CS_DATABASE__USERNAME", db_user);
+        }
+
+        if let Some(db_password) = &args.db_password {
+            env::set_var("CS_DATABASE__PASSWORD", db_password);
         }
 
         // Source order is important!
@@ -237,6 +285,26 @@ impl TandemConfig {
             return Err(ConfigError::TlsConfigurationRequired.into());
         }
         Ok(())
+    }
+
+    /// Validate the inbound (client-facing) TLS configuration.
+    ///
+    /// TLS that is configured but invalid is fatal, at startup and on reload:
+    /// a plaintext fallback would silently downgrade clients that use
+    /// `sslmode=prefer`. Without TLS configuration, the proxy listens in
+    /// plaintext unless `require_tls` is set (by `--tls` or
+    /// `CS_SERVER__REQUIRE_TLS`).
+    pub fn resolve_inbound_tls(&self) -> Result<InboundTls, Error> {
+        match &self.tls {
+            Some(tls) => {
+                tls.check_cert().map_err(ConfigError::from)?;
+                tls.check_private_key().map_err(ConfigError::from)?;
+                crate::tls::configure_server(tls)?;
+                Ok(InboundTls::Enabled)
+            }
+            None if self.server.require_tls => Err(ConfigError::TlsConfigurationRequired.into()),
+            None => Ok(InboundTls::NotConfigured),
+        }
     }
 
     pub fn database_tls_disabled(&self) -> bool {
@@ -378,9 +446,163 @@ impl Default for PrometheusConfig {
 
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
 
-///
-/// Extracts a field name (if present) from a config::ConfigError string
-/// This is called in `build` if a ConfigError message contains the string `missing field`
+/// Parse a PostgreSQL connection string (e.g.
+/// "postgres://user:pass@host:5432/dbname") and set the corresponding
+/// CS_DATABASE__* env vars for each component present. Individual --db-* flags
+/// are applied after this and take precedence.
+fn apply_database_url(url: &str) -> Result<(), Error> {
+    use std::str::FromStr;
+    use tokio_postgres::config::{Host, SslMode};
+
+    let invalid = |reason: &str| -> Error {
+        ConfigError::InvalidDatabaseUrl {
+            reason: reason.to_string(),
+        }
+        .into()
+    };
+
+    // Proxy negotiates database TLS itself (as `sslmode=prefer`), so honouring
+    // only part of the URL could silently downgrade `sslmode=require`.
+    const DATABASE_TLS_HINT: &str = "Proxy connects to the database with sslmode=prefer. \
+        Remove sslmode and other ssl options from the URL, and set \
+        CS_DATABASE__WITH_TLS_VERIFICATION=true to verify the database certificate";
+
+    let pg = tokio_postgres::Config::from_str(url).map_err(|err| {
+        // The cause names the option, as in "invalid value for option `sslmode`".
+        let err =
+            std::error::Error::source(&err).map_or(err.to_string(), |cause| cause.to_string());
+        if err.contains("`ssl") {
+            invalid(DATABASE_TLS_HINT)
+        } else {
+            invalid(&err)
+        }
+    })?;
+
+    match pg.get_ssl_mode() {
+        SslMode::Prefer => {}
+        SslMode::Disable => {
+            return Err(invalid(
+                "sslmode=disable is not supported. Remove it from the URL, and set \
+                 CS_DEVELOPMENT__DISABLE_DATABASE_TLS=true to connect to the database without TLS",
+            ))
+        }
+        _ => return Err(invalid(DATABASE_TLS_HINT)),
+    }
+
+    let host = match pg.get_hosts() {
+        [] => None,
+        [Host::Tcp(host)] => Some(host.clone()),
+        [_] => {
+            return Err(invalid(
+                "Unix socket hosts are not supported. Use a TCP host name or address",
+            ))
+        }
+        _ => {
+            return Err(invalid(
+                "multiple hosts are not supported. Use a single host",
+            ))
+        }
+    };
+
+    // tokio-postgres fills in 5432 for a URL host without a port, which would
+    // replace the configured port, so skip the ports it filled in.
+    let ports = pg.get_ports();
+    let port = match ports.get(defaulted_port_count(url).min(ports.len())..) {
+        Some([]) | None => None,
+        Some([port]) => Some(*port),
+        Some(_) => {
+            return Err(invalid(
+                "multiple ports are not supported. Use a single port",
+            ))
+        }
+    };
+
+    // Refuse every other connection option rather than silently ignoring it:
+    // the URL must equal a config built from the parts Proxy applies.
+    let mut applied = tokio_postgres::Config::new();
+    if let Some(user) = pg.get_user() {
+        applied.user(user);
+    }
+    if let Some(password) = pg.get_password() {
+        applied.password(password);
+    }
+    if let Some(dbname) = pg.get_dbname() {
+        applied.dbname(dbname);
+    }
+    if let Some(host) = &host {
+        applied.host(host);
+    }
+    for port in ports {
+        applied.port(*port);
+    }
+    if applied != pg {
+        return Err(invalid(
+            "only the user, password, host, port and database name are supported. \
+             Remove other connection options from the URL",
+        ));
+    }
+
+    // The password is required downstream as a String. Rather than silently
+    // dropping a non-UTF8 password (which would leave the proxy connecting
+    // with no password, or a stale env/config one), fail clearly.
+    let password = pg
+        .get_password()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| invalid("password contains invalid UTF-8"))?;
+
+    if let Some(host) = host {
+        env::set_var("CS_DATABASE__HOST", host);
+    }
+
+    if let Some(port) = port {
+        env::set_var("CS_DATABASE__PORT", port.to_string());
+    }
+
+    if let Some(user) = pg.get_user() {
+        env::set_var("CS_DATABASE__USERNAME", user);
+    }
+
+    if let Some(password) = password {
+        env::set_var("CS_DATABASE__PASSWORD", password);
+    }
+
+    if let Some(dbname) = pg.get_dbname() {
+        env::set_var("CS_DATABASE__NAME", dbname);
+    }
+
+    Ok(())
+}
+
+/// The number of ports tokio-postgres filled in with 5432 when it parsed
+/// `url`: one for each host in a `postgres://` URL's authority that has no
+/// port, or an empty one. A key=value string only has the ports it sets.
+fn defaulted_port_count(url: &str) -> usize {
+    let Some(rest) = url
+        .strip_prefix("postgres://")
+        .or_else(|| url.strip_prefix("postgresql://"))
+    else {
+        return 0;
+    };
+    // Like tokio-postgres, take the credentials up to the first `@`, so an
+    // unencoded `/` in the password does not end the authority.
+    let rest = rest.split_once('@').map_or(rest, |(_, rest)| rest);
+    let hosts = rest.split(['/', '?']).next().unwrap_or_default();
+    if hosts.is_empty() {
+        return 0;
+    }
+    hosts
+        .split(',')
+        .filter(|host| {
+            let port = match host.rsplit_once(']') {
+                Some((_, after_ipv6_host)) => after_ipv6_host.strip_prefix(':'),
+                None => host.split_once(':').map(|(_, port)| port),
+            };
+            port.is_none_or(str::is_empty)
+        })
+        .count()
+}
+
 /// Expected string is in the forms:
 ///     "missing field `{field}}` for key `{key}`"
 ///     "missing field `{field}}`"
@@ -428,7 +650,7 @@ fn extract_invalid_field(input: &str) -> (String, String) {
 mod tests {
     use crate::test_helpers::with_no_cs_vars;
     use crate::{
-        config::{tandem::extract_missing_field_and_key, TandemConfig},
+        config::{tandem::extract_missing_field_and_key, InboundTls, TandemConfig},
         error::{ConfigError, Error},
     };
     use cipherstash_client::config::vars::{
@@ -449,6 +671,61 @@ mod tests {
             config.validate(),
             Err(Error::Config(ConfigError::TlsConfigurationRequired))
         ));
+    }
+
+    #[test]
+    /// --database-url sets each CS_DATABASE__* var, including USERNAME (not USER
+    /// -- a previous bug set the wrong var so --db-user was a silent no-op).
+    fn database_url_sets_connection_env() {
+        use crate::config::tandem::apply_database_url;
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(
+                [
+                    "CS_DATABASE__HOST",
+                    "CS_DATABASE__PORT",
+                    "CS_DATABASE__USERNAME",
+                    "CS_DATABASE__USER",
+                    "CS_DATABASE__PASSWORD",
+                    "CS_DATABASE__NAME",
+                ],
+                || {
+                    apply_database_url("postgres://alice:s3cret@db.example.com:5430/orders")
+                        .unwrap();
+
+                    assert_eq!(
+                        std::env::var("CS_DATABASE__HOST").unwrap(),
+                        "db.example.com"
+                    );
+                    assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "5430");
+                    assert_eq!(std::env::var("CS_DATABASE__USERNAME").unwrap(), "alice");
+                    assert_eq!(std::env::var("CS_DATABASE__PASSWORD").unwrap(), "s3cret");
+                    assert_eq!(std::env::var("CS_DATABASE__NAME").unwrap(), "orders");
+                    // The old (buggy) variable name must not be set.
+                    assert!(std::env::var("CS_DATABASE__USER").is_err());
+                },
+            );
+        });
+    }
+
+    #[test]
+    /// A non-UTF8 password in --database-url is an error, not a silent no-op.
+    /// tokio-postgres percent-decodes the password to raw bytes without UTF-8
+    /// validation, so `%FF` yields invalid UTF-8; we must reject it rather than
+    /// leave CS_DATABASE__PASSWORD unset (which would connect with no/stale
+    /// credentials).
+    fn database_url_rejects_non_utf8_password() {
+        use crate::config::tandem::apply_database_url;
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(["CS_DATABASE__PASSWORD"], || {
+                let result = apply_database_url("postgres://alice:%FF@db.example.com/orders");
+                assert!(
+                    result.is_err(),
+                    "expected a non-UTF8 password to be rejected"
+                );
+                // And it must not have set a password from the bad URL.
+                assert!(std::env::var("CS_DATABASE__PASSWORD").is_err());
+            });
+        });
     }
 
     #[test]
@@ -988,6 +1265,288 @@ mod tests {
                     crate::config::DEFAULT_THREAD_STACK_SIZE
                 }
             );
+        });
+    }
+
+    fn missing_tls_config() -> crate::config::TlsConfig {
+        crate::config::TlsConfig::Path {
+            certificate_path: "tests/tls/does-not-exist.cert".to_string(),
+            private_key_path: "tests/tls/does-not-exist.key".to_string(),
+        }
+    }
+
+    fn load_test_config(args: crate::Args) -> Result<TandemConfig, Error> {
+        with_no_cs_vars(|| TandemConfig::load(&args))
+    }
+
+    fn test_args() -> crate::Args {
+        use clap::Parser;
+        crate::Args::parse_from([
+            "cipherstash-proxy",
+            "--config-file-path",
+            "tests/config/cipherstash-proxy-test.toml",
+        ])
+    }
+
+    #[test]
+    /// An invalid certificate must not discard an explicit `require_tls`:
+    /// falling back to plaintext would accept the sessions it exists to reject.
+    fn invalid_tls_with_require_tls_is_fatal() {
+        let mut config = TandemConfig::for_testing();
+        config.tls = Some(missing_tls_config());
+        config.server.require_tls = true;
+
+        let result = config.resolve_inbound_tls();
+
+        assert!(result.is_err(), "expected an error, got {result:?}");
+    }
+
+    #[test]
+    /// TLS that was configured but is invalid is fatal: a plaintext fallback
+    /// would silently downgrade clients that use `sslmode=prefer`, including
+    /// after a SIGHUP reload.
+    fn invalid_tls_without_require_tls_is_fatal() {
+        let mut config = TandemConfig::for_testing();
+        config.tls = Some(missing_tls_config());
+
+        let result = config.resolve_inbound_tls();
+
+        assert!(result.is_err(), "expected an error, got {result:?}");
+    }
+
+    #[test]
+    /// `--tls` must require TLS from clients, not only a valid certificate.
+    fn tls_flag_sets_require_tls() {
+        let mut args = test_args();
+        args.tls = true;
+
+        let config = load_test_config(args).unwrap();
+
+        assert!(config.server.require_tls);
+    }
+
+    #[test]
+    fn tls_flag_without_tls_configuration_is_an_error() {
+        let mut args = test_args();
+        args.tls = true;
+        args.config_file_path = "tests/config/does-not-exist.toml".to_string();
+
+        let result = with_no_cs_vars(|| {
+            temp_env::with_vars(
+                [
+                    ("CS_DATABASE__NAME", Some("test")),
+                    ("CS_DATABASE__PASSWORD", Some("test")),
+                    (
+                        "CS_WORKSPACE_CRN",
+                        Some("crn:ap-southeast-2.aws:IJGECSCWKREECNBS"),
+                    ),
+                    ("CS_CLIENT_ACCESS_KEY", Some("test")),
+                    ("CS_CLIENT_ID", Some("00000000-0000-0000-0000-000000000001")),
+                    (
+                        "CS_CLIENT_KEY",
+                        Some(TandemConfig::for_testing().encrypt.client_key.as_str()),
+                    ),
+                ],
+                || TandemConfig::load(&args),
+            )
+        });
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::Config(ConfigError::TlsConfigurationRequired))
+            ),
+            "expected TlsConfigurationRequired, got {result:?}"
+        );
+    }
+
+    #[test]
+    /// The quiet default filters `warn!`, so a plaintext listener needs a
+    /// notice that is printed regardless of log level.
+    fn tls_not_configured_prints_a_notice() {
+        assert!(InboundTls::NotConfigured.notice(false).is_some());
+    }
+
+    #[test]
+    fn no_tls_flag_silences_the_not_configured_notice() {
+        assert_eq!(InboundTls::NotConfigured.notice(true), None);
+    }
+
+    /// Runs `f` with the CS_DATABASE__* vars that --database-url sets unset,
+    /// and restores them afterwards.
+    fn with_no_database_vars<F: FnOnce() -> R, R>(f: F) -> R {
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(
+                [
+                    "CS_DATABASE__HOST",
+                    "CS_DATABASE__PORT",
+                    "CS_DATABASE__USERNAME",
+                    "CS_DATABASE__PASSWORD",
+                    "CS_DATABASE__NAME",
+                ],
+                f,
+            )
+        })
+    }
+
+    #[test]
+    /// `sslmode` is not applied to the database connection, so accepting it
+    /// would silently downgrade `sslmode=require` to `prefer`.
+    fn database_url_rejects_sslmode() {
+        use crate::config::tandem::apply_database_url;
+        for sslmode in ["require", "disable"] {
+            with_no_database_vars(|| {
+                let url =
+                    format!("postgres://alice:s3cret@db.example.com/orders?sslmode={sslmode}");
+                let result = apply_database_url(&url);
+                assert!(result.is_err(), "expected sslmode={sslmode} to be rejected");
+            });
+        }
+    }
+
+    #[test]
+    fn database_url_accepts_sslmode_prefer() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice:s3cret@db.example.com/orders?sslmode=prefer")
+                .unwrap();
+        });
+    }
+
+    #[test]
+    /// A Unix socket host would leave CS_DATABASE__HOST unset while still
+    /// setting the port from the same URL.
+    fn database_url_rejects_unix_socket_host() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            let result =
+                apply_database_url("postgres://alice@%2Fvar%2Frun%2Fpostgresql:5433/orders");
+            assert!(result.is_err());
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+        });
+    }
+
+    #[test]
+    fn database_url_rejects_multiple_hosts() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            let result =
+                apply_database_url("postgres://alice@db1.example.com,db2.example.com/orders");
+            assert!(result.is_err());
+            assert!(std::env::var("CS_DATABASE__HOST").is_err());
+        });
+    }
+
+    #[test]
+    /// Every connection option other than user, password, host, port and
+    /// dbname would be silently ignored, so it is refused.
+    fn database_url_rejects_unapplied_options() {
+        use crate::config::tandem::apply_database_url;
+        for option in [
+            "channel_binding=require",
+            "hostaddr=10.0.0.9",
+            "port=5432,5433",
+            "target_session_attrs=read-write",
+            "options=-csearch_path%3Dfoo",
+            "application_name=app",
+            "connect_timeout=5",
+            "load_balance_hosts=random",
+            "sslnegotiation=direct",
+        ] {
+            with_no_database_vars(|| {
+                let url = format!("postgres://alice@db.example.com/orders?{option}");
+                let result = apply_database_url(&url);
+                assert!(result.is_err(), "expected {option} to be rejected");
+            });
+        }
+    }
+
+    #[test]
+    /// A URL without a port must not replace the configured port with 5432.
+    fn database_url_without_port_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db.example.com/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+            assert_eq!(
+                std::env::var("CS_DATABASE__HOST").unwrap(),
+                "db.example.com"
+            );
+        });
+    }
+
+    #[test]
+    fn database_url_with_port_sets_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@[::1]:6543/orders").unwrap();
+
+            assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "6543");
+        });
+    }
+
+    #[test]
+    fn database_url_sslmode_errors_point_to_the_supported_setting() {
+        use crate::config::tandem::apply_database_url;
+        for option in [
+            "sslmode=require",
+            "sslmode=verify-full",
+            "sslmode=verify-ca",
+            "sslmode=allow",
+            "sslrootcert=/etc/ssl/root.crt",
+        ] {
+            with_no_database_vars(|| {
+                let url = format!("postgres://alice@db.example.com/orders?{option}");
+                let err = apply_database_url(&url).unwrap_err().to_string();
+                assert!(
+                    err.contains("CS_DATABASE__WITH_TLS_VERIFICATION"),
+                    "{option}: {err}"
+                );
+            });
+        }
+
+        with_no_database_vars(|| {
+            let url = "postgres://alice@db.example.com/orders?sslmode=disable";
+            let err = apply_database_url(url).unwrap_err().to_string();
+            assert!(
+                err.contains("CS_DEVELOPMENT__DISABLE_DATABASE_TLS"),
+                "sslmode=disable: {err}"
+            );
+            assert!(!err.contains("CS_DATABASE__WITH_TLS_VERIFICATION"));
+        });
+    }
+
+    #[test]
+    /// tokio-postgres takes the password up to the first `@`, so a `/` in an
+    /// unencoded password must not end the authority early.
+    fn database_url_with_slash_in_password_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice:pa/ss@db1.example.com/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+            assert_eq!(std::env::var("CS_DATABASE__PASSWORD").unwrap(), "pa/ss");
+        });
+    }
+
+    #[test]
+    fn database_url_with_empty_port_keeps_configured_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db1.example.com:/orders").unwrap();
+
+            assert!(std::env::var("CS_DATABASE__PORT").is_err());
+        });
+    }
+
+    #[test]
+    fn database_url_port_parameter_sets_port() {
+        use crate::config::tandem::apply_database_url;
+        with_no_database_vars(|| {
+            apply_database_url("postgres://alice@db1.example.com/orders?port=6543").unwrap();
+
+            assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "6543");
         });
     }
 }

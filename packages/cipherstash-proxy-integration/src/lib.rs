@@ -1,5 +1,6 @@
 mod common;
 mod connection_resilience;
+mod copy_from_stdin;
 mod decrypt;
 mod diagnostics;
 mod disable_mapping;

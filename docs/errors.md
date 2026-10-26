@@ -17,6 +17,12 @@
   - [Prepared settings changed](#mapping-prepared-settings-changed)
   - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
+  - [Unresolvable table](#mapping-unresolvable-table)
+  - [Ambiguous table](#mapping-ambiguous-table)
+  - [COPY into encrypted column](#mapping-copy-into-encrypted-column)
+  - [COPY into unknown column](#mapping-copy-into-unknown-column)
+  - [COPY with a statement that uses an encrypted column](#mapping-copy-with-encrypted-statement)
+  - [Unsupported encrypted operation](#mapping-unsupported-encrypted-operation)
   - [Unknown prepared statement](#mapping-unknown-prepared-statement)
   - [Internal Error](#mapping-internal-error)
 
@@ -48,6 +54,7 @@
 
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
+  - [Invalid database URL](#config-invalid-database-url)
   - [Network configuration change requires restart](#config-network-change-requires-restart)
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -244,7 +251,18 @@ CipherStash Proxy checks SQL statements against the database schema to transpare
 
 The behaviour of Proxy depends on the `mapping_errors_enabled` configuration.
 
-When `mapping_errors_enabled` is `false` (the default), then type check errors are logged, and the statement is passed through to the database.
+When `mapping_errors_enabled` is `false` (the default), then type check errors are logged, and a read-only statement is passed through to the database.
+A statement that writes data (`INSERT`, `UPDATE`, `DELETE` or `MERGE`, including one inside `PREPARE`, `EXPLAIN`, `COPY (...) TO` or a `WITH` clause) is refused instead whenever any column is encrypted, because Proxy cannot tell whether it writes plaintext to an encrypted column.
+This applies to every table, including tables with no encrypted columns, because Proxy cannot tell which columns a write it cannot type check reaches.
+For example, these statements are refused while any column is encrypted:
+
+- `UPDATE users SET name = v.name FROM (VALUES (1, 'Ada')) AS v(id, name) WHERE users.id = v.id`
+- `INSERT INTO users (id) SELECT x FROM unnest(ARRAY[1, 2]) AS x`
+- `INSERT INTO names SELECT relname FROM pg_catalog.pg_class`
+
+Proxy type checks writes to the connection's native temporary tables, and to tables that encryption-neutral DDL earlier in the same simple query creates or alters, so those are not refused.
+`CREATE TABLE IF NOT EXISTS` is the exception: the table may already exist with encrypted columns that Proxy has not loaded, so a write after it in the same simple query is refused unless an earlier statement created the table.
+In a simple query, a statement is also refused when another statement in the same query needs encrypting.
 
 When `mapping_errors_enabled` is `true`, then type check errors are raised, and statement execution halts.
 
@@ -253,7 +271,7 @@ Configure this setting with the environment variable `CS_DEVELOPMENT__ENABLE_MAP
 In our experience, most production systems have a relatively small number of columns that require protection.
 As SQL is large and complex, instead of blocking statements with type check errors that are false negatives, the default behaviour of Proxy is to allow the statement.
 
-However, this does mean it is possible that a statement that references encrypted columns cannot be type-checked, and it will be passed through to the database.
+However, this does mean it is possible that a read-only statement that references encrypted columns cannot be type-checked, and it will be passed through to the database.
 When a statement is passed through to the database, the database's column constraints (provided by EQL) will catch the statement, and return a PostgreSQL error.
 
 Example constraint error:
@@ -402,6 +420,170 @@ re-encrypted as part of that migration; it cannot be reinterpreted in place.
 
 If the column is no longer used, dropping it also resolves the error.
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unresolvable table <a id='mapping-unresolvable-table'></a>
+
+A statement that writes data refers to a table that is not in the database schema CipherStash Proxy has loaded.
+Proxy cannot tell whether the statement writes to an encrypted column, so it refuses the statement rather than forward its values unencrypted.
+
+### Error message
+
+```
+Statement refers to table 'users', which is not in the database schema Proxy has loaded, so Proxy cannot tell whether it writes to an encrypted column.
+```
+
+### Notes
+
+The refusal applies to `INSERT`, `UPDATE`, `DELETE` and `MERGE`, including one inside `PREPARE`, `EXPLAIN`, `COPY (...) TO` or a `WITH` clause, when any column is encrypted.
+It applies wherever the statement names the table, so `INSERT INTO users ... SELECT ... FROM other` is refused when `other` cannot be resolved.
+Read-only statements are not refused.
+When no columns are encrypted, Proxy forwards these statements.
+
+Unlike a type-check failure, this refusal is not subject to the `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` passthrough.
+
+Proxy loads the tables in the schemas on its database connection's search path.
+A schema-qualified name such as `public.users` resolves only to a table loaded from that schema.
+A bare table name used in more than one schema on the search path cannot be resolved, because the client's search path can differ from Proxy's.
+Encryption configuration is keyed by the unqualified table name, so when same-named tables in different schemas declare a column with different EQL domains, Proxy loads no configuration for that column and refuses statements on it.
+When they declare the same domain, both tables share one configuration and one key descriptor, so they are not cryptographically separate: a ciphertext copied from one table to the other still decrypts, and equal values produce equal search terms in both.
+A table in a schema that is not on the search path, or one created on another connection since Proxy last loaded the schema, cannot be resolved.
+
+### How to fix
+
+Check that the table exists and that its name is spelled as PostgreSQL resolves it.
+If the table name is used in more than one schema, qualify it with its schema, as in `public.users`.
+If the table is in a schema outside the search path, add that schema to the search path of the database user Proxy connects as, then restart Proxy or wait for it to reload the schema.
+If the table was created on another connection, retry once Proxy has reloaded the database schema.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Ambiguous table <a id='mapping-ambiguous-table'></a>
+
+A statement that writes data refers to a table by a bare name that the connection uses for both a temporary table and a permanent table.
+PostgreSQL resolves the name to the temporary table, but if that table has been dropped somewhere CipherStash Proxy cannot see, such as inside a function or a `DO` block, the name means the permanent table.
+Proxy cannot tell which table the statement writes to, so it refuses the statement rather than forward its values unencrypted.
+
+### Error message
+
+```
+Statement refers to table 'notes', which names both a temporary table and a permanent table, so Proxy cannot tell which one it writes to. Qualify the name, as in 'pg_temp.notes'.
+```
+
+### Notes
+
+The refusal applies to the same statements as [Unresolvable table](#mapping-unresolvable-table), and only when any column is encrypted.
+Read-only statements are not refused.
+
+### How to fix
+
+Qualify the table name: `pg_temp.notes` for the temporary table, or the permanent table's schema, as in `public.notes`.
+Alternatively, give the temporary table a name no permanent table uses.
+
+Proxy assumes PostgreSQL's default search order, in which `pg_temp` comes first.
+It does not track `SET search_path`, so a client that puts `pg_temp` later in its search path should qualify table names.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into encrypted column <a id='mapping-copy-into-encrypted-column'></a>
+
+A `COPY ... FROM` statement would load data into an encrypted column.
+CipherStash Proxy does not encrypt `COPY` data, so it refuses the statement rather than store plaintext in the encrypted column.
+
+### Error message
+
+```
+COPY into encrypted column 'users.encrypted_email' is not supported, as Proxy does not encrypt COPY data.
+```
+
+### Notes
+
+The refusal applies to a `COPY ... FROM STDIN`, and to a `COPY ... FROM` a file or a program.
+A `COPY` with no column list loads every column of the table, so it is refused when the table has any encrypted column.
+A `COPY ... FROM` into a table with no encrypted columns, or into only the plaintext columns of a table, is forwarded to PostgreSQL with its data.
+A `COPY ... TO` of a table or of a query that reads is forwarded, and returns encrypted columns as ciphertext, as Proxy does not decrypt `COPY` data.
+A `COPY ... FROM` into a table Proxy cannot resolve is refused as an [Unresolvable table](#mapping-unresolvable-table) or an [Ambiguous table](#mapping-ambiguous-table).
+That includes a table created with `CREATE TABLE ... (LIKE ...)` or `CREATE TABLE ... AS`, whose columns Proxy does not know.
+When no columns are encrypted, Proxy does not check the table of a `COPY`.
+A `COPY` after DDL that may change which columns are encrypted, in the same simple query, is still refused, as an `INSERT` would be.
+
+### How to fix
+
+Load the encrypted columns with `INSERT` statements through CipherStash Proxy, which encrypts the values.
+Use `COPY` only for columns that are not encrypted.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY into unknown column <a id='mapping-copy-into-unknown-column'></a>
+
+A `COPY ... FROM` statement names a column that is not in the database schema CipherStash Proxy has loaded for its table.
+Proxy cannot tell whether the column is encrypted, so it refuses the statement.
+
+### Error message
+
+```
+COPY into column 'users.nickname', which is not in the database schema Proxy has loaded, is not supported, as Proxy cannot tell whether it is encrypted.
+```
+
+### Notes
+
+The refusal applies only when any column is encrypted, and whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to.
+
+### How to fix
+
+Check that the column exists and that its name is spelled as PostgreSQL resolves it.
+If the column was added on another connection, retry once Proxy has reloaded the database schema.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## COPY with a statement that uses an encrypted column <a id='mapping-copy-with-encrypted-statement'></a>
+
+A simple query contains a `COPY` together with a statement that uses an encrypted column.
+CipherStash Proxy rewrites such a query to encrypt it, and cannot keep the `COPY` in the rewritten query.
+
+### Error message
+
+```
+COPY must be sent in a query of its own when the query has a statement that uses an encrypted column.
+```
+
+### How to fix
+
+Send the `COPY` in a query of its own.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unsupported encrypted operation <a id='mapping-unsupported-encrypted-operation'></a>
+
+A statement uses an operation on an encrypted column that the column's EQL type does not support, such as `<` or `ORDER BY` on a column with no ordering index, or `LIKE` on a column with no match index.
+CipherStash Proxy cannot encrypt the operand for that operation, so it refuses the statement rather than send the operand to the database as plaintext.
+
+### Error message
+
+```
+Statement uses an operation that an encrypted column's EQL type does not support: Type `...` does not satisfy bounds `Ord`.
+```
+
+### Notes
+
+The refusal applies to reads as well as writes, and whether or not `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set.
+
+### How to fix
+
+Change the statement to use only operations the column supports, or change the column's EQL domain type to one that supports the operation.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -1091,6 +1273,27 @@ Encrypted jsonb entry has an invalid selector '{selector}'.
 
 # Configuration errors
 
+
+## Invalid database URL <a id='config-invalid-database-url'></a>
+
+The connection string passed with `--database-url` cannot be applied.
+
+### Error message
+
+```
+Invalid --database-url: {reason}.
+```
+
+### How to fix
+
+`--database-url` sets only the user, password, host, port and database name.
+Remove any other connection option from the URL, and use a single TCP host and port.
+Proxy connects to the database with `sslmode=prefer`, so remove `sslmode` and other `ssl` options.
+To verify the database certificate, set `CS_DATABASE__WITH_TLS_VERIFICATION=true`.
+To connect to the database without TLS, set `CS_DEVELOPMENT__DISABLE_DATABASE_TLS=true`.
+Percent-encode special characters in the password, and prefer `CS_DATABASE__PASSWORD` so the password is not exposed on the command line.
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 ## Database <a id='config-missing-or-invalid-tls'></a>
 

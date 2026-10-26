@@ -54,10 +54,28 @@ _Avoid_: session (`start_session`, `SessionId` and the
 `..._statements_session_duration_seconds` metric all use this sense and are misnamed).
 
 **Passthrough**:
-Traffic forwarded without encryption or rewriting. Three independent conditions produce
-it and they are not interchangeable: no encrypt config is loaded, mapping is disabled by
-configuration, or `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING` was issued on this connection.
+Traffic forwarded without encryption or rewriting. Mapping disabled by configuration
+forwards the whole connection. Otherwise each statement's **route** decides, and a
+statement is forwarded only for a named reason: `SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING`
+was issued on this connection, EQL Mapper does not type check its kind, it touches no
+encrypted column, or the **type-check fallback**. These are not interchangeable.
 Name the condition rather than saying "passthrough" alone.
+
+**Route**:
+What Proxy does with one statement from a Query or Parse: map it, forward it for a named
+reason, or refuse it. Refusing is the default. A failed type check falls back to
+forwarding only for a coverage gap (the statement could not be type checked, or an
+internal mapper error), only while mapping errors are off, and never in a simple Query with another statement to map.
+When encrypted columns are configured, a write never falls back.
+A `COPY ... FROM` is not type checked: when encrypted columns are configured, it is forwarded only if every column it fills resolves to a native column.
+Each statement in a simple Query is type checked against a **batch view**: the effective schema plus the encryption-neutral DDL of the statements before it.
+
+**Connection temporary tables**:
+The native temporary tables one connection has created, which the type checker resolves before permanent tables, as `pg_temp` is searched first.
+A table is added when PostgreSQL confirms its `CREATE`, and removed by `DROP`, `DISCARD`, `ON COMMIT DROP` at commit, or rollback of the transaction or savepoint that created it.
+A bare name that also names a permanent table is ambiguous and does not resolve, because a stale record would otherwise hide the permanent table.
+A write that uses it is refused with its own error.
+Proxy does not track `SET search_path`, so it assumes PostgreSQL's default of searching `pg_temp` first; a client that moves `pg_temp` later in its search path can make a bare name mean a permanent table Proxy has not loaded.
 
 ### Encryption
 

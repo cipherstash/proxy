@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{unifier::Type, SchemaError, ScopeError};
+use crate::{unifier::Type, SchemaError, ScopeError, UnresolvedTable};
 
 use super::unifier::EqlTraits;
 
@@ -136,6 +136,27 @@ impl TypeError {
                 column,
                 column_type,
             } => Some((table, column, column_type)),
+            _ => None,
+        }
+    }
+
+    /// Whether this error means a statement uses an operation that an encrypted
+    /// value's EQL type does not support, such as `<` on a column with no
+    /// ordering index.
+    pub fn is_unsatisfied_bounds(&self) -> bool {
+        match self {
+            TypeError::UnsatisfiedBounds(..) => true,
+            TypeError::ScopeError(err) => err.is_unsatisfied_bounds(),
+            _ => false,
+        }
+    }
+
+    /// Returns why, when this error means a statement names a
+    /// table the schema cannot resolve.
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
+        match self {
+            TypeError::SchemaError(err) => err.as_unresolved_table(),
+            TypeError::ScopeError(err) => err.as_unresolved_table(),
             _ => None,
         }
     }

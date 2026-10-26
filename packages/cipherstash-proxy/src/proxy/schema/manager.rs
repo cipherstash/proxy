@@ -11,6 +11,7 @@ use arc_swap::ArcSwap;
 use cipherstash_client::eql::Identifier;
 use eql_mapper::{Column, Schema, Table};
 use sqltk::parser::ast::Ident;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -385,6 +386,75 @@ fn classify_column(
     Column::native(ident)
 }
 
+/// One row of [`SCHEMA_QUERY`]: a table and its columns.
+struct TableRow {
+    table_schema: String,
+    table_name: String,
+    columns: Vec<String>,
+    column_type_names: Vec<Option<String>>,
+    column_domain_names: Vec<Option<String>>,
+}
+
+/// Builds the schema and its encryption metadata from the catalog query's rows.
+fn build_snapshot(tables: impl IntoIterator<Item = TableRow>) -> (Schema, EncryptConfig) {
+    let mut schema = Schema::new("public");
+    let mut encrypt_config = EncryptConfig::new();
+    // The domain each configured column was loaded with, and the columns whose
+    // same-named tables disagree on it.
+    let mut domains: HashMap<Identifier, String> = HashMap::new();
+    let mut conflicting: HashSet<Identifier> = HashSet::new();
+
+    for row in tables {
+        let table_name = row.table_name;
+        let mut table = Table::in_schema(
+            Ident::with_quote('"', &row.table_schema),
+            Ident::new(&table_name),
+        );
+
+        row.columns
+            .iter()
+            .zip(row.column_type_names)
+            .zip(row.column_domain_names)
+            .for_each(|((col, column_type_name), column_domain_name)| {
+                let column = classify_column(
+                    &table_name,
+                    col,
+                    column_type_name.as_deref(),
+                    column_domain_name.as_deref(),
+                );
+
+                table.add_column(Arc::new(column));
+
+                if let Some(domain) = column_domain_name.as_deref() {
+                    if let Some(config) = column_config_from_domain(&table_name, col, domain) {
+                        let identifier = Identifier::new(table_name.clone(), col.clone());
+                        // The encrypt config is keyed by the bare table name,
+                        // so same-named tables in two schemas share an entry.
+                        // It is only right for both when they use one domain:
+                        // otherwise a write to one would be encrypted with the
+                        // other's configuration. Leave such a column with no
+                        // configuration, so statements on it are refused.
+                        match domains.get(&identifier) {
+                            None => {
+                                domains.insert(identifier.clone(), domain.to_owned());
+                                encrypt_config.insert(identifier, config);
+                            }
+                            Some(seen) if seen != domain && conflicting.insert(identifier.clone()) => {
+                                warn!(target: SCHEMA, msg = "Encrypted column is declared with different EQL domains in tables of the same name in different schemas. Statements on this column will be REFUSED, as Proxy keys encryption configuration by the unqualified table name.", table = table_name, column = col, table_schema = row.table_schema);
+                                encrypt_config.remove_column(&table_name, col);
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                }
+            });
+
+        schema.add_table(table);
+    }
+
+    (schema, encrypt_config)
+}
+
 /// Loads the current structural schema without exposing encryption metadata.
 pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     load_snapshot(config).await.map(|(schema, _)| schema)
@@ -399,50 +469,17 @@ async fn load_snapshot(config: &DatabaseConfig) -> Result<(Schema, EncryptConfig
 
     let tables = client.query(SCHEMA_QUERY, &[]).await?;
 
-    let mut schema = Schema::new("public");
-    let mut encrypt_config = EncryptConfig::new();
-
     if tables.is_empty() {
         warn!(msg = "Database schema contains no tables");
     }
 
-    for table in tables {
-        let table_name: String = table.get("table_name");
-        let columns: Vec<String> = table.get("columns");
-        let column_type_names: Vec<Option<String>> = table.get("column_type_names");
-        let column_domain_names: Vec<Option<String>> = table.get("column_domain_names");
-
-        let mut table = Table::new(Ident::new(&table_name));
-
-        columns
-            .iter()
-            .zip(column_type_names)
-            .zip(column_domain_names)
-            .for_each(|((col, column_type_name), column_domain_name)| {
-                let column = classify_column(
-                    &table_name,
-                    col,
-                    column_type_name.as_deref(),
-                    column_domain_name.as_deref(),
-                );
-
-                table.add_column(Arc::new(column));
-
-                if let Some(domain) = column_domain_name.as_deref() {
-                    if let Some(config) = column_config_from_domain(&table_name, col, domain) {
-                        let identifier = Identifier::new(table_name.clone(), col.clone());
-                        // The catalog query orders rows in search-path
-                        // precedence and requires consumers to keep the FIRST
-                        // row for a duplicate name.
-                        if encrypt_config.get_column_config(&identifier).is_none() {
-                            encrypt_config.insert(identifier, config);
-                        }
-                    }
-                }
-            });
-
-        schema.add_table(table);
-    }
+    let (mut schema, encrypt_config) = build_snapshot(tables.into_iter().map(|table| TableRow {
+        table_schema: table.get("table_schema"),
+        table_name: table.get("table_name"),
+        columns: table.get("columns"),
+        column_type_names: table.get("column_type_names"),
+        column_domain_names: table.get("column_domain_names"),
+    }));
 
     let aggregates = client.query(AGGREGATE_QUERY, &[]).await?;
     schema.aggregates = aggregates
@@ -523,6 +560,82 @@ mod test {
             kind(Some("eql_v2_encrypted_backup"), None),
             ColumnKind::Native
         );
+    }
+
+    fn users_row(table_schema: &str, email_domain: Option<&str>) -> TableRow {
+        TableRow {
+            table_schema: table_schema.to_owned(),
+            table_name: "users".to_owned(),
+            columns: vec!["id".to_owned(), "email".to_owned()],
+            column_type_names: vec![Some("int4".to_owned()), Some("jsonb".to_owned())],
+            column_domain_names: vec![None, email_domain.map(str::to_owned)],
+        }
+    }
+
+    fn object_name(parts: &[&str]) -> sqltk::parser::ast::ObjectName {
+        sqltk::parser::ast::ObjectName(
+            parts
+                .iter()
+                .map(|part| sqltk::parser::ast::ObjectNamePart::Identifier(Ident::new(*part)))
+                .collect(),
+        )
+    }
+
+    /// The catalog query returns a row per schema on the search path that has
+    /// the table. A client can change its own search path, which Proxy does not
+    /// track, so a bare name used in two schemas stays unresolved and a write
+    /// through it is refused. A qualified name resolves to its own table.
+    #[test]
+    fn a_table_name_in_two_schemas_resolves_only_when_qualified() {
+        let (schema, encrypt_config) = build_snapshot([
+            users_row("app", None),
+            users_row("public", Some("eql_v3_text_search")),
+        ]);
+
+        assert!(schema.resolve_table(&object_name(&["users"])).is_err());
+        let app = schema
+            .resolve_table(&object_name(&["app", "users"]))
+            .unwrap();
+        assert_eq!(app.schema, Some(Ident::with_quote('"', "app")));
+        let public = schema
+            .resolve_table(&object_name(&["public", "users"]))
+            .unwrap();
+        assert_eq!(public.schema, Some(Ident::with_quote('"', "public")));
+        assert!(encrypt_config
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_some());
+    }
+
+    /// The encrypt config is keyed by the bare table name, so it can describe
+    /// a column of two same-named tables only when both use one domain.
+    /// Otherwise a qualified write would encrypt with the other table's
+    /// configuration, so neither column gets one and both are refused.
+    #[test]
+    fn same_named_encrypted_columns_with_different_domains_get_no_config() {
+        let (_, encrypt_config) = build_snapshot([
+            users_row("app", Some("eql_v3_text_search")),
+            users_row("public", Some("eql_v3_text")),
+        ]);
+        assert!(encrypt_config
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_none());
+
+        let (_, encrypt_config) = build_snapshot([
+            users_row("app", Some("eql_v3_text_search")),
+            users_row("public", Some("eql_v3_text")),
+            users_row("archive", Some("eql_v3_text_search")),
+        ]);
+        assert!(encrypt_config
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_none());
+
+        let (_, encrypt_config) = build_snapshot([
+            users_row("app", Some("eql_v3_text_search")),
+            users_row("public", Some("eql_v3_text_search")),
+        ]);
+        assert!(encrypt_config
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_some());
     }
 
     #[test]

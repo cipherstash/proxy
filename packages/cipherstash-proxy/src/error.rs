@@ -59,28 +59,17 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether this error must be returned to the client even when the proxy is
-    /// configured to fall back to forwarding statements it could not map.
-    ///
-    /// That fallback exists for mapper *coverage gaps*: a statement Proxy does
-    /// not understand is passed through unchanged, on the reasoning that it
-    /// probably touches nothing encrypted. Some errors are not coverage gaps but
-    /// deliberate refusals, where forwarding the statement is the very harm the
-    /// error was raised to prevent. Those are listed here and are never
-    /// downgraded to a passthrough.
-    pub fn must_fail_closed(&self) -> bool {
+    /// Whether this error is a mapper *coverage gap*: EQL Mapper could not type
+    /// check the statement, which is not evidence that it touches anything
+    /// encrypted. Only a coverage gap may fall back to forwarding the
+    /// statement as written. Every other error is a refusal, so an error
+    /// added later fails closed without being listed anywhere.
+    pub fn is_coverage_gap(&self) -> bool {
         matches!(
             self,
-            // Forwarding a statement that references a legacy EQL v2 column
-            // stores plaintext in a column its operator believes is encrypted
-            // (CIP-3688). No configuration may turn that back on.
             Error::Mapping(
-                MappingError::UnmappableEncryptedColumn { .. }
-                    | MappingError::DependentStatementAfterDdl
-                    | MappingError::DependentStatementAfterSettings
-                    | MappingError::PreparedSettingsChanged
-                    | MappingError::UnmodelledDdl
-            ) | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
+                MappingError::StatementCouldNotBeTypeChecked(_) | MappingError::Internal(_)
+            )
         )
     }
 }
@@ -153,6 +142,24 @@ pub enum MappingError {
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
     StatementCouldNotBeTypeChecked(String),
 
+    #[error("Statement refers to table '{table}', which is not in the database schema Proxy has loaded, so Proxy cannot tell whether it writes to an encrypted column. For help visit {}#mapping-unresolvable-table", ERROR_DOC_BASE_URL)]
+    UnresolvableTable { table: String },
+
+    #[error("Statement refers to table '{table}', which names both a temporary table and a permanent table, so Proxy cannot tell which one it writes to. Qualify the name, as in 'pg_temp.{table}'. For help visit {}#mapping-ambiguous-table", ERROR_DOC_BASE_URL)]
+    AmbiguousTable { table: String },
+
+    #[error("COPY into encrypted column '{table}.{column}' is not supported, as Proxy does not encrypt COPY data. For help visit {}#mapping-copy-into-encrypted-column", ERROR_DOC_BASE_URL)]
+    CopyIntoEncryptedColumn { table: String, column: String },
+
+    #[error("COPY into column '{table}.{column}', which is not in the database schema Proxy has loaded, is not supported, as Proxy cannot tell whether it is encrypted. For help visit {}#mapping-copy-into-unknown-column", ERROR_DOC_BASE_URL)]
+    CopyIntoUnknownColumn { table: String, column: String },
+
+    #[error("COPY must be sent in a query of its own when the query has a statement that uses an encrypted column. For help visit {}#mapping-copy-with-encrypted-statement", ERROR_DOC_BASE_URL)]
+    CopyWithEncryptedStatement,
+
+    #[error("Statement uses an operation that an encrypted column's EQL type does not support: {}. For help visit {}#mapping-unsupported-encrypted-operation", _0, ERROR_DOC_BASE_URL)]
+    UnsupportedEncryptedOperation(String),
+
     #[error("Column '{table}.{column}' is declared as '{column_type}', a legacy EQL v2 type that this version of CipherStash Proxy cannot encrypt or decrypt. Statements referencing '{table}' are refused so that plaintext is never written to the column. Migrate '{table}.{column}' to an EQL v3 domain type. For help visit {}#mapping-unmappable-encrypted-column", ERROR_DOC_BASE_URL)]
     UnmappableEncryptedColumn {
         table: String,
@@ -203,6 +210,12 @@ pub enum ConfigError {
 
     #[error("Invalid {name}: {value}")]
     InvalidParameter { name: String, value: String },
+
+    #[error(
+        "Invalid --database-url: {reason}. For help visit {}#config-invalid-database-url",
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidDatabaseUrl { reason: String },
 
     #[error(
         "Invalid Workspace CRN: {crn}. CRN format is `crn:{{region}}.aws:{{workspace_id}}` For help visit {}",

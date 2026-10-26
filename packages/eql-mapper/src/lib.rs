@@ -41,7 +41,9 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError};
+    use super::{
+        test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError, UnresolvedTable,
+    };
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -531,6 +533,150 @@ mod test {
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Asserts the statement fails to type check because it names a table the
+    /// schema cannot resolve, and returns the name the error reports.
+    fn table_not_found(schema: Arc<TableResolver>, sql: &str) -> String {
+        let statement = parse(sql);
+        match type_check(schema, &statement) {
+            Ok(_) => panic!("statement type checked but names an unknown table: {sql}"),
+            Err(err) => match err.as_unresolved_table() {
+                Some(UnresolvedTable::NotFound(table)) => table.to_owned(),
+                _ => panic!("failed for another reason ({err}): {sql}"),
+            },
+        }
+    }
+
+    fn users_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL),
+                }
+            }
+        })
+    }
+
+    fn assert_encrypts_users_email(schema: Arc<TableResolver>, sql: &str) {
+        let statement = parse(sql);
+        match type_check(schema, &statement) {
+            Ok(typed) => assert!(
+                typed.literals.contains(&(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraits::default()
+                    )),
+                    &ast::Value::SingleQuotedString("alice@example.com".into()),
+                )),
+                "the literal is not mapped to users.email: {sql}"
+            ),
+            Err(err) => panic!("type check failed ({err}): {sql}"),
+        }
+    }
+
+    #[test]
+    fn schema_qualified_table_resolves_to_the_loaded_table() {
+        assert_encrypts_users_email(
+            users_schema(),
+            "INSERT INTO public.users (id, email) VALUES (1, 'alice@example.com')",
+        );
+        assert_encrypts_users_email(
+            users_schema(),
+            "UPDATE public.users SET email = 'alice@example.com' WHERE id = 1",
+        );
+        assert_encrypts_users_email(
+            users_schema(),
+            "INSERT INTO PUBLIC.USERS (id, email) VALUES (1, 'alice@example.com')",
+        );
+    }
+
+    #[test]
+    fn table_qualified_by_another_schema_is_not_found() {
+        assert_eq!(
+            table_not_found(
+                users_schema(),
+                "INSERT INTO archive.users (id, email) VALUES (1, 'alice@example.com')"
+            ),
+            "archive.users"
+        );
+        assert_eq!(
+            table_not_found(
+                users_schema(),
+                "INSERT INTO db.public.users (id, email) VALUES (1, 'alice@example.com')"
+            ),
+            "db.public.users"
+        );
+    }
+
+    #[test]
+    fn table_resolves_by_the_schema_it_was_loaded_from() {
+        let mut schema = Schema::new("public");
+        let mut users = crate::Table::in_schema(Ident::new("app"), Ident::new("users"));
+        users.add_column(Arc::new(crate::Column::native(Ident::new("id"))));
+        users.add_column(Arc::new(crate::Column::eql(
+            Ident::new("email"),
+            EqlTraits::default(),
+            crate::unifier::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+        )));
+        schema.add_table(users);
+        let schema = resolver(schema);
+
+        assert_encrypts_users_email(
+            schema.clone(),
+            "INSERT INTO app.users (id, email) VALUES (1, 'alice@example.com')",
+        );
+        assert_encrypts_users_email(
+            schema.clone(),
+            "INSERT INTO users (id, email) VALUES (1, 'alice@example.com')",
+        );
+        // `public.users` is a different table from the loaded `app.users`.
+        assert_eq!(
+            table_not_found(
+                schema,
+                "INSERT INTO public.users (id, email) VALUES (1, 'alice@example.com')"
+            ),
+            "public.users"
+        );
+    }
+
+    #[test]
+    fn unknown_table_is_reported_wherever_the_statement_names_it() {
+        for sql in [
+            "INSERT INTO accounts (email) VALUES ('alice@example.com')",
+            "UPDATE accounts SET email = 'alice@example.com'",
+            "DELETE FROM accounts WHERE email = 'alice@example.com'",
+            "SELECT * FROM accounts WHERE email = 'alice@example.com'",
+            "INSERT INTO users (id, email) SELECT id, email FROM accounts",
+        ] {
+            assert_eq!(table_not_found(users_schema(), sql), "accounts", "{sql}");
+        }
+    }
+
+    #[test]
+    fn writes_data_finds_nested_writes() {
+        for sql in [
+            "INSERT INTO users (id) VALUES (1)",
+            "UPDATE users SET id = 1",
+            "DELETE FROM users",
+            "MERGE INTO users USING accounts ON users.id = accounts.id WHEN MATCHED THEN DELETE",
+            "PREPARE p AS INSERT INTO users (id) VALUES ($1)",
+            "EXPLAIN ANALYZE DELETE FROM users",
+            "WITH moved AS (DELETE FROM users RETURNING id) SELECT id FROM moved",
+        ] {
+            assert!(crate::writes_data(&parse(sql)), "{sql}");
+        }
+        for sql in [
+            "SELECT id FROM users",
+            "WITH c AS (SELECT id FROM users) SELECT id FROM c",
+            "EXPLAIN SELECT id FROM users",
+        ] {
+            assert!(!crate::writes_data(&parse(sql)), "{sql}");
         }
     }
 

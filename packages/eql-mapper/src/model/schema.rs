@@ -29,6 +29,10 @@ pub struct Schema {
 #[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 #[display("Table<{}>", name)]
 pub struct Table {
+    /// The database schema the table was loaded from, when it is known.
+    ///
+    /// `None` means the table lives in the [`Schema`]'s own namespace.
+    pub schema: Option<Ident>,
     pub name: Ident,
     pub columns: Vec<Arc<Column>>,
 }
@@ -105,11 +109,49 @@ pub enum SchemaError {
     #[error("Table not found: {}", _0)]
     TableNotFound(String),
 
-    #[error("Column: {} not found for table: {}", _0, _1)]
+    #[error(
+        "Table name is ambiguous: {} names both a temporary and a permanent table",
+        _0
+    )]
+    AmbiguousTable(String),
+
+    #[error("Column: {} not found for table: {}", _1, _0)]
     ColumnNotFound(String, String),
 }
 
+impl SchemaError {
+    /// Returns why a table could not be resolved, when that is what this
+    /// error means.
+    pub fn as_unresolved_table(&self) -> Option<UnresolvedTable<'_>> {
+        match self {
+            SchemaError::TableNotFound(table) => Some(UnresolvedTable::NotFound(table)),
+            SchemaError::AmbiguousTable(table) => Some(UnresolvedTable::Ambiguous(table)),
+            SchemaError::ColumnNotFound(..) => None,
+        }
+    }
+}
+
+/// A table name that does not resolve to exactly one table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnresolvedTable<'a> {
+    /// No table has this name.
+    NotFound(&'a str),
+    /// A temporary table and a permanent table both have this bare name.
+    Ambiguous(&'a str),
+}
+
 impl Schema {
+    /// Whether any column holds encrypted data, including one this build
+    /// cannot map.
+    pub fn has_encrypted_columns(&self) -> bool {
+        self.tables.iter().any(|table| {
+            table
+                .columns
+                .iter()
+                .any(|column| column.kind != ColumnKind::Native)
+        })
+    }
+
     /// Creates a new named empty schema.
     pub fn new<S>(name: S) -> Self
     where
@@ -129,19 +171,34 @@ impl Schema {
         self.tables.push(Arc::new(table));
     }
 
-    /// Resolves a table by `Ident`, which takes into account the SQL rules
+    /// Resolves a table by name, which takes into account the SQL rules
     /// of quoted and new identifier matching.
+    ///
+    /// A one-part name matches a table of that name in any loaded schema. A
+    /// two-part `schema.table` name matches only a table loaded from that
+    /// schema. A name more than one table matches is not resolved.
     pub fn resolve_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
-        if name.0.len() == 1 {
-            let ObjectNamePart::Identifier(name) = name.0.last().unwrap();
-            let mut haystack = self.tables.iter();
-            haystack
-                .find_unique(&|table| IdentCase::from(&table.name) == IdentCase::from(name))
-                .cloned()
-                .map_err(|_| SchemaError::TableNotFound(name.to_string()))
-        } else {
-            Err(SchemaError::TableNotFound(format!("{name}")))
-        }
+        let not_found = || SchemaError::TableNotFound(name.to_string());
+        let parts: Vec<&Ident> = name
+            .0
+            .iter()
+            .map(|ObjectNamePart::Identifier(ident)| ident)
+            .collect();
+
+        let (qualifier, table_name) = match parts.as_slice() {
+            [table_name] => (None, *table_name),
+            [qualifier, table_name] => (Some(*qualifier), *table_name),
+            _ => return Err(not_found()),
+        };
+
+        let mut haystack = self.tables.iter();
+        haystack
+            .find_unique(&|table| {
+                IdentCase::from(&table.name) == IdentCase::from(table_name)
+                    && qualifier.is_none_or(|qualifier| table.is_in_schema(&self.name, qualifier))
+            })
+            .cloned()
+            .map_err(|_| not_found())
     }
 
     pub fn resolve_table_columns(
@@ -165,30 +222,17 @@ impl Schema {
         table_name: &ObjectName,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
-        if table_name.0.len() == 1 {
-            let ObjectNamePart::Identifier(table_name) = table_name.0.last().unwrap();
-            let mut haystack = self.tables.iter();
-            match haystack
-                .find_unique(&|table| IdentCase::from(&table.name) == IdentCase::from(table_name))
-            {
-                Ok(table) => match table.get_column(column_name) {
-                    Ok(column) => Ok(SchemaTableColumn {
-                        table: table.name.clone(),
-                        column: column.name.clone(),
-                        kind: column.kind.clone(),
-                    }),
-                    Err(_) => Err(SchemaError::ColumnNotFound(
-                        table_name.to_string(),
-                        column_name.to_string(),
-                    )),
-                },
-                Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),
-            }
-        } else {
-            Err(SchemaError::ColumnNotFound(
-                format!("{table_name}"),
-                format!("{column_name}"),
-            ))
+        let table = self.resolve_table(table_name)?;
+        match table.get_column(column_name) {
+            Ok(column) => Ok(SchemaTableColumn {
+                table: table.name.clone(),
+                column: column.name.clone(),
+                kind: column.kind.clone(),
+            }),
+            Err(_) => Err(SchemaError::ColumnNotFound(
+                table_name.to_string(),
+                column_name.to_string(),
+            )),
         }
     }
 }
@@ -197,9 +241,25 @@ impl Table {
     /// Create a new named table with no columns.
     pub fn new(name: Ident) -> Self {
         Self {
+            schema: None,
             name,
             columns: Vec::with_capacity(16),
         }
+    }
+
+    /// Create a new named table with no columns, in the named database schema.
+    pub fn in_schema(schema: Ident, name: Ident) -> Self {
+        Self {
+            schema: Some(schema),
+            ..Self::new(name)
+        }
+    }
+
+    /// Whether `qualifier` names the database schema this table belongs to.
+    /// A table with no schema of its own belongs to `default_schema`.
+    fn is_in_schema(&self, default_schema: &Ident, qualifier: &Ident) -> bool {
+        let schema = self.schema.as_ref().unwrap_or(default_schema);
+        IdentCase::from(schema) == IdentCase::from(qualifier)
     }
 
     /// Adds a column to the table.
@@ -405,4 +465,24 @@ macro_rules! schema {
             schema
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_not_found_names_the_column_then_the_table() {
+        let mut schema = Schema::new("public");
+        schema.add_table(Table::new(Ident::new("users")));
+
+        let err = schema
+            .resolve_table_column(
+                &ObjectName::from(vec![Ident::new("users")]),
+                &Ident::new("email"),
+            )
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "Column: email not found for table: users");
+    }
 }

@@ -48,10 +48,12 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
+        // EQL Mapper cannot type check a write to a column it does not know, so
+        // Proxy refuses it rather than forward the values as written.
         assert_db_error(
             result,
             "ERROR",
-            "column \"encrypted_unconfigured\" of relation \"encrypted\" does not exist",
+            "Statement could not be type checked: Column: encrypted_unconfigured not found for table: encrypted. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-statement-could-not-be-type-checked",
         );
     }
 
