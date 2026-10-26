@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792992133483,
+  "lastUpdate": 1792993439025,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29589,6 +29589,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.207017,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c5389a6386e8cd29e277ba3e1c85a4a0368a7ebb",
+          "message": "Merge pull request #487 from cipherstash/claude/project-thread-i7jv62\n\nClose test gaps for transaction-scoped CIPHERSTASH settings",
+          "timestamp": "2026-10-26T16:38:58+11:00",
+          "tree_id": "a7e2261f5370bb739acc54965dc7b6830b794828",
+          "url": "https://github.com/cipherstash/proxy/commit/c5389a6386e8cd29e277ba3e1c85a4a0368a7ebb"
+        },
+        "date": 1792993437505,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.684419,
             "unit": "Number"
           }
         ]
