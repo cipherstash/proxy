@@ -59,7 +59,7 @@ Out:
 | A1 | A coverage gap is nondeterministic: any type-checked statement may hit one. | Over-approximates EQL Mapper's incompleteness instead of modelling SQL. |
 | A2 | The encrypt config covers every encrypted column in the catalog, including one whose table name Proxy cannot resolve. | `has_encrypted_columns` gates the unresolvable-table refusal (#486). If an encrypted table were missing from the config, S2 would not protect it. |
 | A3 | Statement kinds Proxy never type checks (`COPY ... FROM STDIN`, `DO`, `CALL`) carry no values for a column. Switched off in the `uncheckedWrites` instance. | `requires_type_check` forwards these as written. |
-| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. Tested through Proxy for F1 and F2 (`COPY ... FROM STDIN`) in `packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` (#489). |
+| A4 | PostgreSQL rejects a plaintext value written to an EQL domain-typed column. Switched off where S3 must rest on Proxy alone. | The domain's base type and CHECK constraint are the last line of defence. Tested through Proxy for F1 in `packages/cipherstash-proxy-integration/src/postgres_rejects_plaintext.rs` (#489). Since #488, Proxy itself refuses `COPY ... FROM` into an encrypted column. |
 | A5 | A schema publication and the DDL that caused it are one step. | Publication completes before `ReadyForQuery` reaches the DDL's own client. |
 
 ## Properties
