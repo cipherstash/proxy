@@ -9,6 +9,11 @@ Before exploring or changing package code, read `CONTEXT-MAP.md` and the
 applicable package `CONTEXT.md`. Treat those files as the source of truth for
 architecture, domain boundaries, request flow, and vocabulary.
 
+## Formal models
+
+Before changing `specs/quint/`, or Rust code named in a model's source-file
+correspondence table, use the `proxy-quint` skill.
+
 ## Development workflow
 
 Before setting up a local environment; starting or stopping Proxy or
