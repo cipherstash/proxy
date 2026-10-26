@@ -1864,6 +1864,78 @@ mod encrypted {
         assert_eq!(connection.errors_sent_to_client(), 0);
     }
 
+    /// The SQL of the one Query forwarded since the last call
+    async fn forwarded_query(connection: &mut Connection) -> String {
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded.len(), 1);
+        let (code, body) = &forwarded[0];
+        assert_eq!(*code, b'Q');
+        String::from_utf8(body.clone())
+            .unwrap()
+            .trim_end_matches('\0')
+            .to_owned()
+    }
+
+    /// Covers each passthrough path in `query_handler`: a statement that is not type checked
+    /// (`SET`, `DISCARD`) and a type-checked statement with no encrypted column (`SELECT id`)
+    #[tokio::test]
+    async fn statements_beside_an_encrypted_statement_are_forwarded_in_order() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .encrypts
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        connection
+            .client(query(
+                "SET search_path TO public; \
+                 INSERT INTO users (email) VALUES ('a@example.com'); \
+                 SELECT id FROM users; \
+                 DISCARD PLANS",
+            ))
+            .await;
+
+        let sql = forwarded_query(&mut connection).await;
+        assert_eq!(connection.encrypted_with(), vec![None]);
+        assert!(!sql.contains("a@example.com"), "{sql}");
+        assert!(
+            sql.starts_with("SET search_path = public;INSERT INTO users"),
+            "{sql}"
+        );
+        assert!(
+            sql.ends_with(";SELECT id FROM users;DISCARD PLANS"),
+            "{sql}"
+        );
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
+    /// Covers the mapping-disabled passthrough path in `query_handler`. Forwarding plaintext into
+    /// the encrypted column is the intended, documented effect of `UNSAFE_DISABLE_MAPPING`.
+    #[tokio::test]
+    async fn a_statement_after_mapping_is_disabled_is_forwarded_beside_an_encrypted_statement() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .encrypts
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        connection
+            .client(query(
+                "INSERT INTO users (email) VALUES ('a@example.com'); \
+                 SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; \
+                 INSERT INTO users (email) VALUES ('b@example.com')",
+            ))
+            .await;
+
+        let sql = forwarded_query(&mut connection).await;
+        assert_eq!(connection.encrypted_with(), vec![None]);
+        assert!(!sql.contains("a@example.com"), "{sql}");
+        assert!(
+            sql.ends_with(
+                ";SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true\
+                 ;INSERT INTO users (email) VALUES ('b@example.com')"
+            ),
+            "{sql}"
+        );
+        assert_eq!(connection.errors_sent_to_client(), 0);
+    }
+
     #[tokio::test]
     async fn a_keyset_set_earlier_in_a_batch_encrypts_the_parameters_after_it() {
         let mut connection = Connection::encrypted().await;
