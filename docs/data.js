@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792970048855,
+  "lastUpdate": 1792975286868,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29131,6 +29131,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.128074,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "71de14df114bce47f1f1350aeedab52cf1a91e62",
+          "message": "Merge pull request #397 from cipherstash/dan/cli-connection-flags\n\nfeat(cli): connection flags + DX (quiet logging, random port, best-effort TLS)",
+          "timestamp": "2026-10-26T11:34:50+11:00",
+          "tree_id": "3820d7c4efdb8bd83c2c76aed30f6d5736605c0f",
+          "url": "https://github.com/cipherstash/proxy/commit/71de14df114bce47f1f1350aeedab52cf1a91e62"
+        },
+        "date": 1792975285337,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.762715,
             "unit": "Number"
           }
         ]
