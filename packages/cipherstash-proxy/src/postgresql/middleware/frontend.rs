@@ -3833,6 +3833,12 @@ mod unresolvable_table_tests {
     /// a native `notes (body)`, and when `encrypted` is set, `legacy (data)` with
     /// `data` a legacy EQL v2 column.
     fn client(config: TandemConfig, encrypted: bool) -> (Frontend<Counter>, Counter) {
+        let (context, counter) = client_context(config, encrypted);
+        (Frontend::new(context), counter)
+    }
+
+    /// The [`Context`] behind [`client`].
+    fn client_context(config: TandemConfig, encrypted: bool) -> (Context<Counter>, Counter) {
         let mut schema = eql_mapper::Schema::new("public");
         let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
         table.add_column(Arc::new(eql_mapper::Column::native(
@@ -3881,7 +3887,7 @@ mod unresolvable_table_tests {
             counter.clone(),
             sender,
         );
-        (Frontend::new(context), counter)
+        (context, counter)
     }
 
     fn encrypted_client() -> (Frontend<Counter>, Counter) {
@@ -4354,6 +4360,66 @@ mod unresolvable_table_tests {
             let (mut frontend, _) = client(TandemConfig::for_testing(), false);
             assert_eq!(query(&mut frontend, sql).await, sql);
         }
+    }
+
+    /// A statement prepared with SQL `PREPARE` while mapping is disabled was
+    /// never mapped, so executing it once mapping is enabled again would write
+    /// its arguments as written.
+    #[tokio::test]
+    async fn sql_execute_of_a_statement_prepared_without_mapping_is_refused() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        config.development.as_mut().unwrap().disable_mapping = false;
+        let (context, _) = client_context(config, true);
+        let mut frontend = Frontend::new(context.clone());
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        for (sql, tag) in [
+            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET"),
+            (
+                "PREPARE p (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
+                "PREPARE",
+            ),
+            ("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET"),
+        ] {
+            let operation = operation_id();
+            frontend
+                .intercept(
+                    operation,
+                    FrontendMessage::Query(Bytes::copy_from_slice(sql.as_bytes())),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(
+                    Some(operation),
+                    pg_proto::BackendMessage::CommandComplete(Bytes::copy_from_slice(
+                        tag.as_bytes(),
+                    )),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(
+                    Some(operation),
+                    pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+                )
+                .await
+                .unwrap();
+        }
+        let reprepared = query(
+            &mut frontend,
+            "PREPARE q (text) AS INSERT INTO encrypted (secret) VALUES ($1)",
+        )
+        .await;
+        assert!(
+            reprepared.contains("RAISE EXCEPTION"),
+            "mapping is still disabled: {reprepared}"
+        );
+        let forwarded = query(&mut frontend, "EXECUTE p('plaintext')").await;
+        assert!(
+            forwarded.contains("RAISE EXCEPTION") && !forwarded.contains("plaintext"),
+            "{forwarded}"
+        );
     }
 
     #[tokio::test]

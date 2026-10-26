@@ -290,4 +290,54 @@ mod tests {
                 .unwrap();
         }
     }
+
+    /// A statement prepared with SQL `PREPARE` while mapping is disabled was
+    /// never mapped. Executing it after mapping is enabled again must be
+    /// refused by Proxy, rather than forwarded with its arguments as written.
+    #[tokio::test]
+    async fn sql_execute_of_a_statement_prepared_without_mapping_is_refused() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(*PROXY).await;
+        let id = random_id();
+
+        client
+            .simple_query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true")
+            .await
+            .unwrap();
+        client
+            .simple_query(
+                "PREPARE insert_unmapped AS INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+            )
+            .await
+            .unwrap();
+        client
+            .simple_query("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false")
+            .await
+            .unwrap();
+
+        // Valid JSON, so only PostgreSQL's domain check would stop it otherwise
+        let err = client
+            .simple_query(&format!(
+                r#"EXECUTE insert_unmapped({id}, '{{"plaintext": "hello"}}')"#
+            ))
+            .await
+            .err()
+            .unwrap();
+        let message = err.as_db_error().unwrap().message().to_owned();
+        assert!(
+            message.starts_with(
+                "The prepared statement or bound values no longer match confirmed connection state"
+            ),
+            "{message}"
+        );
+
+        let rows = client
+            .query("SELECT id FROM encrypted WHERE id = $1", &[&id])
+            .await
+            .unwrap();
+        assert!(rows.is_empty());
+    }
 }
