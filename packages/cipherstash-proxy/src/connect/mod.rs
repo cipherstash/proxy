@@ -4,7 +4,12 @@ mod channel_writer;
 pub use async_stream::AsyncStream;
 pub use channel_writer::{ChannelWriter, Sender};
 
-use crate::{config::ServerConfig, error::Error, log::DEVELOPMENT, tls, DatabaseConfig};
+use crate::{
+    config::ServerConfig,
+    error::{Error, ErrorChain},
+    log::DEVELOPMENT,
+    tls, DatabaseConfig,
+};
 use socket2::TcpKeepalive;
 use std::time::Duration;
 use tokio::{
@@ -45,7 +50,7 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!(msg = "Connection error", error = err.to_string());
+            error!(msg = "Connection error", error = %ErrorChain(&err));
         }
     });
     Ok(client)
@@ -66,7 +71,7 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
                     error!(
                         msg = "Error binding connection",
                         retries = MAX_RETRY_COUNT,
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     std::process::exit(exitcode::CONFIG);
                 }
@@ -91,7 +96,7 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    error!(msg = "Could not connect to database", retries = ?retry_count, error = err.to_string());
+                    error!(msg = "Could not connect to database", retries = ?retry_count, error = %ErrorChain(&err));
                     return Err(Error::DatabaseConnection);
                 }
             }
@@ -117,7 +122,7 @@ pub fn configure(stream: &TcpStream) {
     stream.set_nodelay(true).unwrap_or_else(|err| {
         warn!(
             msg = "Error configuring nodelay for connection",
-            error = err.to_string()
+            error = %ErrorChain(&err)
         );
     });
 
@@ -127,7 +132,7 @@ pub fn configure(stream: &TcpStream) {
         Err(err) => {
             warn!(
                 msg = "Error configuring tcp_user_timeout for connection",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
         }
     }
@@ -144,7 +149,7 @@ pub fn configure(stream: &TcpStream) {
                 Err(err) => {
                     warn!(
                         msg = "Error configuring keepalive for connection",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                 }
             }
@@ -152,7 +157,7 @@ pub fn configure(stream: &TcpStream) {
         Err(err) => {
             warn!(
                 msg = "Error configuring connection",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
         }
     }
