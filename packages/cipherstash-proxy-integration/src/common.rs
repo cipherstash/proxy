@@ -567,6 +567,46 @@ pub fn interleaved_indices(len: usize) -> Vec<usize> {
     indices
 }
 
+/// Asserts that `result` failed with a PostgreSQL `ErrorResponse` carrying
+/// exactly this severity and this message.
+///
+/// Read the message off the `DbError` rather than off `err.to_string()`.
+/// `tokio_postgres::Error`'s `Display` renders only the error *kind*: since
+/// 0.7.18 it no longer appends its cause, so `to_string()` yields a bare
+/// `"db error"` and pins nothing. The server's text is still reachable through
+/// `as_db_error()`, so asserting there keeps the exact customer-visible wording
+/// pinned.
+pub fn assert_db_error<T>(result: Result<T, tokio_postgres::Error>, severity: &str, message: &str) {
+    let Err(err) = result else {
+        panic!("expected a database error, got a successful result");
+    };
+
+    let db_error = err
+        .as_db_error()
+        .unwrap_or_else(|| panic!("expected a database error, got: {err:?}"));
+
+    assert_eq!(db_error.severity(), severity);
+    assert_eq!(db_error.message(), message);
+}
+
+/// Asserts that `result` failed in the client, before the statement reached the
+/// server, with exactly this error kind and this underlying cause.
+///
+/// The counterpart to [`assert_db_error`] for errors that never become a
+/// PostgreSQL `ErrorResponse`, such as a `ToSql` conversion failure.
+pub fn assert_client_error<T>(result: Result<T, tokio_postgres::Error>, kind: &str, cause: &str) {
+    let Err(err) = result else {
+        panic!("expected a client error, got a successful result");
+    };
+
+    assert_eq!(err.to_string(), kind);
+
+    let source = std::error::Error::source(&err)
+        .unwrap_or_else(|| panic!("expected the error to carry a cause, got: {err:?}"));
+
+    assert_eq!(source.to_string(), cause);
+}
+
 ///
 /// Configure the client TLS settings.
 /// These are the settings for connecting to the database with TLS.
