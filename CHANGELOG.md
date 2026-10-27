@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Encryption results checked before use**: Proxy now refuses a statement when the encryption service returns fewer encrypted values than the values it was asked to encrypt. Previously the parameters left without an encrypted value were sent to PostgreSQL as written, so a misbehaving encryption service could cause plaintext to reach the database.
 
+- **Bind to a statement Proxy did not see prepared**: Proxy now refuses a `Bind` that names a prepared statement it did not see prepared on the connection, with SQLSTATE `26000`, PostgreSQL's own code for a missing prepared statement. Previously Proxy sent the bound values as written, so if it had lost track of a statement that writes an encrypted column, the values reached PostgreSQL unencrypted. A statement prepared with SQL `PREPARE` can no longer be bound with a `Bind` message through Proxy.
+
 ### Security
 
 - **Dependency updates**: Updated `rustls` to 0.23.45, `rustls-webpki` to 0.103.14, `aws-lc-rs` to 1.18.2 (with `aws-lc-sys` 0.46.0), `rand` to 0.9.3 and 0.10.2, `quinn-proto` to 0.11.15, `hickory-proto` and `hickory-resolver` to 0.26.3 (with `reqwest` 0.13.4), and `diesel` to 2.3.12, and `postgres-protocol` to 0.6.12, to pick up the fixes for published security advisories in those crates. No configuration change is required.
