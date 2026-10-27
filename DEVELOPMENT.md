@@ -782,6 +782,22 @@ git push origin vX.Y.Z
 gh release create vX.Y.Z --generate-notes
 ```
 
+### Maintenance releases (2.2.x)
+
+2.2.x patch releases are cut from the `release/2.2` branch, not `main`, which carries 3.x.
+`mise run release` only runs on `main`, so open the prepare-release PR against `release/2.2` and use the manual steps.
+`release.yml` on `release/2.2` sets `latest=false` on its Docker metadata steps, so a 2.2.x release publishes `cipherstash/proxy:X.Y.Z` and `:2.2` but never moves `:latest` off 3.x.
+Keep the GitHub "Latest" release on 3.x too, and start the generated notes from the previous 2.2.x tag so they don't diff against a 3.x tag:
+
+```bash
+# From the merged prepare-release commit on release/2.2
+git tag v2.2.Z <merged sha>
+git push origin v2.2.Z
+
+gh release create v2.2.Z --target release/2.2 --latest=false \
+  --generate-notes --notes-start-tag v2.2.Y
+```
+
 ### Re-releasing a version
 
 If a release fails and you need to re-release the same version:
