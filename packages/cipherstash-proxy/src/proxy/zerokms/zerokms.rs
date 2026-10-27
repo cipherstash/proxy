@@ -239,13 +239,7 @@ impl EncryptionService for ZeroKms {
         let encrypt_duration = encrypt_start.elapsed();
         debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
-        // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
-        for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
-            result[idx] = Some(ciphertext);
-        }
-
-        Ok(result)
+        place_ciphertexts(plaintexts.len(), indices, encrypted)
     }
 
     ///
@@ -301,5 +295,54 @@ impl EncryptionService for ZeroKms {
         }
 
         Ok(result)
+    }
+}
+
+/// Put each ciphertext back at the position of the plaintext it encrypts, with `None` everywhere
+/// else.
+///
+/// Fails when there are fewer ciphertexts than encrypted positions: padding the gap with `None`
+/// would forward the original value of that parameter unencrypted.
+fn place_ciphertexts<T>(
+    len: usize,
+    indices: Vec<usize>,
+    ciphertexts: Vec<T>,
+) -> Result<Vec<Option<T>>, Error> {
+    if ciphertexts.len() != indices.len() {
+        return Err(EncryptError::EncryptionResultCountMismatch {
+            expected: indices.len(),
+            actual: ciphertexts.len(),
+        }
+        .into());
+    }
+    let mut result: Vec<Option<T>> = (0..len).map(|_| None).collect();
+    for (idx, ciphertext) in indices.into_iter().zip(ciphertexts) {
+        result[idx] = Some(ciphertext);
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ciphertexts_are_placed_at_the_positions_that_were_encrypted() {
+        let result = place_ciphertexts(3, vec![0, 2], vec!["a", "c"]).unwrap();
+        assert_eq!(result, vec![Some("a"), None, Some("c")]);
+    }
+
+    #[test]
+    fn fewer_ciphertexts_than_encrypted_positions_fails_closed() {
+        let result = place_ciphertexts(3, vec![0, 2], vec!["a"]);
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(
+                EncryptError::EncryptionResultCountMismatch {
+                    expected: 2,
+                    actual: 1
+                }
+            ))
+        ));
     }
 }
