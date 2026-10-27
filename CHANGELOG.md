@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
-- **Dependency updates**: Updated `rustls` to 0.23.45, `rustls-webpki` to 0.103.14, `aws-lc-rs` to 1.18.2 (with `aws-lc-sys` 0.46.0), `rand` to 0.9.3 and 0.10.2, `quinn-proto` to 0.11.15, `hickory-proto` and `hickory-resolver` to 0.26.3 (with `reqwest` 0.13.4), and `diesel` to 2.3.12, and `postgres-protocol` to 0.6.12, to pick up the fixes for published security advisories in those crates. No configuration change is required.
+- **Dependency updates**: Updated `rustls` to 0.23.46, `rustls-webpki` to 0.103.16, `webpki-root-certs` to 1.0.11, `aws-lc-rs` to 1.18.2 (with `aws-lc-sys` 0.46.0), `tokio-postgres` to 0.7.18, `postgres-protocol` to 0.6.12, `tokio` to 1.51.6, `h2` to 0.4.20, `crossbeam-epoch` to 0.9.21, `rand` to 0.9.3 and 0.10.2, `quinn-proto` to 0.11.15, `hickory-proto` and `hickory-resolver` to 0.26.3 (with `reqwest` 0.13.4), and `diesel` to 2.3.12, to pick up the fixes for published security advisories in those crates. No configuration change is required.
 
 ## [2.2.4] - 2026-06-18
 
