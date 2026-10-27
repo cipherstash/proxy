@@ -1,7 +1,7 @@
 use crate::{
     config::DatabaseConfig,
     connect,
-    error::{ConfigError, Error},
+    error::{ConfigError, Error, ErrorChain},
     log::ENCRYPT_CONFIG,
     proxy::ENCRYPT_CONFIG_QUERY,
 };
@@ -88,7 +88,7 @@ impl EncryptConfigManager {
             Err(err) => {
                 warn!(
                     msg = "Error reloading encrypt configuration",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
             }
         };
@@ -118,7 +118,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 _ => {
                     error!(
                         msg = "Error loading Encrypt configuration",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     return Err(err);
                 }
@@ -161,7 +161,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 Err(err) => {
                     warn!(
                         msg = "Error reloading Encrypt configuration",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                 }
             }
@@ -197,7 +197,7 @@ async fn load_encrypt_config_with_retry(config: &DatabaseConfig) -> Result<Encry
                         ENCRYPT_CONFIG,
                         msg = "Encrypt configuration could not beloaded",
                         retries = retry_count,
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     return Err(err);
                 }

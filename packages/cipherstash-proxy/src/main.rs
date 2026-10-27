@@ -1,6 +1,6 @@
 use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
-use cipherstash_proxy::error::{ConfigError, Error};
+use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             Err(err) => {
-                error!(msg = "Error running command", error = err.to_string());
+                error!(msg = "Error running command", error = %ErrorChain(&err));
                 std::process::exit(exitcode::USAGE);
             }
         }
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(err) => {
                     error!(
                         msg = "Could not start CipherStash proxy",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     std::process::exit(exitcode::CONFIG);
                 }
@@ -111,10 +111,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         info!(msg = "Database connection closed after cancel request");
                                     }
                                     Error::ConnectionTimeout{..} => {
-                                        warn!(msg = "Database connection timeout", error = err.to_string());
+                                        warn!(msg = "Database connection timeout", error = %ErrorChain(&err));
                                     }
                                     _ => {
-                                        error!(msg = "Database connection error", error = err.to_string());
+                                        error!(msg = "Database connection error", error = %ErrorChain(&err));
                                     }
                                 }
                             },
@@ -155,7 +155,7 @@ async fn init(mut config: TandemConfig) -> Proxy {
         Err(err) => {
             error!(
                 msg = "Could not start CipherStash proxy",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             std::process::exit(exitcode::CONFIG);
         }
@@ -201,7 +201,7 @@ async fn init(mut config: TandemConfig) -> Proxy {
                 Err(err) => {
                     error!(
                         msg = "Server Transport Layer Security (TLS) configuration error",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     std::process::exit(exitcode::CONFIG);
                 }
@@ -236,7 +236,7 @@ async fn init(mut config: TandemConfig) -> Proxy {
         Err(err) => {
             error!(
                 msg = "Could not start CipherStash proxy",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             std::process::exit(exitcode::UNAVAILABLE);
         }
@@ -272,7 +272,7 @@ async fn reload_application_config(config: &TandemConfig, args: &Args) -> Result
         Err(err) => {
             warn!(
                 msg = "Configuration could not be reloaded: {}",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             return Err(err);
         }

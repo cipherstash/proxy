@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use tracing::{debug, info};
+    use tracing::debug;
 
-    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
+    use crate::common::{
+        assert_client_error, assert_db_error, clear, connect_with_tls, random_id, reset_schema,
+        trace, PROXY,
+    };
 
     struct Reset;
 
@@ -35,9 +38,12 @@ mod tests {
 
         // EQL Mapper cannot type check a write to a column it does not know, so Proxy refuses it
         // rather than forward the values as written
-        let msg = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
+        let db_error = err.as_db_error().unwrap();
+        assert_eq!(db_error.severity(), "ERROR");
+        let msg = db_error.message();
         assert!(
-            msg.starts_with("db error: ERROR: Statement could not be type checked:"),
+            msg.starts_with("Statement could not be type checked:"),
             "{msg}"
         );
         assert!(msg.contains("encrypted_unconfigured"), "{msg}");
@@ -61,15 +67,11 @@ mod tests {
         let sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-
-            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-column");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "ERROR",
+            "Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-column",
+        );
     }
 
     /// The error here is in the Tokio/Postgres layer
@@ -89,14 +91,11 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_date]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `i32` and the Postgres type `date`");
-        } else {
-            unreachable!();
-        }
+        assert_client_error(
+            result,
+            "error serializing parameter 1",
+            "cannot convert between the Rust type `i32` and the Postgres type `date`",
+        );
     }
 
     #[tokio::test]
@@ -117,14 +116,10 @@ mod tests {
         let sql = "INSERT INTO encrypted id, encrypted_text VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
 
-        assert!(result.is_err());
-
-        if let Err(err) = result {
-            let msg = err.to_string();
-            info!("{}", msg);
-            assert_eq!(msg, "db error: ERROR: sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-invalid-sql-statement");
-        } else {
-            unreachable!();
-        }
+        assert_db_error(
+            result,
+            "ERROR",
+            "sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-invalid-sql-statement",
+        );
     }
 }

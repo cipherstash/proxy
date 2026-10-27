@@ -101,6 +101,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY_IMAGE }}
+          # 2.2.x releases are maintenance releases: never move `latest` off 3.x.
+          flavor: |
+            latest=false
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -180,6 +183,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY_IMAGE }}
+          # 2.2.x releases are maintenance releases: never move `latest` off 3.x.
+          flavor: |
+            latest=false
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -198,13 +204,3 @@ jobs:
         if: ${{ fromJSON(env.publish) }}
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
-
-      - name: Notify Multitudes
-        if: ${{ fromJSON(env.publish) }}
-        run: |
-          curl --request POST \
-            --fail-with-body \
-            --url "https://api.developer.multitudes.co/deployments" \
-            --header "Content-Type: application/json" \
-            --header "Authorization: ${{ env.MULTITUDES_ACCESS_TOKEN }}" \
-            --data '{"commitSha": "${{ github.sha }}", "environmentName":"dockerhub"}'

@@ -42,7 +42,7 @@ rustls-platform-verifier = "0.5.0"
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
-socket2 = "0.5.7"
+socket2 = { version = "0.5.7", features = ["all"] }
 sqltk = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

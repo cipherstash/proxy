@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-10-28
+
 ### Fixed
 
 - **Memory growth on long-lived connections**: Proxy now releases the prepared-statement, portal and statement-metrics state it keeps for each client connection once PostgreSQL has finished with it. Previously some common client patterns left state behind until the connection closed, so with a connection pool that keeps connections open, memory grew steadily until Proxy was restarted. The affected patterns were statements prepared and described but never executed, prepared statements removed with SQL `DEALLOCATE`, `DEALLOCATE ALL` or `DISCARD ALL` (used by psycopg 3, Rails and connection-pool reset queries, whether sent as a simple query or through the extended protocol), uniquely named portals, pipelined batches that fail part-way, statements rejected by Proxy, and connections that use `COPY ... FROM STDIN`. No configuration change is required.
@@ -17,6 +19,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`COPY ... FROM STDIN`**: Proxy now forwards a `COPY ... FROM STDIN` into a table with no encrypted columns, with its copy data, so `psql`'s `\copy` and driver `COPY` APIs can bulk-load plaintext tables through Proxy. Previously Proxy refused the statement as invalid SQL unless it ended with `;`, with or without an encryption configuration. A `COPY ... FROM` into an encrypted column is now refused with an error that names the column, as Proxy does not encrypt `COPY` data; previously a `COPY` from a file or program was forwarded with its plaintext. When encrypted columns are configured, a `COPY ... FROM` into a table or column that Proxy has not loaded, or into a table name that more than one schema has, is refused, as Proxy cannot tell whether it is encrypted. Statements after a `COPY ... FROM STDIN;` in the same simple query are now checked and encrypted like any other; previously Proxy read them as copy data and forwarded them unchanged, so a plaintext `INSERT` into an encrypted column could reach PostgreSQL. A simple query that has a `COPY` and a statement Proxy encrypts is refused, and the `COPY` must be sent in a query of its own. A `COPY (INSERT ... RETURNING ...) TO STDOUT`, or a `COPY` of another query that writes, is refused when encrypted columns are configured; previously Proxy forwarded its values as plaintext. Proxy now parses every `COPY`, so it refuses as invalid SQL the few `COPY` options its SQL parser does not support, such as `WHERE`, `HEADER MATCH` and `ON_ERROR`.
 
 - **Plaintext forwarded beside a statement Proxy cannot type check**: When encrypted columns are configured, Proxy now refuses a write that it cannot type check, such as an `INSERT` into a table it has not loaded, instead of forwarding it to PostgreSQL unchanged. Such a write is still forwarded when Proxy knows that every table it writes to has no encrypted columns. Proxy also refuses a simple query that has a statement it cannot type check together with a statement it needs to encrypt or decrypt. Previously, with mapping errors off (the default), Proxy forwarded the whole query as written, so an `INSERT` into an encrypted column in the same query reached PostgreSQL with its plaintext values. A read that Proxy cannot type check is still forwarded unchanged when it is sent in a query of its own or only with statements that Proxy does not need to map. A statement that Proxy forwards unchanged is sent as written, so a plaintext value that it compares with an encrypted column still reaches the database.
+
+- **Encryption results checked before use**: Proxy now refuses a statement when the encryption service returns fewer encrypted values than the values it was asked to encrypt. Previously the parameters left without an encrypted value were sent to PostgreSQL as written, so a misbehaving encryption service could cause plaintext to reach the database.
+
+- **Bind to a statement Proxy did not see prepared**: Proxy now refuses a `Bind` that names a prepared statement it did not see prepared on the connection, with SQLSTATE `26000`, PostgreSQL's own code for a missing prepared statement. Previously Proxy sent the bound values as written, so if it had lost track of a statement that writes an encrypted column, the values reached PostgreSQL unencrypted. A statement prepared with SQL `PREPARE` can no longer be bound with a `Bind` message through Proxy.
+
+- **Plaintext in `INSERT ... ON CONFLICT DO UPDATE`**: Proxy now encrypts a value assigned to an encrypted column in the `DO UPDATE SET` clause of an upsert. Previously the clause was not type checked, so a literal or parameter assigned to an encrypted column there reached PostgreSQL as plaintext. `excluded.<column>` now carries the column's encrypted type, and an `ON CONFLICT` target on an encrypted column is refused, as a conflict judged on randomised ciphertext would never fire.
+
+### Security
+
+- **Dependency updates**: Updated `rustls` to 0.23.46, `rustls-webpki` to 0.103.16, `webpki-root-certs` to 1.0.11, `aws-lc-rs` to 1.18.2 (with `aws-lc-sys` 0.46.0), `tokio-postgres` to 0.7.18, `postgres-protocol` to 0.6.12, `tokio` to 1.51.6, `h2` to 0.4.20, `crossbeam-epoch` to 0.9.21, `rand` to 0.9.3 and 0.10.2, `quinn-proto` to 0.11.15, `hickory-proto` and `hickory-resolver` to 0.26.3 (with `reqwest` 0.13.4), and `diesel` to 2.3.12, to pick up the fixes for published security advisories in those crates. No configuration change is required.
 
 ## [2.2.4] - 2026-06-18
 
@@ -285,7 +297,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.5...HEAD
+[2.2.5]: https://github.com/cipherstash/proxy/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2

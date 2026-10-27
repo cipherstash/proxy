@@ -160,7 +160,7 @@ impl ErrorResponse {
     }
 
     ///
-    /// A prepared statement Proxy no longer runs as PostgreSQL error
+    /// A prepared statement Proxy no longer runs, or never saw prepared, as PostgreSQL error
     /// Code: 26000 invalid_sql_statement_name
     ///
     /// Drivers such as PostgreSQL JDBC invalidate their cached statements on this code.
