@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **DDL in a prepared statement after a rejected re-Parse**: when PostgreSQL rejected a second Parse that reused a prepared DDL statement's name, Proxy forgot that the retained statement was DDL. Executing it then changed the schema without Proxy updating its view of the schema or publishing the change to other connections. Proxy now keeps a statement's schema effects with the statement, so they are restored, closed and deallocated together.
+
+- **Pooled connections refused after a temporary table shadowed an encrypted table**: after a temporary table with the same name as an encrypted table, Proxy refuses statements that need encryption on that connection until the table is gone. `DISCARD ALL`, the default reset query of PgBouncer, now ends that refusal, so the next client of a pooled connection is not refused. `DISCARD TEMP` still keeps it, because a rollback can bring the table back.
+
 - **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
 - **Unknown column error message**: the type-checking error for a column a table does not have now names the column and the table the right way round, for example `Column: email not found for table: users`. It previously swapped them.
