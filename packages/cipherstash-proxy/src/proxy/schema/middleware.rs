@@ -64,7 +64,6 @@
 
 use super::eql_domains;
 use super::manager::CommittedSchemaStore;
-use crate::postgresql::Name;
 use crate::proxy::encrypt_config::from_domain::column_config_from_domain;
 use crate::proxy::EncryptConfig;
 use cipherstash_client::eql::Identifier;
@@ -73,16 +72,19 @@ use sqltk::parser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, DataType, DiscardObject, DropBehavior,
     Ident, ObjectName, ObjectNamePart, ObjectType, OnCommit, Statement,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, RwLock,
 };
 use tokio::sync::Notify;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// The schema-relevant meaning recorded for a parsed statement.
-struct Intent {
+///
+/// Context keeps it with the prepared statement and its portals, so it is released and
+/// restored together with them.
+pub struct SchemaIntent {
     statement: Statement,
     ddl: bool,
     modelled: bool,
@@ -90,7 +92,7 @@ struct Intent {
     temporary: bool,
 }
 
-impl Intent {
+impl SchemaIntent {
     /// Whether schema-dependent work must wait for this execution's outcome:
     /// catalog DDL, or a temporary table a later statement may use. Work after
     /// `DISCARD` need not wait, since a temporary table it removes can only
@@ -258,7 +260,7 @@ fn drop_tables(names: Vec<ObjectName>) -> Statement {
 /// One execution or synchronization boundary awaiting a backend outcome.
 enum PendingExecution {
     /// An execution, optionally carrying schema intent.
-    Execute(Option<Box<Intent>>),
+    Execute(Option<Box<SchemaIntent>>),
     /// The boundary terminated by the next `ReadyForQuery` message.
     ReadyBoundary,
 }
@@ -316,8 +318,6 @@ pub struct SchemaMiddleware {
     base_encrypt_config: Arc<RwLock<Arc<EncryptConfig>>>,
     encrypt_config: Arc<RwLock<Arc<EncryptConfig>>>,
     resolver: Arc<RwLock<Arc<TableResolver>>>,
-    prepared: Arc<RwLock<HashMap<Name, Intent>>>,
-    portals: Arc<RwLock<HashMap<Name, Intent>>>,
     executions: Arc<RwLock<VecDeque<PendingExecution>>>,
     in_flight_ddl: Arc<AtomicUsize>,
     execution_finished: Arc<Notify>,
@@ -349,8 +349,6 @@ impl SchemaMiddleware {
             base_encrypt_config: Arc::new(RwLock::new(snapshot.encrypt_config())),
             encrypt_config: Arc::new(RwLock::new(snapshot.encrypt_config())),
             resolver: Arc::new(RwLock::new(Arc::new(TableResolver::new_editable(schema)))),
-            prepared: Arc::new(RwLock::new(HashMap::new())),
-            portals: Arc::new(RwLock::new(HashMap::new())),
             executions: Arc::new(RwLock::new(VecDeque::new())),
             in_flight_ddl: Arc::new(AtomicUsize::new(0)),
             execution_finished: Arc::new(Notify::new()),
@@ -459,9 +457,9 @@ impl SchemaMiddleware {
     }
 
     /// Classifies what executing `statement` would do to schema state.
-    fn intent(&self, statement: Statement) -> Intent {
+    pub fn intent(&self, statement: Statement) -> SchemaIntent {
         let statement = mark_temporary(statement);
-        Intent {
+        SchemaIntent {
             ddl: self.is_schema_ddl(&statement),
             modelled: self.models_ddl(&statement),
             temporary: self.changes_only_temporary_tables(&statement),
@@ -481,36 +479,11 @@ impl SchemaMiddleware {
         }
     }
 
-    /// Records schema intent for a named prepared statement.
-    pub fn prepare(&self, name: Name, statement: Statement) {
-        let intent = self.intent(statement);
-        self.prepared.write().unwrap().insert(name, intent);
-    }
-
-    /// Associates a portal with the schema intent of its prepared statement.
-    pub fn bind(&self, portal: Name, prepared_statement: &Name) {
-        let intent = self
-            .prepared
-            .read()
-            .unwrap()
-            .get(prepared_statement)
-            .cloned();
-        let mut portals = self.portals.write().unwrap();
-        match intent {
-            Some(intent) => {
-                portals.insert(portal, intent);
-            }
-            None => {
-                portals.remove(&portal);
-            }
-        }
-    }
-
-    /// Records a portal execution awaiting a backend result and returns whether
-    /// the protocol adapter must flush DDL immediately to unblock dependent work.
-    pub fn execute(&self, portal: &Name) -> bool {
-        let intent = self.portals.read().unwrap().get(portal).cloned();
-        let executes_ddl = intent.as_ref().is_some_and(Intent::changes_schema);
+    /// Records a portal execution, with the schema intent of its prepared statement, awaiting
+    /// a backend result. Returns whether the protocol adapter must flush DDL immediately to
+    /// unblock dependent work.
+    pub fn execute(&self, intent: Option<SchemaIntent>) -> bool {
+        let executes_ddl = intent.as_ref().is_some_and(SchemaIntent::changes_schema);
         self.transaction_active.store(true, Ordering::Release);
         if executes_ddl {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
@@ -783,7 +756,18 @@ impl SchemaMiddleware {
                                 self.temporary.write().unwrap().apply(&statement)
                             }
                             SchemaChange::DiscardTemporary => {
-                                self.temporary.write().unwrap().discard()
+                                self.temporary.write().unwrap().discard();
+                                // PostgreSQL refuses `DISCARD ALL` in a transaction block, so
+                                // no rollback can bring back the temporary tables it drops.
+                                // `DISCARD TEMP` can be rolled back, so it keeps them unmodelled.
+                                if matches!(
+                                    intent.statement,
+                                    Statement::Discard {
+                                        object_type: DiscardObject::ALL
+                                    }
+                                ) {
+                                    self.local_unmodelled.store(false, Ordering::Release);
+                                }
                             }
                             SchemaChange::Catalog(statement) if self.models_ddl(&statement) => {
                                 self.apply_ddl(&statement)
@@ -947,7 +931,7 @@ impl SchemaMiddleware {
     }
 
     /// Removes the next execution without crossing a readiness boundary.
-    fn pop_execution(&self) -> Option<Option<Intent>> {
+    fn pop_execution(&self) -> Option<Option<SchemaIntent>> {
         let mut executions = self.executions.write().unwrap();
         if matches!(executions.front(), Some(PendingExecution::Execute(_))) {
             match executions.pop_front().unwrap() {
@@ -1241,12 +1225,8 @@ mod tests {
         )
     }
 
-    fn execute_prepared(middleware: &SchemaMiddleware, name: String, statement: Statement) {
-        let statement_name = Name::from(format!("statement_{name}"));
-        let portal_name = Name::from(format!("portal_{name}"));
-        middleware.prepare(statement_name.clone(), statement);
-        middleware.bind(portal_name.clone(), &statement_name);
-        middleware.execute(&portal_name);
+    fn execute_prepared(middleware: &SchemaMiddleware, statement: Statement) {
+        middleware.execute(Some(middleware.intent(statement)));
     }
 
     proptest! {
@@ -1261,7 +1241,6 @@ mod tests {
                         let name = format!("generated_{id}");
                         execute_prepared(
                             &middleware,
-                            format!("create_{id}"),
                             parse(&format!(
                                 "create table {name} (id bigint, secret eql_v3_text_search)"
                             )),
@@ -1273,7 +1252,6 @@ mod tests {
                         let name = format!("generated_{id}");
                         execute_prepared(
                             &middleware,
-                            format!("create_{id}"),
                             parse(&format!(
                                 "create table {name} (id bigint, secret eql_v3_text_search)"
                             )),
@@ -1281,7 +1259,7 @@ mod tests {
                         middleware.execution_failed();
                     }
                     GeneratedEvent::Rollback => {
-                        execute_prepared(&middleware, "rollback".to_owned(), parse("rollback"));
+                        execute_prepared(&middleware, parse("rollback"));
                         middleware.execution_succeeded();
                         expected_tables.clear();
                     }
@@ -1473,11 +1451,7 @@ mod tests {
     fn ordinary_extended_execution_pins_the_snapshot_until_readiness() {
         let store = CommittedSchemaStore::for_testing(Schema::new("public"), EncryptConfig::new());
         let middleware = SchemaMiddleware::from_store(store.clone());
-        let statement = Name::from("statement");
-        let portal = Name::from("portal");
-        middleware.prepare(statement.clone(), parse("select 1"));
-        middleware.bind(portal.clone(), &statement);
-        assert!(!middleware.execute(&portal));
+        assert!(!middleware.execute(Some(middleware.intent(parse("select 1")))));
 
         let mut published = Schema::new("public");
         published.add_table(Table::new(Ident::new("reports")));
@@ -1500,12 +1474,9 @@ mod tests {
     #[test]
     fn extended_ddl_execution_requests_an_immediate_flush() {
         let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
-        let statement = Name::from("statement");
-        let portal = Name::from("portal");
-        middleware.prepare(statement.clone(), parse("create table reports (id bigint)"));
-        middleware.bind(portal.clone(), &statement);
+        let intent = middleware.intent(parse("create table reports (id bigint)"));
 
-        assert!(middleware.execute(&portal));
+        assert!(middleware.execute(Some(intent)));
     }
 
     #[test]
@@ -1833,6 +1804,57 @@ mod tests {
         middleware.protocol_boundary();
         middleware.ready_for_query(TransactionStatus::Idle);
         middleware.publication_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_all_ends_fail_closed_temporary_shadowing() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+        run(&middleware, "create temporary table users (email text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+        assert!(middleware.has_unmodelled_ddl());
+
+        // A pooler's reset query drops the shadowing table, so the next client is unaffected
+        run(&middleware, "discard all");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_temp_keeps_temporary_shadowing_fail_closed() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+        run(&middleware, "create temporary table users (email text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        // Unlike `DISCARD ALL`, a rollback can undo `DISCARD TEMP`
+        run(&middleware, "discard temp");
+
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_all_keeps_unmodelled_catalog_ddl_fail_closed() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "create view names as select 1");
+        assert!(middleware.has_unmodelled_ddl());
+
+        run(&middleware, "discard all");
 
         assert!(middleware.has_unmodelled_ddl());
     }

@@ -33,7 +33,9 @@ are different things; do not call either of them a Statement here.
 **Prepared statement**:
 A name the client prepared on its connection with Parse, and everything Proxy keeps for
 it: the Parse that prepared it, its Statement when it touches encrypted columns, its
-statement metrics scope, and whether its SQL is a deallocation. It lasts until a Close, a
+statement metrics scope, whether its SQL is a deallocation, and its schema intent (what
+executing it does to schema state, which Schema middleware applies once PostgreSQL confirms
+it). It lasts until a Close, a
 Parse that reuses the name, or a `DEALLOCATE` or `DISCARD ALL` that PostgreSQL confirms,
 and all of it is released together.
 
@@ -176,10 +178,11 @@ closed without forwarding readiness, and the dirty publication remains eligible 
 
 **Schema middleware**:
 The owner of transactional schema state. Frontend and Backend report protocol lifecycle events;
-they do not directly change overlays or dirty flags. The middleware owns DDL detection, prepared
-DDL effects, successful-execution activation, savepoint and transaction transitions,
-effective-schema resolution, and the decision that publication is required. `Context` performs the
-authoritative reload round trip, while `SchemaManager` coalesces reloads and orders their
+they do not directly change overlays or dirty flags. The middleware owns DDL detection, the
+classification of each statement's schema intent, successful-execution activation, savepoint and
+transaction transitions, effective-schema resolution, and the decision that publication is
+required. `Context` keeps each schema intent with its prepared statement and portals, and performs
+the authoritative reload round trip, while `SchemaManager` coalesces reloads and orders their
 generations. See `docs/adr/0001-transaction-aware-schema-middleware.md`.
 
 ## Note on `session`

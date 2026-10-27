@@ -150,7 +150,7 @@ impl<S: EncryptionService> Context<S> {
             self.wait_for_schema_execution().await;
             self.ensure_schema_modelled()?;
         }
-        self.prepare_schema_statement(name.clone(), statement.clone());
+        self.prepare_schema_statement(name.clone(), statement.clone())?;
         self.update_statement_metadata(metrics, |m| {
             m.statement_type = Some(StatementType::from_statement(statement));
             m.set_query_fingerprint(sql);
@@ -235,7 +235,6 @@ impl<S: EncryptionService> Context<S> {
         statement: &Name,
     ) -> Result<BindKnowledge, Error> {
         self.bind_settings_statement(operation, portal.clone(), statement)?;
-        self.bind_schema_statement(portal.clone(), statement);
         let mapping_disabled = self.unsafe_disable_mapping()?;
         let metrics = if mapping_disabled {
             None
@@ -309,7 +308,7 @@ impl<S: EncryptionService> Context<S> {
             return Ok(false);
         }
         let settings = self.execute_settings_portal(operation, portal)?;
-        let schema = self.execute_schema_portal(portal);
+        let schema = self.execute_schema_portal(portal)?;
         self.set_execute_for_portal(operation, portal.clone())?;
         Ok(settings || schema)
     }
