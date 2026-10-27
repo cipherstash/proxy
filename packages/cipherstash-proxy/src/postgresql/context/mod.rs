@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     config::TandemConfig,
-    error::Error,
+    error::{EncryptError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -1518,9 +1518,22 @@ where
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
-        self.encryption
+        let expected = plaintexts.len();
+
+        let encrypted = self
+            .encryption
             .encrypt(keyset_id, plaintexts, columns)
-            .await
+            .await?;
+
+        // Values are paired with parameters by position, so a short result must never be used
+        if encrypted.len() != expected {
+            return Err(EncryptError::EncryptionResultCountMismatch {
+                expected,
+                actual: encrypted.len(),
+            }
+            .into());
+        }
+        Ok(encrypted)
     }
 
     pub async fn decrypt(
@@ -2708,5 +2721,25 @@ mod tests {
         context.ready_for_query(b'I');
 
         assert!(context.get_statement(&name).is_some());
+    }
+
+    #[tokio::test]
+    async fn encryption_service_returning_fewer_values_fails_closed() {
+        let context = create_context();
+        // TestService returns no outputs at all
+        let plaintext = cipherstash_client::encryption::Plaintext::new("secret".to_owned());
+        let result = context
+            .encrypt(None, vec![Some(plaintext), None], &[None, None])
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(
+                crate::error::EncryptError::EncryptionResultCountMismatch {
+                    expected: 2,
+                    actual: 0
+                }
+            ))
+        ));
     }
 }

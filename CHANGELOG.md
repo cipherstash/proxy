@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Plaintext forwarded beside a statement Proxy cannot type check**: When encrypted columns are configured, Proxy now refuses a write that it cannot type check, such as an `INSERT` into a table it has not loaded, instead of forwarding it to PostgreSQL unchanged. Such a write is still forwarded when Proxy knows that every table it writes to has no encrypted columns. Proxy also refuses a simple query that has a statement it cannot type check together with a statement it needs to encrypt or decrypt. Previously, with mapping errors off (the default), Proxy forwarded the whole query as written, so an `INSERT` into an encrypted column in the same query reached PostgreSQL with its plaintext values. A read that Proxy cannot type check is still forwarded unchanged when it is sent in a query of its own or only with statements that Proxy does not need to map. A statement that Proxy forwards unchanged is sent as written, so a plaintext value that it compares with an encrypted column still reaches the database.
 
+- **Encryption results checked before use**: Proxy now refuses a statement when the encryption service returns fewer encrypted values than the values it was asked to encrypt. Previously the parameters left without an encrypted value were sent to PostgreSQL as written, so a misbehaving encryption service could cause plaintext to reach the database.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed
