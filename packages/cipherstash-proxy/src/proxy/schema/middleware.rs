@@ -481,6 +481,16 @@ impl SchemaMiddleware {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn statement_count(&self) -> usize {
+        self.prepared.read().unwrap().len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn portal_count(&self) -> usize {
+        self.portals.read().unwrap().len()
+    }
+
     /// Records schema intent for a named prepared statement.
     pub fn prepare(&self, name: Name, statement: Statement) {
         let intent = self.intent(statement);
@@ -1833,6 +1843,57 @@ mod tests {
         middleware.protocol_boundary();
         middleware.ready_for_query(TransactionStatus::Idle);
         middleware.publication_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_all_ends_fail_closed_temporary_shadowing() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+        run(&middleware, "create temporary table users (email text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+        assert!(middleware.has_unmodelled_ddl());
+
+        // A pooler's reset query drops the shadowing table, so the next client is unaffected
+        run(&middleware, "discard all");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        assert!(!middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_temp_keeps_temporary_shadowing_fail_closed() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+        run(&middleware, "create temporary table users (email text)");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        // Unlike `DISCARD ALL`, a rollback can undo `DISCARD TEMP`
+        run(&middleware, "discard temp");
+
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn discard_all_keeps_unmodelled_catalog_ddl_fail_closed() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        run(&middleware, "create view names as select 1");
+        assert!(middleware.has_unmodelled_ddl());
+
+        run(&middleware, "discard all");
 
         assert!(middleware.has_unmodelled_ddl());
     }

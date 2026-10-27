@@ -148,6 +148,8 @@ pub(crate) struct ProtocolStateSizes {
     pub settings_statements: usize,
     pub portals: usize,
     pub portal_operations: usize,
+    pub schema_statements: usize,
+    pub schema_portals: usize,
 }
 
 #[derive(Debug)]
@@ -925,6 +927,8 @@ where
             settings_statements: state.settings_protocol.statement_count(),
             portals: state.portals.len(),
             portal_operations: state.portal_operations.len(),
+            schema_statements: self.schema_middleware.statement_count(),
+            schema_portals: self.schema_middleware.portal_count(),
         }
     }
 
