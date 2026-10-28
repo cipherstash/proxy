@@ -509,6 +509,22 @@ impl SettingsProtocol {
             mutation.metadata = MetadataSnapshot::default();
         }
     }
+    /// Forgets a statement that PostgreSQL releases unconditionally, as a simple Query
+    /// releases the unnamed statement. A rollback of an earlier operation must not restore
+    /// it, so returns the metrics scopes its rollback snapshots referenced.
+    pub fn released(&mut self, name: &Name) -> Vec<SessionId> {
+        self.prepared.remove(name);
+        self.journal
+            .values_mut()
+            .filter(|mutation| {
+                mutation.name == *name && matches!(mutation.previous, Previous::Statement(_))
+            })
+            .flat_map(|mutation| {
+                mutation.previous = Previous::Statement(None);
+                std::mem::take(&mut mutation.metadata).metrics()
+            })
+            .collect()
+    }
     #[cfg(test)]
     pub fn statement_count(&self) -> usize {
         self.prepared.len()

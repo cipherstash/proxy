@@ -103,6 +103,8 @@ mod tests {
 
     const ITERATIONS: usize = 200;
 
+    mod connection_model;
+
     #[derive(Clone)]
     struct TestService;
 
@@ -644,6 +646,53 @@ mod tests {
     }
 
     both_configs! {
+        async fn simple_query_releases_the_unnamed_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["", "a1"]).await;
+            let select = connection.select;
+
+            // PostgreSQL runs a simple Query in the unnamed statement, dropping the client's
+            let query = connection.query(select).await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert_eq!(statement_names(&connection), vec!["a1"]);
+        }
+    }
+
+    both_configs! {
+        async fn earlier_pipelined_failure_does_not_restore_the_unnamed_statement_a_query_released(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &[""]).await;
+            let select = connection.select;
+
+            let failed = connection.parse_named("a1".to_owned()).await;
+            // PostgreSQL skips this Parse after the failure, so it never answers it
+            connection.parse(b"").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            let query = connection.query(select).await;
+            connection.server(failed, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert!(statement_names(&connection).is_empty());
+        }
+    }
+
+    both_configs! {
         async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate(connect) {
             let mut connection = connect();
             prepare(&mut connection, &["a1", "a2"]).await;
@@ -835,16 +884,30 @@ mod tests {
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
-            let query = connection.query("DEALLOCATE ALL").await;
+            // Through the extended protocol, because a simple Query releases the unnamed
+            // statement itself
+            let parse = connection
+                .parse_sql(b"deallocate", "DEALLOCATE ALL".to_owned())
+                .await;
+            let bind = connection
+                .bind(Bytes::from_static(b"deallocate"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
             connection
-                .server(query, command_complete(b"DEALLOCATE ALL"))
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE ALL"))
                 .await;
             connection
-                .server(query, ready(TransactionStatus::Idle))
+                .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
             assert!(connection.holds_statement(b""));
             assert!(!connection.holds_statement(b"a1"));
+            assert!(!connection.holds_statement(b"deallocate"));
         }
     }
 
