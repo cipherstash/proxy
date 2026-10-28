@@ -26,7 +26,7 @@ permissions:
 jobs:
   benchmark:
     name: Performance regression check
-    runs-on: blacksmith-16vcpu-ubuntu-2204
+    runs-on: runs-on=${{ github.run_id }}/family=c8a+m8a/cpu=8/image=ubuntu22-full-x64/volume=80gb/extras=s3-cache
     env:
       CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
       CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
