@@ -138,7 +138,7 @@ jobs:
 
   merge:
     name: Publish multi-platform image
-    runs-on: blacksmith-16vcpu-ubuntu-2404-arm
+    runs-on: runs-on=${{ github.run_id }}/family=c8a+m8a/cpu=8/image=ubuntu24-full-x64/volume=80gb/extras=s3-cache
     timeout-minutes: 30
     needs:
       - build
