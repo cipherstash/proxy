@@ -56,6 +56,7 @@ impl<S: EncryptionService> Context<S> {
     }
 
     pub fn unmapped_query(&mut self, operation: OperationId) -> Result<(), Error> {
+        self.release_unnamed_statement()?;
         let metrics = self.start_metrics_scope()?;
         self.add_portal(operation, Name::new(), Portal::passthrough(Some(metrics)))?;
         self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))?;
@@ -373,6 +374,7 @@ impl<S: EncryptionService> Context<S> {
         portal: Portal,
         statements: &[ast::Statement],
     ) -> Result<(), Error> {
+        self.release_unnamed_statement()?;
         self.add_portal(operation, Name::new(), portal)?;
         self.set_simple_query_execute_until_ready(operation, Name::new(), Some(metrics))?;
         self.execute_simple_schema_statements(statements);
@@ -386,6 +388,7 @@ impl<S: EncryptionService> Context<S> {
         metrics: SessionId,
         response: DiagnosticResponse,
     ) -> Result<(), Error> {
+        self.release_unnamed_statement()?;
         self.finish_metrics_scope(Some(metrics))?;
         self.set_operation_error(operation, response)?;
         self.set_execute(operation, Name::new(), None)?;

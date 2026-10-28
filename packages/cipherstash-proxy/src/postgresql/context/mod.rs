@@ -803,6 +803,24 @@ where
         Ok(())
     }
 
+    /// PostgreSQL runs a simple Query in the unnamed statement, releasing the client's.
+    fn release_unnamed_statement(&self) -> Result<(), Error> {
+        let finished = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+            let name = Name::new();
+            let mut candidates = state.settings_protocol.released(&name);
+            candidates.extend(state.prepared_statements.remove(&name));
+            state.take_unreferenced_metrics(candidates)
+        };
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
+        Ok(())
+    }
+
     /// Record that the SQL of statement `name` is a `DEALLOCATE` or `DISCARD ALL`, so that
     /// executing it through the extended protocol releases what it removes.
     pub fn set_statement_deallocation(
