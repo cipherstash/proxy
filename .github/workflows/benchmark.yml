@@ -46,6 +46,12 @@ jobs:
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
           CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_PASSWORD }}
+
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
 
