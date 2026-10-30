@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-10-30
+
 ### Fixed
 
 - **Memory growth on long-lived connections**: Proxy now releases the prepared-statement, portal and statement-metrics state it keeps for each client connection once PostgreSQL has finished with it. Previously some common client patterns left state behind until the connection closed, so with a connection pool that keeps connections open, memory grew steadily until Proxy was restarted. The affected patterns were statements prepared and described but never executed, prepared statements removed with SQL `DEALLOCATE`, `DEALLOCATE ALL` or `DISCARD ALL` (used by psycopg 3, Rails and connection-pool reset queries, whether sent as a simple query or through the extended protocol), uniquely named portals, pipelined batches that fail part-way, statements rejected by Proxy, and connections that use `COPY ... FROM STDIN`. No configuration change is required.
@@ -285,7 +287,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.5...HEAD
+[2.2.5]: https://github.com/cipherstash/proxy/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2
