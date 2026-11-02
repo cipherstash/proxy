@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793267309111,
+  "lastUpdate": 1793579835661,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29797,6 +29797,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.191386,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "3abd3b3955c226e4a71f44e431ff396fbb361951",
+          "message": "docs: move agent working rules into the repo and drop dead test config",
+          "timestamp": "2026-10-26T13:23:14Z",
+          "url": "https://github.com/cipherstash/proxy/pull/500/commits/3abd3b3955c226e4a71f44e431ff396fbb361951"
+        },
+        "date": 1793579834197,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 33.350031,
             "unit": "Number"
           }
         ]
