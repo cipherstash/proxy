@@ -32,7 +32,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -2231,5 +2231,368 @@ mod test {
         );
 
         type_check(schema, &statement).unwrap();
+    }
+
+    /// `ON CONFLICT DO UPDATE SET enc = <literal>` is the upsert path: the
+    /// assignment value must be typed as the column's EQL type so the literal
+    /// is encrypted, exactly as in a plain `UPDATE ... SET`.
+    #[test]
+    fn insert_on_conflict_do_update_encrypts_assignment_literal() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = 30000",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        // Both the inserted literal and the conflict-path literal are EQL
+        // literals to encrypt.
+        assert_eq!(typed.literals.len(), 2);
+
+        let encrypted = typed
+            .literals
+            .iter()
+            .map(|(_, node)| {
+                (
+                    node.as_node_key(),
+                    ast::Value::SingleQuotedString(format!("ENCRYPTED_{node}")),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        match typed.transform(encrypted) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (id, salary) VALUES (1, 'ENCRYPTED_20000'::JSONB::eql_v2_encrypted) \
+                 ON CONFLICT(id) DO UPDATE SET salary = 'ENCRYPTED_30000'::JSONB::eql_v2_encrypted"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// A param assigned to an encrypted column on the conflict path is
+    /// encrypted too.
+    #[test]
+    fn insert_on_conflict_do_update_encrypts_assignment_param() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET salary = $3",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        assert!(
+            matches!(
+                &typed.params[..],
+                [
+                    (_, Value::Native(_)),
+                    (_, Value::Eql(EqlTerm::Full(_))),
+                    (_, Value::Eql(EqlTerm::Full(_)))
+                ]
+            ),
+            "expected $1 native and $2, $3 EQL full payloads, got: {:?}",
+            typed.params
+        );
+    }
+
+    /// The `excluded` pseudo-table projects the target table's columns, so
+    /// `SET enc = excluded.enc` resolves and the param feeding the insert
+    /// value gets the column's EQL type.
+    #[test]
+    fn insert_on_conflict_do_update_with_excluded_reference() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        assert!(
+            matches!(
+                &typed.params[..],
+                [(_, Value::Native(_)), (_, Value::Eql(EqlTerm::Full(_)))]
+            ),
+            "expected $1 native and $2 EQL full payload, got: {:?}",
+            typed.params
+        );
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (id, salary) VALUES ($1, $2::JSONB::eql_v2_encrypted) \
+                 ON CONFLICT(id) DO UPDATE SET salary = excluded.salary"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `DO UPDATE ... WHERE` predicate is an ordinary predicate over the
+    /// existing row and `excluded`.
+    #[test]
+    fn insert_on_conflict_do_update_where_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             WHERE excluded.salary > employees.salary",
+        );
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err:#?}")
+        }
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.salary",
+        );
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "excluded must not be visible outside ON CONFLICT DO UPDATE"
+        );
+    }
+
+    #[test]
+    fn insert_source_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) \
+             SELECT excluded.id, excluded.salary FROM employees \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded.id".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded_wildcard() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.*",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_into_table_named_excluded_is_valid() {
+        let schema = resolver(schema! {
+            tables: {
+                excluded: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO excluded (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        type_check(schema, &statement).unwrap();
+    }
+
+    #[test]
+    fn insert_on_conflict_update_keeps_unqualified_columns_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::AmbiguousMatch(
+                "salary".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_do_nothing_does_not_add_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+
+        for sql in [
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING RETURNING *",
+        ] {
+            type_check(Arc::clone(&schema), &parse(sql)).unwrap();
+        }
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_unqualified_column_is_not_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING salary",
+        );
+
+        let typed = type_check(schema, &statement)
+            .expect("the target table must be the only relation visible to RETURNING");
+
+        assert_eq!(
+            typed.projection,
+            projection![(EQL(employees.salary) as salary)]
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_wildcard_only_projects_target_table() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING *",
+        );
+
+        let typed = type_check(schema, &statement).expect("RETURNING * must type check");
+
+        assert_eq!(
+            typed.projection,
+            projection![
+                (NATIVE(employees.id) as id),
+                (EQL(employees.salary) as salary)
+            ]
+        );
+    }
+
+    /// A conflict only fires off a unique index, and uniqueness of an
+    /// encrypted column would be judged on the randomised ciphertext, so the
+    /// conflict would never fire. Rejected explicitly.
+    #[test]
+    fn insert_on_conflict_target_on_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 2) \
+             ON CONFLICT (salary) DO NOTHING",
+        );
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "an encrypted conflict-target column should fail type checking"
+        );
     }
 }
