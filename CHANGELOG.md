@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [3.0.2] - 2026-11-02
+## [3.1.0] - 2026-11-02
 
 ### Added
 
@@ -456,8 +456,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v3.0.2...HEAD
-[3.0.2]: https://github.com/cipherstash/proxy/compare/v3.0.1...v3.0.2
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/cipherstash/proxy/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/cipherstash/proxy/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/cipherstash/proxy/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
