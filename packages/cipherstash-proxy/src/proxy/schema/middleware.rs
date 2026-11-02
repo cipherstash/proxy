@@ -100,6 +100,19 @@ impl SchemaIntent {
     fn changes_schema(&self) -> bool {
         self.ddl || (self.temporary && matches!(self.statement, Statement::CreateTable(_)))
     }
+
+    /// Whether executing the statement can change schema state at all, so Context need not
+    /// keep the intent of a statement that cannot.
+    pub fn affects_schema(&self) -> bool {
+        self.ddl
+            || self.temporary
+            || matches!(
+                self.statement,
+                Statement::Savepoint { .. }
+                    | Statement::ReleaseSavepoint { .. }
+                    | Statement::Rollback { .. }
+            )
+    }
 }
 
 /// Where one confirmed schema change lands.
@@ -124,6 +137,9 @@ struct Temporary {
     on_commit_drop: Vec<ObjectName>,
     /// The tables when the current transaction started, which rollback restores.
     committed: SchemaWithEdits,
+    /// Whether connection-local DDL was unmodelled when the current transaction started,
+    /// which rollback restores along with the tables.
+    committed_local_unmodelled: bool,
     /// Whether PostgreSQL will roll back the current transaction.
     failed: bool,
 }
@@ -143,6 +159,7 @@ impl Temporary {
             resolver,
             on_commit_drop: Vec::new(),
             committed,
+            committed_local_unmodelled: false,
             failed: false,
         }
     }
@@ -193,8 +210,9 @@ impl Temporary {
     }
 
     /// Commits the current transaction's changes, or discards them if
-    /// PostgreSQL rolled it back.
-    fn transaction_ended(&mut self) {
+    /// PostgreSQL rolled it back. Returns whether connection-local DDL is unmodelled
+    /// afterwards, given whether it is now.
+    fn transaction_ended(&mut self, local_unmodelled: bool) -> bool {
         if self.failed {
             self.restore(TemporaryCheckpoint {
                 tables: self.committed.clone(),
@@ -205,8 +223,12 @@ impl Temporary {
                 apply_to_temporary(&self.resolver, &drop_tables(vec![name]));
             }
         }
+        if !self.failed {
+            self.committed_local_unmodelled = local_unmodelled;
+        }
         self.committed = Self::tables_of(&self.resolver);
         self.failed = false;
+        self.committed_local_unmodelled
     }
 }
 
@@ -260,7 +282,7 @@ fn drop_tables(names: Vec<ObjectName>) -> Statement {
 /// One execution or synchronization boundary awaiting a backend outcome.
 enum PendingExecution {
     /// An execution, optionally carrying schema intent.
-    Execute(Option<Box<SchemaIntent>>),
+    Execute(Option<Arc<SchemaIntent>>),
     /// The boundary terminated by the next `ReadyForQuery` message.
     ReadyBoundary,
 }
@@ -449,7 +471,13 @@ impl SchemaMiddleware {
         self.transaction_active
             .store(!status.is_idle(), Ordering::Release);
         if status.is_idle() {
-            self.temporary.write().unwrap().transaction_ended();
+            let local_unmodelled = self
+                .temporary
+                .write()
+                .unwrap()
+                .transaction_ended(self.local_unmodelled.load(Ordering::Acquire));
+            self.local_unmodelled
+                .store(local_unmodelled, Ordering::Release);
         }
         if status.is_idle() && !self.needs_publication() {
             self.adopt_latest();
@@ -482,8 +510,8 @@ impl SchemaMiddleware {
     /// Records a portal execution, with the schema intent of its prepared statement, awaiting
     /// a backend result. Returns whether the protocol adapter must flush DDL immediately to
     /// unblock dependent work.
-    pub fn execute(&self, intent: Option<SchemaIntent>) -> bool {
-        let executes_ddl = intent.as_ref().is_some_and(SchemaIntent::changes_schema);
+    pub fn execute(&self, intent: Option<Arc<SchemaIntent>>) -> bool {
+        let executes_ddl = intent.as_deref().is_some_and(SchemaIntent::changes_schema);
         self.transaction_active.store(true, Ordering::Release);
         if executes_ddl {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
@@ -491,7 +519,7 @@ impl SchemaMiddleware {
         self.executions
             .write()
             .unwrap()
-            .push_back(PendingExecution::Execute(intent.map(Box::new)));
+            .push_back(PendingExecution::Execute(intent));
         executes_ddl
     }
 
@@ -504,7 +532,7 @@ impl SchemaMiddleware {
             if intent.changes_schema() {
                 self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
             }
-            executions.push_back(PendingExecution::Execute(Some(Box::new(intent))));
+            executions.push_back(PendingExecution::Execute(Some(Arc::new(intent))));
         }
         executions.push_back(PendingExecution::ReadyBoundary);
     }
@@ -670,7 +698,7 @@ impl SchemaMiddleware {
         self.executions
             .write()
             .unwrap()
-            .push_back(PendingExecution::Execute(Some(Box::new(intent))));
+            .push_back(PendingExecution::Execute(Some(Arc::new(intent))));
     }
 
     /// Applies the next queued execution after PostgreSQL confirms success.
@@ -756,18 +784,10 @@ impl SchemaMiddleware {
                                 self.temporary.write().unwrap().apply(&statement)
                             }
                             SchemaChange::DiscardTemporary => {
+                                // A rollback restores both the tables and whether they were
+                                // unmodelled
                                 self.temporary.write().unwrap().discard();
-                                // PostgreSQL refuses `DISCARD ALL` in a transaction block, so
-                                // no rollback can bring back the temporary tables it drops.
-                                // `DISCARD TEMP` can be rolled back, so it keeps them unmodelled.
-                                if matches!(
-                                    intent.statement,
-                                    Statement::Discard {
-                                        object_type: DiscardObject::ALL
-                                    }
-                                ) {
-                                    self.local_unmodelled.store(false, Ordering::Release);
-                                }
+                                self.local_unmodelled.store(false, Ordering::Release);
                             }
                             SchemaChange::Catalog(statement) if self.models_ddl(&statement) => {
                                 self.apply_ddl(&statement)
@@ -931,11 +951,11 @@ impl SchemaMiddleware {
     }
 
     /// Removes the next execution without crossing a readiness boundary.
-    fn pop_execution(&self) -> Option<Option<SchemaIntent>> {
+    fn pop_execution(&self) -> Option<Option<Arc<SchemaIntent>>> {
         let mut executions = self.executions.write().unwrap();
         if matches!(executions.front(), Some(PendingExecution::Execute(_))) {
             match executions.pop_front().unwrap() {
-                PendingExecution::Execute(intent) => Some(intent.map(|intent| *intent)),
+                PendingExecution::Execute(intent) => Some(intent),
                 PendingExecution::ReadyBoundary => unreachable!(),
             }
         } else {
@@ -1226,7 +1246,7 @@ mod tests {
     }
 
     fn execute_prepared(middleware: &SchemaMiddleware, statement: Statement) {
-        middleware.execute(Some(middleware.intent(statement)));
+        middleware.execute(Some(Arc::new(middleware.intent(statement))));
     }
 
     proptest! {
@@ -1451,7 +1471,7 @@ mod tests {
     fn ordinary_extended_execution_pins_the_snapshot_until_readiness() {
         let store = CommittedSchemaStore::for_testing(Schema::new("public"), EncryptConfig::new());
         let middleware = SchemaMiddleware::from_store(store.clone());
-        assert!(!middleware.execute(Some(middleware.intent(parse("select 1")))));
+        assert!(!middleware.execute(Some(Arc::new(middleware.intent(parse("select 1"))))));
 
         let mut published = Schema::new("public");
         published.add_table(Table::new(Ident::new("reports")));
@@ -1476,7 +1496,7 @@ mod tests {
         let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
         let intent = middleware.intent(parse("create table reports (id bigint)"));
 
-        assert!(middleware.execute(Some(intent)));
+        assert!(middleware.execute(Some(Arc::new(intent))));
     }
 
     #[test]

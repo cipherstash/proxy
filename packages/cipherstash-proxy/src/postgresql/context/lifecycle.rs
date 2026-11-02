@@ -307,8 +307,8 @@ impl<S: EncryptionService> Context<S> {
             self.set_execute_for_portal(operation, portal.clone())?;
             return Ok(false);
         }
-        let settings = self.execute_settings_portal(operation, portal)?;
-        let schema = self.execute_schema_portal(portal)?;
+        let (settings, intent) = self.execute_settings_portal(operation, portal)?;
+        let schema = self.execute_schema_portal(intent);
         self.set_execute_for_portal(operation, portal.clone())?;
         Ok(settings || schema)
     }
