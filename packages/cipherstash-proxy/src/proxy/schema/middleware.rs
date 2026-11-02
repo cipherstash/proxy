@@ -1808,8 +1808,8 @@ mod tests {
         assert!(middleware.has_unmodelled_ddl());
     }
 
-    #[test]
-    fn discard_all_ends_fail_closed_temporary_shadowing() {
+    /// A connection whose temporary `users` table shadows the encrypted catalog table
+    fn shadowed_by_a_temporary_table() -> SchemaMiddleware {
         let mut encrypt_config = EncryptConfig::new();
         let column = match parse("create table users (email eql_v3_text_search)") {
             Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
@@ -1821,6 +1821,12 @@ mod tests {
         run(&middleware, "create temporary table users (email text)");
         middleware.ready_for_query(TransactionStatus::Idle);
         assert!(middleware.has_unmodelled_ddl());
+        middleware
+    }
+
+    #[test]
+    fn discard_all_ends_fail_closed_temporary_shadowing() {
+        let middleware = shadowed_by_a_temporary_table();
 
         // A pooler's reset query drops the shadowing table, so the next client is unaffected
         run(&middleware, "discard all");
@@ -1830,21 +1836,38 @@ mod tests {
     }
 
     #[test]
-    fn discard_temp_keeps_temporary_shadowing_fail_closed() {
-        let mut encrypt_config = EncryptConfig::new();
-        let column = match parse("create table users (email eql_v3_text_search)") {
-            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
-            _ => unreachable!(),
-        };
-        add_column_config(&mut encrypt_config, "users", &column);
-        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
-        let middleware = SchemaMiddleware::from_store(store);
-        run(&middleware, "create temporary table users (email text)");
+    fn discard_temp_ends_fail_closed_temporary_shadowing() {
+        let middleware = shadowed_by_a_temporary_table();
+
+        run(&middleware, "discard temp");
         middleware.ready_for_query(TransactionStatus::Idle);
 
-        // Unlike `DISCARD ALL`, a rollback can undo `DISCARD TEMP`
-        run(&middleware, "discard temp");
+        assert!(!middleware.has_unmodelled_ddl());
+    }
 
+    #[test]
+    fn rolled_back_discard_temp_keeps_temporary_shadowing_fail_closed() {
+        let middleware = shadowed_by_a_temporary_table();
+
+        run(&middleware, "begin");
+        run(&middleware, "discard temp");
+        run(&middleware, "rollback");
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        // The rollback brought the shadowing table back
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
+    fn failed_batch_after_discard_all_keeps_temporary_shadowing_fail_closed() {
+        let middleware = shadowed_by_a_temporary_table();
+
+        run(&middleware, "discard all");
+        middleware.execution_started(parse("select 1"));
+        middleware.execution_failed();
+        middleware.ready_for_query(TransactionStatus::Idle);
+
+        // Proxy cannot tell whether the failure rolled back the discard
         assert!(middleware.has_unmodelled_ddl());
     }
 
@@ -1852,9 +1875,11 @@ mod tests {
     fn discard_all_keeps_unmodelled_catalog_ddl_fail_closed() {
         let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
         run(&middleware, "create view names as select 1");
+        middleware.ready_for_query(TransactionStatus::Idle);
         assert!(middleware.has_unmodelled_ddl());
 
         run(&middleware, "discard all");
+        middleware.ready_for_query(TransactionStatus::Idle);
 
         assert!(middleware.has_unmodelled_ddl());
     }
