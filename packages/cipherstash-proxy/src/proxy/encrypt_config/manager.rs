@@ -238,9 +238,14 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
         }
     }
 }
+/// Whether `e` is PostgreSQL reporting that the EQL configuration table does not exist.
+///
+/// Reads the structured server error rather than the rendered text: since tokio-postgres 0.7.15, `Error`'s `Display` is only the error kind (`"db error"`) and no longer includes the server's message.
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
-    let msg = e.to_string();
-    msg.contains("eql_v2_configuration") && msg.contains("does not exist")
+    e.as_db_error().is_some_and(|db| {
+        *db.code() == tokio_postgres::error::SqlState::UNDEFINED_TABLE
+            && db.message().contains("eql_v2_configuration")
+    })
 }
 
 fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfigMap, ConfigError> {

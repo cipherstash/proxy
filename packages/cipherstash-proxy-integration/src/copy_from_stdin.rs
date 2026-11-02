@@ -47,7 +47,7 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert!(err.to_string().contains(
+        assert!(err.as_db_error().unwrap().message().contains(
             "COPY into encrypted column 'encrypted_text' of table 'encrypted' is not supported"
         ));
 
@@ -57,7 +57,11 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert!(err.to_string().contains("COPY into encrypted column"));
+        assert!(err
+            .as_db_error()
+            .unwrap()
+            .message()
+            .contains("COPY into encrypted column"));
 
         // The connection is still usable
         let rows = client.simple_query("SELECT 1").await.unwrap();
