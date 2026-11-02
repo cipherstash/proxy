@@ -2074,6 +2074,66 @@ mod refusals {
     }
 
     #[tokio::test]
+    async fn a_bind_to_a_statement_proxy_did_not_see_prepared_is_refused() {
+        let mut connection = Connection::started().await;
+        connection.client(bind_text("", "missing", "secret")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        // Proxy cannot tell whether the statement's values must be encrypted, so they never
+        // reach PostgreSQL under that name
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert!(target(&forwarded[0].1, true).starts_with("__cipherstash_"));
+        assert!(!forwarded
+            .iter()
+            .any(|(_, body)| body.windows(6).any(|w| w == b"secret")));
+
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+
+        // The connection stays usable
+        connection.prepare("s", "SELECT 1").await;
+        connection.forwarded().await;
+        connection.client(bind("", "s")).await;
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert_eq!(target(&forwarded[0].1, true), "s");
+    }
+
+    #[tokio::test]
+    async fn a_bind_to_a_statement_whose_parse_proxy_refused_is_refused() {
+        let mut connection = Connection::started().await;
+        connection.forwarded().await;
+        connection
+            .client(parse("s", "SET CIPHERSTASH.UNKNOWN_SETTING = 1"))
+            .await;
+        connection.client(sync()).await;
+        let forwarded = connection.forwarded().await;
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        connection.errors_sent_to_client();
+
+        // PostgreSQL never prepared `s`, so a later Bind to it is refused like any other
+        // statement Proxy did not see prepared, and its values never reach PostgreSQL
+        connection.client(bind_text("", "s", "secret")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert!(target(&forwarded[0].1, true).starts_with("__cipherstash_"));
+        assert!(!forwarded
+            .iter()
+            .any(|(_, body)| body.windows(6).any(|w| w == b"secret")));
+
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+    }
+
+    #[tokio::test]
     async fn a_refused_execute_is_forwarded_as_an_execute_postgresql_rejects() {
         let mut connection = Connection::started().await;
         connection.client(query("BEGIN")).await;

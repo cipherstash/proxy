@@ -259,6 +259,10 @@ where
                         let name = Parse::try_from(&bytes)
                             .map(|parse| parse.name)
                             .unwrap_or_else(|_| Name::unnamed());
+                        // PostgreSQL will not prepare the statement, so Proxy must not count
+                        // it as prepared either, or the Bind guard would forward a later Bind
+                        // to it with its values as written
+                        self.context.close_statement(&name);
                         bytes = self.refuse(err, |refusal| refused_parse(&name, refusal))?;
                         self.error_state = Some(ErrorState);
                     }
@@ -1353,6 +1357,17 @@ where
         }
 
         let mut bind = Bind::try_from(bytes)?;
+
+        // Proxy stores a Statement only for statements that touch encrypted columns, so a name it
+        // has no Parse for could be one whose values must be encrypted. Refuse it rather than
+        // send the values as they are.
+        if !self.context.is_prepared(&bind.prepared_statement) {
+            return Err(MappingError::UnknownPreparedStatement {
+                name: bind.prepared_statement.as_str().to_owned(),
+            }
+            .into());
+        }
+
         let statement = self.context.get_statement(&bind.prepared_statement);
         let encrypted_values = statement
             .as_ref()

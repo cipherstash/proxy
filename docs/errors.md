@@ -17,6 +17,7 @@
   - [COPY with a statement that uses an encrypted column](#mapping-copy-with-encrypted-statement)
   - [Internal Error](#mapping-internal-error)
   - [Prepared settings changed](#mapping-prepared-settings-changed)
+  - [Unknown prepared statement](#mapping-unknown-prepared-statement)
 
 - Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
@@ -405,6 +406,29 @@ The error uses SQLSTATE `26000`, so drivers such as PostgreSQL JDBC can invalida
 
 Select the intended keyset and mapping mode, close the old statement, then prepare and bind it again.
 Prefer bound parameters over encrypted literals when a prepared statement must be reused across keysets.
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unknown prepared statement <a id='mapping-unknown-prepared-statement'></a>
+
+A Bind names a prepared statement that Proxy did not see prepared on this connection.
+Proxy only knows whether a statement's values must be encrypted from the Parse that prepared it, so it refuses the Bind rather than send the values to the database as they are.
+
+### Error message
+
+```
+Prepared statement 'my_statement' does not exist on this connection.
+```
+
+### How to fix
+
+The error uses SQLSTATE `26000`, PostgreSQL's own code for a missing prepared statement, so drivers that cache statements can prepare it again.
+
+Prepare the statement with a Parse message on the same connection before binding it.
+A statement prepared with SQL `PREPARE` cannot be bound through Proxy.
 
 
 

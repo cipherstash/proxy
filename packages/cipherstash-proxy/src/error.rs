@@ -122,6 +122,11 @@ pub enum MappingError {
     #[error("The prepared statement or bound values no longer match the connection's CipherStash settings. Close the statement, then prepare and bind it again. For help visit {}#mapping-prepared-settings-changed", ERROR_DOC_BASE_URL)]
     PreparedSettingsChanged,
 
+    /// A Bind names a statement Proxy has no Parse for, so Proxy cannot tell whether its
+    /// values must be encrypted.
+    #[error("Prepared statement '{name}' does not exist on this connection. For help visit {}#mapping-unknown-prepared-statement", ERROR_DOC_BASE_URL)]
+    UnknownPreparedStatement { name: String },
+
     #[error(transparent)]
     EqlMapper(#[from] EqlMapperError),
 }

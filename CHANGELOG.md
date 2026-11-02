@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Encryption results checked before use**: Proxy now refuses a statement when the encryption service returns fewer encrypted values than the values it was asked to encrypt. Previously the parameters left without an encrypted value were sent to PostgreSQL as written, so a misbehaving encryption service could cause plaintext to reach the database.
 
+- **Bind to a statement Proxy did not see prepared**: Proxy now refuses a `Bind` that names a prepared statement it did not see prepared on the connection, with SQLSTATE `26000`, PostgreSQL's own code for a missing prepared statement. Previously Proxy sent the bound values as written, so if it had lost track of a statement that writes an encrypted column, the values reached PostgreSQL unencrypted. This includes a statement whose `Parse` Proxy refused, which PostgreSQL never prepared. A statement prepared with SQL `PREPARE` can no longer be bound with a `Bind` message through Proxy.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

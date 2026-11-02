@@ -953,6 +953,16 @@ where
             .map(|mut sessions| sessions.insert(name, session_id));
     }
 
+    /// Whether a Parse on this connection prepared `name`.
+    ///
+    /// Every Parse records its session, including one Proxy does not map, and closing the
+    /// statement removes it.
+    pub fn is_prepared(&self, name: &Name) -> bool {
+        self.statement_sessions
+            .read()
+            .is_ok_and(|sessions| sessions.contains_key(name))
+    }
+
     pub fn get_statement_session(&self, name: &Name) -> Option<SessionId> {
         let sessions = self.statement_sessions.read().ok()?;
         sessions.get(name).copied()
