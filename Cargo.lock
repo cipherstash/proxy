@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-proxy"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "eql-mapper-macros"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "pretty_assertions",
  "proc-macro2",
@@ -4468,7 +4468,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "showcase"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "cipherstash-client",
  "cipherstash-config",
