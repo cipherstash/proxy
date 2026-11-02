@@ -2423,6 +2423,31 @@ mod copy_from_stdin {
         assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
     }
 
+    /// A COPY prepared while mapping was disabled was never checked, so it must not run once
+    /// mapping is enabled again, or its copy data would reach the encrypted column as plaintext
+    #[tokio::test]
+    async fn a_copy_prepared_while_mapping_was_disabled_is_refused_once_it_is_enabled() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection
+            .client(parse("s", "COPY users (email) FROM STDIN"))
+            .await;
+        connection.client(sync()).await;
+        connection.server(parse_complete()).await;
+        connection.server(ready(b'I')).await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET")
+            .await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+
+        connection.client(bind("", "s")).await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
+    }
+
     /// PostgreSQL reads a file or program into the table as it reads copy data
     #[tokio::test]
     async fn a_copy_from_a_file_into_an_encrypted_column_is_refused() {

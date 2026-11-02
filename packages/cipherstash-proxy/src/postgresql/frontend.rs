@@ -946,9 +946,10 @@ where
         self.effective_settings_command(command.clone(), &settings)?;
         self.context
             .set_statement_settings(message.name.to_owned(), command);
-        // A statement Proxy maps runs only under the settings it was prepared under
+        // A statement Proxy maps or checks against the schema, including a COPY ... FROM, runs
+        // only under the settings it was prepared under
         let prepared =
-            eql_mapper::requires_type_check(&statement).then(|| EffectiveSettings::new(&settings));
+            eql_mapper::requires_schema(&statement).then(|| EffectiveSettings::new(&settings));
         self.context
             .set_prepared_settings(message.name.to_owned(), prepared);
 
