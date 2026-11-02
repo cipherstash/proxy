@@ -79,8 +79,9 @@ After every push:
    `gh pr checks --watch`, and collect failed-run logs with read-only `gh`
    commands. Where GitHub's GraphQL API is unavailable (`gh pr checks` then
    fails), read check state over REST with
-   `gh api repos/cipherstash/proxy/commits/<sha>/check-runs`. It must not edit files, run formatting that changes files, commit,
-   push, or perform any other repository mutation.
+   `gh api repos/cipherstash/proxy/commits/<sha>/check-runs`. It must not
+   edit files, run formatting that changes files, commit, push, or perform any
+   other repository mutation.
 2. The monitor must return the final check state and, for failures, the failed
    check names, run identifiers, and relevant failure output to the main agent.
 3. The main agent is the sole writer. It must diagnose the failure, edit the
