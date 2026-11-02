@@ -42,9 +42,10 @@ pub trait PostgreSqlErrorHandler {
                     &column.column_name(),
                 )
             }
-            Error::Mapping(MappingError::PreparedSettingsChanged) => {
-                ErrorResponse::prepared_statement_invalidated(err.to_string())
-            }
+            Error::Mapping(
+                MappingError::PreparedSettingsChanged
+                | MappingError::UnknownPreparedStatement { .. },
+            ) => ErrorResponse::prepared_statement_invalidated(err.to_string()),
             Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,

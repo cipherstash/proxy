@@ -4,7 +4,12 @@ mod channel_writer;
 pub use async_stream::AsyncStream;
 pub use channel_writer::{ChannelWriter, Sender};
 
-use crate::{config::ServerConfig, error::Error, log::DEVELOPMENT, tls, DatabaseConfig};
+use crate::{
+    config::ServerConfig,
+    error::{Error, ErrorChain},
+    log::DEVELOPMENT,
+    tls, DatabaseConfig,
+};
 use socket2::TcpKeepalive;
 use std::time::Duration;
 use tokio::{
@@ -45,7 +50,7 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!(msg = "Connection error", error = err.to_string());
+            error!(msg = "Connection error", error = %ErrorChain(&err));
         }
     });
     Ok(client)

@@ -5,7 +5,8 @@ use crate::{
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
-    Cte, Ident, Insert, ObjectNamePart, TableAlias, TableFactor, TableObject,
+    Cte, Ident, Insert, ObjectNamePart, OnConflict, OnConflictAction, TableAlias, TableFactor,
+    TableObject,
 };
 use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
@@ -17,6 +18,8 @@ pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
+    insert_projections: Vec<Arc<Type>>,
+    shadowed_excluded_relations: Vec<Option<Rc<Relation>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -30,11 +33,16 @@ impl<'ast> Importer<'ast> {
             registry: registry.into(),
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
+            insert_projections: Vec::new(),
+            shadowed_excluded_relations: Vec::new(),
             _ast: PhantomData,
         }
     }
 
-    fn update_scope_for_insert_statement(&mut self, insert: &Insert) -> Result<(), ImportError> {
+    fn update_scope_for_insert_statement(
+        &mut self,
+        insert: &Insert,
+    ) -> Result<Arc<Type>, ImportError> {
         if let Insert {
             table: TableObject::TableName(table_name),
             table_alias,
@@ -45,12 +53,20 @@ impl<'ast> Importer<'ast> {
 
             let projection = Projection::new_from_schema_table(table.clone());
 
+            // The relation is named — by its alias when one is written, by the
+            // table name otherwise — so that qualified references (`t.col` in
+            // `RETURNING` or in `ON CONFLICT DO UPDATE`) can resolve.
+            let name = table_alias.clone().or_else(|| {
+                let ObjectNamePart::Identifier(ident) = table_name.0.last().unwrap();
+                Some(ident.clone())
+            });
+
             self.scope_tracker.borrow_mut().add_relation(Relation {
-                name: table_alias.clone(),
-                projection_type: Type::Value(Value::Projection(projection)).into(),
+                name,
+                projection_type: Type::Value(Value::Projection(projection.clone())).into(),
             })?;
 
-            Ok(())
+            Ok(Type::Value(Value::Projection(projection)).into())
         } else {
             Err(ImportError::Unsupported(
                 "unsupported TableObject variant in Insert".to_string(),
@@ -292,6 +308,9 @@ pub enum ImportError {
     #[error(transparent)]
     ScopeError(#[from] ScopeError),
 
+    #[error("Importer traversal invariant failed: {0}")]
+    TraversalInvariant(&'static str),
+
     #[error("Expected projection")]
     ExpectedProjection,
 
@@ -312,8 +331,31 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         // 2. Child nodes of the `Insert` need to resolve identifiers in the context of the scope, so exit would be too
         // late.
         if let Some(insert) = node.downcast_ref::<Insert>() {
-            if let Err(err) = self.update_scope_for_insert_statement(insert) {
-                return ControlFlow::Break(Break::Err(err));
+            match self.update_scope_for_insert_statement(insert) {
+                Ok(projection) => self.insert_projections.push(projection),
+                Err(err) => return ControlFlow::Break(Break::Err(err)),
+            }
+        }
+
+        // `excluded` exists only inside `ON CONFLICT DO UPDATE`. Adding it at
+        // the clause boundary keeps it visible to assignments and the WHERE
+        // predicate, but not to the INSERT source or RETURNING clause.
+        if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
+            if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+                let Some(projection_type) = self.insert_projections.last().cloned() else {
+                    return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+                };
+
+                match self
+                    .scope_tracker
+                    .borrow_mut()
+                    .add_shadowing_relation(Relation {
+                        name: Some(Ident::new("excluded")),
+                        projection_type,
+                    }) {
+                    Ok(shadowed) => self.shadowed_excluded_relations.push(shadowed),
+                    Err(err) => return ControlFlow::Break(Break::Err(err.into())),
+                }
             }
         }
 
@@ -321,6 +363,30 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+        if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
+            if on_conflict_is_update(on_conflict) {
+                // Remove the pseudo-relation added on entry before traversal
+                // continues into the INSERT's RETURNING clause, restoring a
+                // target table binding that it temporarily shadowed.
+                let Some(shadowed) = self.shadowed_excluded_relations.pop() else {
+                    return ControlFlow::Break(Break::Err(ImportError::TraversalInvariant(
+                        "ON CONFLICT DO UPDATE exited without a shadow record",
+                    )));
+                };
+                if let Err(err) = self
+                    .scope_tracker
+                    .borrow_mut()
+                    .remove_shadowing_relation(&Ident::new("excluded"), shadowed)
+                {
+                    return ControlFlow::Break(Break::Err(err.into()));
+                }
+            }
+        }
+
+        if node.downcast_ref::<Insert>().is_some() && self.insert_projections.pop().is_none() {
+            return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+        }
+
         if let Some(cte) = node.downcast_ref::<Cte>() {
             if let Err(err) = self.update_scope_for_cte(cte) {
                 return ControlFlow::Break(Break::Err(err));
@@ -335,4 +401,8 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
         ControlFlow::Continue(())
     }
+}
+
+fn on_conflict_is_update(on_conflict: &OnConflict) -> bool {
+    matches!(on_conflict.action, OnConflictAction::DoUpdate(_))
 }

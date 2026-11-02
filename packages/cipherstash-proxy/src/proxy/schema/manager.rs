@@ -1,5 +1,5 @@
 use crate::config::DatabaseConfig;
-use crate::error::Error;
+use crate::error::{Error, ErrorChain};
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
@@ -37,7 +37,7 @@ impl SchemaManager {
             Err(err) => {
                 warn!(
                     msg = "Error reloading database schema",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
             }
         };
@@ -72,7 +72,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
                 Err(err) => {
                     warn!(
                         msg = "Error loading database schema",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                 }
             }

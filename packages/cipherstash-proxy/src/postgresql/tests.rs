@@ -2074,6 +2074,66 @@ mod refusals {
     }
 
     #[tokio::test]
+    async fn a_bind_to_a_statement_proxy_did_not_see_prepared_is_refused() {
+        let mut connection = Connection::started().await;
+        connection.client(bind_text("", "missing", "secret")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        // Proxy cannot tell whether the statement's values must be encrypted, so they never
+        // reach PostgreSQL under that name
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert!(target(&forwarded[0].1, true).starts_with("__cipherstash_"));
+        assert!(!forwarded
+            .iter()
+            .any(|(_, body)| body.windows(6).any(|w| w == b"secret")));
+
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+
+        // The connection stays usable
+        connection.prepare("s", "SELECT 1").await;
+        connection.forwarded().await;
+        connection.client(bind("", "s")).await;
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert_eq!(target(&forwarded[0].1, true), "s");
+    }
+
+    #[tokio::test]
+    async fn a_bind_to_a_statement_whose_parse_proxy_refused_is_refused() {
+        let mut connection = Connection::started().await;
+        connection.forwarded().await;
+        connection
+            .client(parse("s", "SET CIPHERSTASH.UNKNOWN_SETTING = 1"))
+            .await;
+        connection.client(sync()).await;
+        let forwarded = connection.forwarded().await;
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        connection.errors_sent_to_client();
+
+        // PostgreSQL never prepared `s`, so a later Bind to it is refused like any other
+        // statement Proxy did not see prepared, and its values never reach PostgreSQL
+        connection.client(bind_text("", "s", "secret")).await;
+        connection.client(execute("")).await;
+        connection.client(sync()).await;
+
+        let forwarded = connection.forwarded().await;
+        assert_eq!(forwarded[0].0, b'B');
+        assert!(target(&forwarded[0].1, true).starts_with("__cipherstash_"));
+        assert!(!forwarded
+            .iter()
+            .any(|(_, body)| body.windows(6).any(|w| w == b"secret")));
+
+        connection.server(rejection(&forwarded)).await;
+        connection.server(ready(b'I')).await;
+        assert_eq!(connection.error_codes_sent_to_client(), vec!["26000"]);
+    }
+
+    #[tokio::test]
     async fn a_refused_execute_is_forwarded_as_an_execute_postgresql_rejects() {
         let mut connection = Connection::started().await;
         connection.client(query("BEGIN")).await;
@@ -2361,6 +2421,31 @@ mod copy_from_stdin {
         let errors = refused(&mut connection).await;
         assert_eq!(errors.len(), 1);
         assert!(errors[0].starts_with("COPY into encrypted column 'email'"));
+    }
+
+    /// A COPY prepared while mapping was disabled was never checked, so it must not run once
+    /// mapping is enabled again, or its copy data would reach the encrypted column as plaintext
+    #[tokio::test]
+    async fn a_copy_prepared_while_mapping_was_disabled_is_refused_once_it_is_enabled() {
+        let mut connection = Connection::encrypted().await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true", "SET")
+            .await;
+        connection
+            .client(parse("s", "COPY users (email) FROM STDIN"))
+            .await;
+        connection.client(sync()).await;
+        connection.server(parse_complete()).await;
+        connection.server(ready(b'I')).await;
+        connection
+            .simple("SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false", "SET")
+            .await;
+        assert_eq!(connection.errors_sent_to_client(), 0);
+
+        connection.client(bind("", "s")).await;
+        connection.client(sync()).await;
+        connection.rejected(b'I').await;
+        assert_eq!(connection.errors_sent_to_client(), 1);
     }
 
     /// PostgreSQL reads a file or program into the table as it reads copy data

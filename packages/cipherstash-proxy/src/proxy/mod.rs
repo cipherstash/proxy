@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     config::TandemConfig,
     connect,
-    error::Error,
+    error::{Error, ErrorChain},
     postgresql::{Column, Context, KeysetIdentifier},
     proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
 };
@@ -96,7 +96,7 @@ impl Proxy {
             Err(err) => {
                 warn!(
                     msg = "Could not query EQL version from database",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
                 None
             }
@@ -148,7 +148,8 @@ impl Proxy {
     }
 }
 
-// The async-trait expansion trips this lint on newer toolchains.
+// async_trait adds must_use to its generated methods. Clippy on Rust 1.99
+// reports these annotations as redundant because Future is already must_use.
 #[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait EncryptionService: Send + Sync {

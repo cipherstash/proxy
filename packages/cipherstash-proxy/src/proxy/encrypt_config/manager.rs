@@ -1,7 +1,7 @@
 use crate::{
     config::DatabaseConfig,
     connect,
-    error::{ConfigError, Error},
+    error::{ConfigError, Error, ErrorChain},
     log::ENCRYPT_CONFIG,
     proxy::ENCRYPT_CONFIG_QUERY,
 };
@@ -88,7 +88,7 @@ impl EncryptConfigManager {
             Err(err) => {
                 warn!(
                     msg = "Error reloading encrypt configuration",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
             }
         };
@@ -118,7 +118,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 _ => {
                     error!(
                         msg = "Error loading Encrypt configuration",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     return Err(err);
                 }
@@ -161,7 +161,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 Err(err) => {
                     warn!(
                         msg = "Error reloading Encrypt configuration",
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                 }
             }
@@ -197,7 +197,7 @@ async fn load_encrypt_config_with_retry(config: &DatabaseConfig) -> Result<Encry
                         ENCRYPT_CONFIG,
                         msg = "Encrypt configuration could not beloaded",
                         retries = retry_count,
-                        error = err.to_string()
+                        error = %ErrorChain(&err)
                     );
                     return Err(err);
                 }
@@ -238,9 +238,14 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
         }
     }
 }
+/// Whether `e` is PostgreSQL reporting that the EQL configuration table does not exist.
+///
+/// Reads the structured server error rather than the rendered text: since tokio-postgres 0.7.15, `Error`'s `Display` is only the error kind (`"db error"`) and no longer includes the server's message.
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
-    let msg = e.to_string();
-    msg.contains("eql_v2_configuration") && msg.contains("does not exist")
+    e.as_db_error().is_some_and(|db| {
+        *db.code() == tokio_postgres::error::SqlState::UNDEFINED_TABLE
+            && db.message().contains("eql_v2_configuration")
+    })
 }
 
 fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfigMap, ConfigError> {
