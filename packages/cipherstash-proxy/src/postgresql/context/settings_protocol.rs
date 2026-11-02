@@ -90,6 +90,7 @@ pub(super) struct MetadataSnapshot {
     pub statement_metrics: Option<SessionId>,
     pub statement_operation: Option<OperationId>,
     pub statement_deallocation: Option<super::Deallocation>,
+    pub statement_schema: Option<Arc<crate::proxy::schema::SchemaIntent>>,
     pub portal: Option<Arc<super::Portal>>,
     pub portal_operation: Option<super::PortalOwner>,
     pub suspended: Option<(OperationId, super::ExecuteContext)>,
