@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     config::TandemConfig,
     connect,
-    error::Error,
+    error::{Error, ErrorChain},
     postgresql::{Column, Context, KeysetIdentifier},
     proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
 };
@@ -96,7 +96,7 @@ impl Proxy {
             Err(err) => {
                 warn!(
                     msg = "Could not query EQL version from database",
-                    error = err.to_string()
+                    error = %ErrorChain(&err)
                 );
                 None
             }

@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Plaintext in `INSERT ... ON CONFLICT DO UPDATE`**: Proxy now encrypts a value assigned to an encrypted column in the `DO UPDATE SET` clause of an upsert. Previously the clause was not type checked, so a literal or parameter assigned to an encrypted column there reached PostgreSQL as plaintext. `excluded.<column>` now carries the column's encrypted type, and an `ON CONFLICT` target on an encrypted column is refused, as a conflict judged on randomised ciphertext would never fire.
 
+- **Database error detail in Proxy's logs**: logged database errors again include the message PostgreSQL returned, not just the error kind. The upgraded PostgreSQL client library stopped appending the underlying cause when an error is rendered as text, which left entries such as `Database connection error` reading only `db error`. Proxy now renders the cause itself, so the server's message is back in the log line.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed
