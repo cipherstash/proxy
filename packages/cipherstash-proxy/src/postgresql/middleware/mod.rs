@@ -644,6 +644,34 @@ mod tests {
     }
 
     both_configs! {
+        async fn reparse_pipelined_after_deallocate_finishes_the_old_metrics(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1"]).await;
+            assert_eq!(connection.sizes().statement_metrics, 1);
+
+            let query = connection.query("DEALLOCATE a1").await;
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // Only the metrics of the statement prepared again remain
+            assert_eq!(statement_names(&connection), vec!["a1"]);
+            assert_eq!(connection.sizes().statement_metrics, 1);
+        }
+    }
+
+    both_configs! {
         async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate(connect) {
             let mut connection = connect();
             prepare(&mut connection, &["a1", "a2"]).await;

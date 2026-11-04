@@ -274,6 +274,23 @@ impl ConnectionProtocolState {
 }
 
 impl ConnectionProtocolState {
+    /// Forgets the statements PostgreSQL removed during `operation`, other than any a later
+    /// Parse prepared again
+    fn deallocate_statements(
+        &mut self,
+        operation: OperationId,
+        names: &[Name],
+    ) -> Vec<SessionMetricsContext> {
+        let mut candidates = Vec::new();
+        for name in names {
+            // Also when a later Parse prepared the name again, so that Parse's rollback
+            // cannot restore the statement PostgreSQL removed
+            candidates.extend(self.settings_protocol.deallocated(operation, name));
+        }
+        candidates.extend(self.prepared_statements.deallocate(names, operation));
+        self.take_unreferenced_metrics(candidates)
+    }
+
     /// Everything Proxy keeps for the named statement, for a rollback to restore
     fn statement_snapshot(&self, name: &Name) -> settings_protocol::MetadataSnapshot {
         settings_protocol::MetadataSnapshot {
@@ -900,13 +917,7 @@ where
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
             let names = state.prepared_statements.deallocation_names(deallocation);
-            for name in &names {
-                // Also when a later Parse prepared the name again, so that Parse's rollback
-                // cannot restore the statement PostgreSQL removed
-                state.settings_protocol.deallocated(operation, name);
-            }
-            let candidates = state.prepared_statements.deallocate(&names, operation);
-            state.take_unreferenced_metrics(candidates)
+            state.deallocate_statements(operation, &names)
         };
 
         for metrics in finished_metrics {
