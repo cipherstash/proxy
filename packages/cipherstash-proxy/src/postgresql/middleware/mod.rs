@@ -103,6 +103,8 @@ mod tests {
 
     const ITERATIONS: usize = 200;
 
+    mod connection_model;
+
     #[derive(Clone)]
     struct TestService;
 
@@ -1242,7 +1244,7 @@ mod tests {
             reprepare_ddl(&mut connection, "SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'", false).await;
 
             // So it cannot run the DDL PostgreSQL still holds as `d` without knowing
-            let (_, output) = connection.client_output(bind_message(b"d")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"d"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
@@ -1250,10 +1252,10 @@ mod tests {
         }
     }
 
-    fn bind_message(statement: &'static [u8]) -> FrontendMessage {
+    fn bind_message(statement: impl Into<Bytes>, portal: impl Into<Bytes>) -> FrontendMessage {
         FrontendMessage::Bind(Bind {
-            portal: Bytes::new(),
-            statement: Bytes::from_static(statement),
+            portal: portal.into(),
+            statement: statement.into(),
             parameter_formats: vec![],
             parameters: vec![],
             result_formats: vec![],
@@ -1264,7 +1266,7 @@ mod tests {
         async fn bind_to_a_statement_proxy_did_not_see_prepared_fails_closed(connect) {
             let mut connection = connect();
 
-            let (bind, output) = connection.client_output(bind_message(b"missing")).await;
+            let (bind, output) = connection.client_output(bind_message(Bytes::from_static(b"missing"), Bytes::new())).await;
             connection.execute(Bytes::new()).await;
             let sync = connection.client(FrontendMessage::Sync).await;
 
@@ -1294,7 +1296,7 @@ mod tests {
 
             // The connection stays usable
             prepare(&mut connection, &["a1"]).await;
-            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"a1"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
@@ -1327,7 +1329,7 @@ mod tests {
 
             // The Bind is still refused, because the statement was prepared under different
             // effective settings
-            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"a1"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
