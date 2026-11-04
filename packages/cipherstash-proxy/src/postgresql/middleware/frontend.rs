@@ -185,6 +185,9 @@ impl<S: EncryptionService> Frontend<S> {
             self.context.discard_operation(operation)?;
             return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
         }
+        if matches!(protocol_message, FrontendMessage::Query(_)) {
+            self.context.query_releases_unnamed_statement(operation)?;
+        }
 
         if self.context.mapping_disabled() {
             match &protocol_message {

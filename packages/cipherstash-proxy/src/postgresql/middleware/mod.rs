@@ -644,6 +644,53 @@ mod tests {
     }
 
     both_configs! {
+        async fn simple_query_releases_the_unnamed_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["", "a1"]).await;
+            let select = connection.select;
+
+            // PostgreSQL runs a simple Query in the unnamed statement, dropping the client's
+            let query = connection.query(select).await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert_eq!(statement_names(&connection), vec!["a1"]);
+        }
+    }
+
+    both_configs! {
+        async fn earlier_pipelined_failure_does_not_restore_the_unnamed_statement_a_query_released(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &[""]).await;
+            let select = connection.select;
+
+            let failed = connection.parse_named("a1".to_owned()).await;
+            // PostgreSQL skips this Parse after the failure, so it never answers it
+            connection.parse(b"").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            let query = connection.query(select).await;
+            connection.server(failed, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert!(statement_names(&connection).is_empty());
+        }
+    }
+
+    both_configs! {
         async fn reparse_pipelined_after_deallocate_finishes_the_old_metrics(connect) {
             let mut connection = connect();
             prepare(&mut connection, &["a1"]).await;
@@ -709,6 +756,39 @@ mod tests {
             // DEALLOCATE ALL removed `a1`, so rolling back the skipped Close must not restore it
             assert!(statement_names(&connection).is_empty());
             assert!(!connection.holds_statement(b"a1"));
+        }
+    }
+
+    both_configs! {
+        async fn refused_query_releases_the_unnamed_portal(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1"]).await;
+            let begin = connection.query("BEGIN").await;
+            connection.server(begin, command_complete(b"BEGIN")).await;
+            connection
+                .server(begin, ready(TransactionStatus::InTransaction))
+                .await;
+            let bind = connection
+                .bind(Bytes::from_static(b"a1"), Bytes::new())
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(sync, ready(TransactionStatus::InTransaction))
+                .await;
+            assert_eq!(connection.sizes().portals, 1);
+
+            // Proxy refuses the Query, and PostgreSQL drops the unnamed portal to run the
+            // refusal in its place
+            let query = connection
+                .query("SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'")
+                .await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::FailedTransaction))
+                .await;
+
+            assert_eq!(connection.sizes().portals, 0);
         }
     }
 
@@ -904,16 +984,30 @@ mod tests {
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
-            let query = connection.query("DEALLOCATE ALL").await;
+            // Through the extended protocol, because a simple Query releases the unnamed
+            // statement itself
+            let parse = connection
+                .parse_sql(b"deallocate", "DEALLOCATE ALL".to_owned())
+                .await;
+            let bind = connection
+                .bind(Bytes::from_static(b"deallocate"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
             connection
-                .server(query, command_complete(b"DEALLOCATE ALL"))
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE ALL"))
                 .await;
             connection
-                .server(query, ready(TransactionStatus::Idle))
+                .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
             assert!(connection.holds_statement(b""));
             assert!(!connection.holds_statement(b"a1"));
+            assert!(!connection.holds_statement(b"deallocate"));
         }
     }
 

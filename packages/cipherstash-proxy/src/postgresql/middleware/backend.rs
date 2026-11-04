@@ -160,6 +160,13 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<BackendMiddlewareOutput, Error> {
         let mut outbound_message = protocol_message.clone();
 
+        // A row is never the first answer to an operation, so skip the lock for it
+        if let Some(operation) =
+            operation.filter(|_| !matches!(protocol_message, BackendMessage::DataRow(_)))
+        {
+            self.context.operation_answered(operation)?;
+        }
+
         if let (BackendMessage::CommandComplete(tag), Some(operation)) =
             (&protocol_message, operation)
         {

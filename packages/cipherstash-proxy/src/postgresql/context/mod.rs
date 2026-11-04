@@ -120,6 +120,9 @@ struct OperationContext {
     /// SQL deallocations in a simple Query or an executed portal, applied in order as
     /// PostgreSQL confirms each one
     deallocations: VecDeque<Deallocation>,
+    /// A simple Query releases the unnamed statement once PostgreSQL runs it, which it
+    /// does not while it skips messages until Sync
+    releases_unnamed_statement: bool,
 }
 
 /// A prepared-statement removal requested with SQL rather than a protocol `Close`.
@@ -817,6 +820,41 @@ where
             state.remove_statement_metadata(name)
         };
         self.record_finished_metrics_scope(finished_metrics_scope);
+        Ok(())
+    }
+
+    /// PostgreSQL runs a simple Query in the unnamed statement, so it releases the client's
+    /// once it runs the Query.
+    pub fn query_releases_unnamed_statement(&self, operation: OperationId) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .operations
+            .entry(operation)
+            .or_default()
+            .releases_unnamed_statement = true;
+        Ok(())
+    }
+
+    /// PostgreSQL answered `operation`, so a simple Query has released the unnamed statement
+    pub fn operation_answered(&self, operation: OperationId) -> Result<(), Error> {
+        let finished = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+            let releases = state
+                .operations
+                .get_mut(&operation)
+                .is_some_and(|context| std::mem::take(&mut context.releases_unnamed_statement));
+            if !releases {
+                return Ok(());
+            }
+            state.deallocate_statements(operation, &[Name::new()])
+        };
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
         Ok(())
     }
 

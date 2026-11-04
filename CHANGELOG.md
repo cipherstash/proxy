@@ -55,6 +55,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DISCARD ALL`, the default reset query of PgBouncer, and `DISCARD TEMP` now end that refusal once their transaction commits, so the next client of a pooled connection is not refused.
   If the transaction rolls back, the table and the refusal both come back.
 
+- **Unnamed prepared statement after a simple Query**: PostgreSQL drops a client's unnamed prepared statement whenever it runs a simple Query, but Proxy kept its copy.
+  Proxy now releases it when PostgreSQL answers the Query, so the statements Proxy tracks match PostgreSQL's.
+
 - **Statement metrics after a pipelined re-Parse**: when a client prepared a name again in the same pipeline as a SQL `DEALLOCATE` of that name, Proxy never finished the metrics of the deallocated statement.
   They are now finished when PostgreSQL confirms the `DEALLOCATE`.
 
