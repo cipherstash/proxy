@@ -672,6 +672,47 @@ mod tests {
     }
 
     both_configs! {
+        async fn skipped_close_after_deallocate_all_does_not_restore_the_statement(connect) {
+            let mut connection = connect();
+            let deallocate = connection
+                .parse_sql(b"deallocate", "DEALLOCATE ALL".to_owned())
+                .await;
+            let parse = connection.parse(b"a1").await;
+            let bind = connection
+                .bind(Bytes::from_static(b"deallocate"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let failed = connection.execute(Bytes::new()).await;
+            // PostgreSQL skips this Close after the failure
+            connection
+                .client(FrontendMessage::Close(Close {
+                    target: DescribeTarget::Statement,
+                    name: Bytes::from_static(b"a1"),
+                }))
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(deallocate, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE ALL"))
+                .await;
+            connection.server(failed, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // DEALLOCATE ALL removed `a1`, so rolling back the skipped Close must not restore it
+            assert!(statement_names(&connection).is_empty());
+            assert!(!connection.holds_statement(b"a1"));
+        }
+    }
+
+    both_configs! {
         async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate(connect) {
             let mut connection = connect();
             prepare(&mut connection, &["a1", "a2"]).await;

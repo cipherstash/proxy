@@ -916,7 +916,18 @@ where
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
-            let names = state.prepared_statements.deallocation_names(deallocation);
+            let mut names = state
+                .prepared_statements
+                .deallocation_names(deallocation.clone());
+            if deallocation == Deallocation::AllStatements {
+                // Also those a pipelined Close or Parse took out of view, whose rollback could
+                // otherwise restore them
+                for name in state.settings_protocol.journalled_statement_names() {
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
             state.deallocate_statements(operation, &names)
         };
 

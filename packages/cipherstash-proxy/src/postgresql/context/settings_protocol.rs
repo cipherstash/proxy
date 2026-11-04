@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::postgresql::{Name, OperationId};
 use sqltk::parser::ast::Statement;
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -509,6 +509,17 @@ impl SettingsProtocol {
             return std::mem::take(&mut mutation.metadata).metrics().collect();
         }
         Vec::new()
+    }
+    /// Names of the named statements whose rollback snapshots the journal holds, which
+    /// include statements Proxy already closed or replaced
+    pub fn journalled_statement_names(&self) -> HashSet<Name> {
+        self.journal
+            .values()
+            .filter(|mutation| {
+                !mutation.name.is_empty() && matches!(mutation.previous, Previous::Statement(_))
+            })
+            .map(|mutation| mutation.name.clone())
+            .collect()
     }
     #[cfg(test)]
     pub fn statement_count(&self) -> usize {

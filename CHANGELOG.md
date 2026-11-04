@@ -58,6 +58,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Statement metrics after a pipelined re-Parse**: when a client prepared a name again in the same pipeline as a SQL `DEALLOCATE` of that name, Proxy never finished the metrics of the deallocated statement.
   They are now finished when PostgreSQL confirms the `DEALLOCATE`.
 
+- **Statement restored after `DEALLOCATE ALL` in a failed pipeline**: when a pipeline ran `DEALLOCATE ALL` and then failed before a `Close` or `Parse` of a statement it removed, Proxy brought that statement back.
+  Proxy now forgets every statement `DEALLOCATE ALL` removes, including those a pipelined `Close` or `Parse` had already replaced.
+
 - **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
 - **Unknown column error message**: the type-checking error for a column a table does not have now names the column and the table the right way round, for example `Column: email not found for table: users`. It previously swapped them.
