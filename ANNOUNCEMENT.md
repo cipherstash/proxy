@@ -3,23 +3,26 @@
 CipherStash Proxy 3.1.0 makes Proxy safer behind connection poolers, closes several paths by which plaintext could reach PostgreSQL, and adds command-line flags for connecting to the database and requiring TLS.
 
 This release refuses some statements that earlier versions forwarded, so read [Before you upgrade](#before-you-upgrade) first.
-The full list of changes is in the [CHANGELOG](https://github.com/cipherstash/proxy/blob/main/CHANGELOG.md#310---2026-11-02).
+The full list of changes is in the [CHANGELOG](https://github.com/cipherstash/proxy/blob/main/CHANGELOG.md#310---2026-11-04).
 
 ## Before you upgrade
 
-Each of these changes refuses something that 3.0 accepted.
-Check that your applications and drivers do not rely on them.
+Most of these changes refuse something that 3.0 accepted, and the rest change how Proxy behaves.
+Check that your applications and drivers do not rely on the old behaviour.
 
 - **Reserved EQL payload shapes**: on encrypted columns, JSON objects shaped like EQL storage or query payloads are now validated as EQL instead of being encrypted as plaintext, with no opt-out. Audit plaintext writes for these key combinations; [Invalid encrypted value](https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-eql-payload) includes a `jsonb` scan predicate.
 - **Settings commands Proxy cannot honour**: a simple query that changes a `CIPHERSTASH.*` setting and then needs encryption, unknown `CIPHERSTASH.*` setting names or values, `SET ALL`, and prepared statements made stale by a settings change are refused.
 - **`SET LOCAL CIPHERSTASH.*`** now ends with the transaction instead of lasting for the connection. Use `SET` where a keyset must persist after `COMMIT`.
 - **SQL `PREPARE` bound through the extended protocol** is refused with PostgreSQL's `26000` error. Prepare with Parse, or run with SQL `EXECUTE`.
 - **Writes Proxy cannot resolve or type check** are refused while encrypted columns are configured, including `MERGE`, SQL `PREPARE` of a write, writes to views, foreign tables and schemas outside the loaded search path, and some bulk `UPDATE` and `INSERT` forms.
+- **Reads an encrypted column cannot support** are refused, including a comparison such as `<` on a column with no ordering index, and `ORDER BY`, `GROUP BY`, `DISTINCT` or `UNION` over a column without the ordering or equality index they need.
 - **`COPY ... FROM` into encrypted columns** is refused. Load those columns with `INSERT`.
 - **Default keyset**: when a connection selects no keyset, Proxy now uses `CS_DEFAULT_KEYSET_ID` rather than the account default. Verify the two are intended; values written under an unintended account default must be re-encrypted.
+- **`require_tls` without a certificate** now fails at startup. Configure TLS, or unset `CS_SERVER__REQUIRE_TLS`.
 - **Building from source** requires Rust 1.89.0 or later.
 
-The floating `cipherstash/proxy:3.0` Docker tag does not move to this release.
+The floating `cipherstash/proxy:3.0` Docker tag does not move to this release, but `cipherstash/proxy:latest` does.
+If you run `latest`, pin `cipherstash/proxy:3.0` until you have made these checks.
 Pin `cipherstash/proxy:3.1` or `cipherstash/proxy:3.1.0` once you are ready.
 
 ## Highlights
