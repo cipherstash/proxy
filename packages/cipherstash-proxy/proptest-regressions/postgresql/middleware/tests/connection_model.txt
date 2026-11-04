@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 335ad1263fb8dcd2668352a2c67efab0b56612df51dd1886b260a0bc5923ae87 # shrinks to pipelined = true, steps = [Parse { statement: 2, sql: DeallocateAll }, Parse { statement: 1, sql: Select }, Bind { statement: 2, portal: 0 }, Execute { portal: 0, fails: false }, Execute { portal: 0, fails: false }, CloseStatement(1)]
+cc 3ee759241739404886acf5e1805cdd8bce8e2b2beb4410d92c8d0d1b7039dd8b # shrinks to pipelined = true, steps = [Parse { statement: 1, sql: Select }, Parse { statement: 0, sql: Select }, CloseStatement(2), Parse { statement: 0, sql: DeallocateAll }, Parse { statement: 0, sql: DeallocateAll }, CloseStatement(2), Bind { statement: 0, portal: 1 }, Parse { statement: 2, sql: Select }, Execute { portal: 1, fails: false }, Bind { statement: 0, portal: 1 }, CloseStatement(1)]

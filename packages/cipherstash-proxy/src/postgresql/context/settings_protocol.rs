@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::postgresql::{Name, OperationId};
 use sqltk::parser::ast::Statement;
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -481,9 +481,9 @@ impl SettingsProtocol {
         }
         retired_metrics
     }
-    /// Forgets a statement that PostgreSQL removed with SQL `DEALLOCATE` or `DISCARD ALL`
-    /// during `operation`, unless a later Parse prepared it again.
-    pub fn deallocated(&mut self, operation: OperationId, name: &Name) {
+    /// Forgets a statement that PostgreSQL removed during `operation`, unless a later Parse
+    /// prepared it again. Returns the metrics scopes of the rollback snapshot it forgot.
+    pub fn deallocated(&mut self, operation: OperationId, name: &Name) -> Vec<SessionId> {
         if self
             .prepared
             .get(name)
@@ -506,8 +506,20 @@ impl SettingsProtocol {
             })
         {
             mutation.previous = Previous::Statement(None);
-            mutation.metadata = MetadataSnapshot::default();
+            return std::mem::take(&mut mutation.metadata).metrics().collect();
         }
+        Vec::new()
+    }
+    /// Names of the named statements whose rollback snapshots the journal holds, which
+    /// include statements Proxy already closed or replaced
+    pub fn journalled_statement_names(&self) -> HashSet<Name> {
+        self.journal
+            .values()
+            .filter(|mutation| {
+                !mutation.name.is_empty() && matches!(mutation.previous, Previous::Statement(_))
+            })
+            .map(|mutation| mutation.name.clone())
+            .collect()
     }
     #[cfg(test)]
     pub fn statement_count(&self) -> usize {

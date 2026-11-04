@@ -120,6 +120,9 @@ struct OperationContext {
     /// SQL deallocations in a simple Query or an executed portal, applied in order as
     /// PostgreSQL confirms each one
     deallocations: VecDeque<Deallocation>,
+    /// A simple Query releases the unnamed statement once PostgreSQL runs it, which it
+    /// does not while it skips messages until Sync
+    releases_unnamed_statement: bool,
 }
 
 /// A prepared-statement removal requested with SQL rather than a protocol `Close`.
@@ -274,6 +277,23 @@ impl ConnectionProtocolState {
 }
 
 impl ConnectionProtocolState {
+    /// Forgets the statements PostgreSQL removed during `operation`, other than any a later
+    /// Parse prepared again
+    fn deallocate_statements(
+        &mut self,
+        operation: OperationId,
+        names: &[Name],
+    ) -> Vec<SessionMetricsContext> {
+        let mut candidates = Vec::new();
+        for name in names {
+            // Also when a later Parse prepared the name again, so that Parse's rollback
+            // cannot restore the statement PostgreSQL removed
+            candidates.extend(self.settings_protocol.deallocated(operation, name));
+        }
+        candidates.extend(self.prepared_statements.deallocate(names, operation));
+        self.take_unreferenced_metrics(candidates)
+    }
+
     /// Everything Proxy keeps for the named statement, for a rollback to restore
     fn statement_snapshot(&self, name: &Name) -> settings_protocol::MetadataSnapshot {
         settings_protocol::MetadataSnapshot {
@@ -803,6 +823,41 @@ where
         Ok(())
     }
 
+    /// PostgreSQL runs a simple Query in the unnamed statement, so it releases the client's
+    /// once it runs the Query.
+    pub fn query_releases_unnamed_statement(&self, operation: OperationId) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .operations
+            .entry(operation)
+            .or_default()
+            .releases_unnamed_statement = true;
+        Ok(())
+    }
+
+    /// PostgreSQL answered `operation`, so a simple Query has released the unnamed statement
+    pub fn operation_answered(&self, operation: OperationId) -> Result<(), Error> {
+        let finished = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+            let releases = state
+                .operations
+                .get_mut(&operation)
+                .is_some_and(|context| std::mem::take(&mut context.releases_unnamed_statement));
+            if !releases {
+                return Ok(());
+            }
+            state.deallocate_statements(operation, &[Name::new()])
+        };
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
+        Ok(())
+    }
+
     /// Record that the SQL of statement `name` is a `DEALLOCATE` or `DISCARD ALL`, so that
     /// executing it through the extended protocol releases what it removes.
     pub fn set_statement_deallocation(
@@ -899,14 +954,19 @@ where
 
             debug!(target: CONTEXT, client_id = self.client_id, msg = "Deallocate", ?deallocation);
 
-            let names = state.prepared_statements.deallocation_names(deallocation);
-            for name in &names {
-                // Also when a later Parse prepared the name again, so that Parse's rollback
-                // cannot restore the statement PostgreSQL removed
-                state.settings_protocol.deallocated(operation, name);
+            let mut names = state
+                .prepared_statements
+                .deallocation_names(deallocation.clone());
+            if deallocation == Deallocation::AllStatements {
+                // Also those a pipelined Close or Parse took out of view, whose rollback could
+                // otherwise restore them
+                for name in state.settings_protocol.journalled_statement_names() {
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
             }
-            let candidates = state.prepared_statements.deallocate(&names, operation);
-            state.take_unreferenced_metrics(candidates)
+            state.deallocate_statements(operation, &names)
         };
 
         for metrics in finished_metrics {

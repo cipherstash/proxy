@@ -103,6 +103,8 @@ mod tests {
 
     const ITERATIONS: usize = 200;
 
+    mod connection_model;
+
     #[derive(Clone)]
     struct TestService;
 
@@ -644,6 +646,155 @@ mod tests {
     }
 
     both_configs! {
+        async fn simple_query_releases_the_unnamed_statement(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["", "a1"]).await;
+            let select = connection.select;
+
+            // PostgreSQL runs a simple Query in the unnamed statement, dropping the client's
+            let query = connection.query(select).await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert_eq!(statement_names(&connection), vec!["a1"]);
+        }
+    }
+
+    both_configs! {
+        async fn earlier_pipelined_failure_does_not_restore_the_unnamed_statement_a_query_released(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &[""]).await;
+            let select = connection.select;
+
+            let failed = connection.parse_named("a1".to_owned()).await;
+            // PostgreSQL skips this Parse after the failure, so it never answers it
+            connection.parse(b"").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            let query = connection.query(select).await;
+            connection.server(failed, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(query, command_complete(b"SELECT 1"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+
+            assert!(!connection.holds_statement(b""));
+            assert!(statement_names(&connection).is_empty());
+        }
+    }
+
+    both_configs! {
+        async fn reparse_pipelined_after_deallocate_finishes_the_old_metrics(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1"]).await;
+            assert_eq!(connection.sizes().statement_metrics, 1);
+
+            let query = connection.query("DEALLOCATE a1").await;
+            let parse = connection.parse(b"a1").await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(query, command_complete(b"DEALLOCATE"))
+                .await;
+            connection
+                .server(query, ready(TransactionStatus::Idle))
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // Only the metrics of the statement prepared again remain
+            assert_eq!(statement_names(&connection), vec!["a1"]);
+            assert_eq!(connection.sizes().statement_metrics, 1);
+        }
+    }
+
+    both_configs! {
+        async fn skipped_close_after_deallocate_all_does_not_restore_the_statement(connect) {
+            let mut connection = connect();
+            let deallocate = connection
+                .parse_sql(b"deallocate", "DEALLOCATE ALL".to_owned())
+                .await;
+            let parse = connection.parse(b"a1").await;
+            let bind = connection
+                .bind(Bytes::from_static(b"deallocate"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let failed = connection.execute(Bytes::new()).await;
+            // PostgreSQL skips this Close after the failure
+            connection
+                .client(FrontendMessage::Close(Close {
+                    target: DescribeTarget::Statement,
+                    name: Bytes::from_static(b"a1"),
+                }))
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(deallocate, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE ALL"))
+                .await;
+            connection.server(failed, error()).await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+
+            // DEALLOCATE ALL removed `a1`, so rolling back the skipped Close must not restore it
+            assert!(statement_names(&connection).is_empty());
+            assert!(!connection.holds_statement(b"a1"));
+        }
+    }
+
+    both_configs! {
+        async fn refused_query_releases_the_unnamed_portal(connect) {
+            let mut connection = connect();
+            prepare(&mut connection, &["a1"]).await;
+            let begin = connection.query("BEGIN").await;
+            connection.server(begin, command_complete(b"BEGIN")).await;
+            connection
+                .server(begin, ready(TransactionStatus::InTransaction))
+                .await;
+            let bind = connection
+                .bind(Bytes::from_static(b"a1"), Bytes::new())
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(sync, ready(TransactionStatus::InTransaction))
+                .await;
+            assert_eq!(connection.sizes().portals, 1);
+
+            // Proxy refuses the Query, and PostgreSQL drops the unnamed portal to run the
+            // refusal in its place
+            let query = connection
+                .query("SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'")
+                .await;
+            connection.server(query, error()).await;
+            connection
+                .server(query, ready(TransactionStatus::FailedTransaction))
+                .await;
+
+            assert_eq!(connection.sizes().portals, 0);
+        }
+    }
+
+    both_configs! {
         async fn query_failing_part_way_keeps_the_statements_it_did_not_deallocate(connect) {
             let mut connection = connect();
             prepare(&mut connection, &["a1", "a2"]).await;
@@ -835,16 +986,30 @@ mod tests {
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
-            let query = connection.query("DEALLOCATE ALL").await;
+            // Through the extended protocol, because a simple Query releases the unnamed
+            // statement itself
+            let parse = connection
+                .parse_sql(b"deallocate", "DEALLOCATE ALL".to_owned())
+                .await;
+            let bind = connection
+                .bind(Bytes::from_static(b"deallocate"), Bytes::new())
+                .await;
+            let execute = connection.execute(Bytes::new()).await;
+            let sync = connection.client(FrontendMessage::Sync).await;
             connection
-                .server(query, command_complete(b"DEALLOCATE ALL"))
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection.server(bind, BackendMessage::BindComplete).await;
+            connection
+                .server(execute, command_complete(b"DEALLOCATE ALL"))
                 .await;
             connection
-                .server(query, ready(TransactionStatus::Idle))
+                .server(sync, ready(TransactionStatus::Idle))
                 .await;
 
             assert!(connection.holds_statement(b""));
             assert!(!connection.holds_statement(b"a1"));
+            assert!(!connection.holds_statement(b"deallocate"));
         }
     }
 
@@ -1079,7 +1244,7 @@ mod tests {
             reprepare_ddl(&mut connection, "SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'", false).await;
 
             // So it cannot run the DDL PostgreSQL still holds as `d` without knowing
-            let (_, output) = connection.client_output(bind_message(b"d")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"d"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
@@ -1087,10 +1252,10 @@ mod tests {
         }
     }
 
-    fn bind_message(statement: &'static [u8]) -> FrontendMessage {
+    fn bind_message(statement: impl Into<Bytes>, portal: impl Into<Bytes>) -> FrontendMessage {
         FrontendMessage::Bind(Bind {
-            portal: Bytes::new(),
-            statement: Bytes::from_static(statement),
+            portal: portal.into(),
+            statement: statement.into(),
             parameter_formats: vec![],
             parameters: vec![],
             result_formats: vec![],
@@ -1101,7 +1266,7 @@ mod tests {
         async fn bind_to_a_statement_proxy_did_not_see_prepared_fails_closed(connect) {
             let mut connection = connect();
 
-            let (bind, output) = connection.client_output(bind_message(b"missing")).await;
+            let (bind, output) = connection.client_output(bind_message(Bytes::from_static(b"missing"), Bytes::new())).await;
             connection.execute(Bytes::new()).await;
             let sync = connection.client(FrontendMessage::Sync).await;
 
@@ -1131,7 +1296,7 @@ mod tests {
 
             // The connection stays usable
             prepare(&mut connection, &["a1"]).await;
-            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"a1"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
@@ -1164,7 +1329,7 @@ mod tests {
 
             // The Bind is still refused, because the statement was prepared under different
             // effective settings
-            let (_, output) = connection.client_output(bind_message(b"a1")).await;
+            let (_, output) = connection.client_output(bind_message(Bytes::from_static(b"a1"), Bytes::new())).await;
             let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
                 panic!("expected a Bind, got {output:?}");
             };
