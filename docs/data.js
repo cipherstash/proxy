@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793821042517,
+  "lastUpdate": 1793929635530,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -29972,6 +29972,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.382695,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2b7731302cebde2d3381a5d59194dce1fd17c906",
+          "message": "Merge pull request #502 from cipherstash/dependabot/cargo/rustls-0.23.46\n\nbuild(deps): bump rustls from 0.23.45 to 0.23.46",
+          "timestamp": "2026-11-06T12:39:19+11:00",
+          "tree_id": "18044b9349fc05bb536c4098eafbad44e8ee2383",
+          "url": "https://github.com/cipherstash/proxy/commit/2b7731302cebde2d3381a5d59194dce1fd17c906"
+        },
+        "date": 1793929633922,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.716894,
             "unit": "Number"
           }
         ]
