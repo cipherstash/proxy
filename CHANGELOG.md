@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-04
+
 ### Added
 
 - **Connection flags**: `--database-url` sets the database host, port, user, password and name from one PostgreSQL connection string, and `--db-port` (`-P`) and `--db-password` (`-W`) join the existing `--db-*` flags, which override matching parts of the URL. A URL sets only the parts it contains. Connection strings with any other option, such as `sslmode`, or with a Unix socket host or multiple hosts, are rejected, because Proxy cannot apply them. A password on the command line is exposed in shell history and the process list, so prefer `CS_DATABASE__PASSWORD`.
@@ -454,7 +456,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/cipherstash/proxy/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/cipherstash/proxy/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/cipherstash/proxy/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
