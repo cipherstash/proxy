@@ -1,0 +1,53 @@
+name: Release-plz
+# Keeps one release PR open on main. See docs/adr/0001-release-plz-release-pr.md.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Never cancel a run in progress. Today this only avoids a half-updated release
+# PR; once this workflow also tags and releases, a run cancelled halfway could
+# leave a tag without a GitHub release.
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    name: Release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The App credentials live in the `release` environment, which only main can use.
+    environment: release
+    steps:
+      # A GitHub App token, not GITHUB_TOKEN: a PR opened with GITHUB_TOKEN does
+      # not trigger other workflows, so test.yml would never run on the release PR
+      # and the required "Build (Rust MSRV)" check would never report.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_PLZ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # release-plz reads tags and history since the last release
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      # Opens or updates the release PR. On GitHub, release-plz creates the branch
+      # and commit through the API (no git push, so no persisted credentials),
+      # and GitHub marks the commit Verified.
+      - name: Run release-plz
+        uses: release-plz/action@8b5bf233ecb5779f63508db7cd050e948ee77cc2 # v0.5.144
+        with:
+          command: release-pr
+          version: 0.3.174
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
