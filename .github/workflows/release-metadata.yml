@@ -1,0 +1,35 @@
+name: Release metadata
+on:
+  # No `branches` or `paths` filter: a version bump can come from any PR (a
+  # release-plz release PR, or a hand-made prepare-release PR), and a check that
+  # sometimes doesn't report can't safely be made required later. release-plz
+  # opens its PR with a GitHub App token, so this workflow runs on it.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+
+      - name: Test the release metadata script
+        run: .github/scripts/release-metadata.test.sh
+
+      # Passes without checking anything when the PR leaves the workspace
+      # version alone. When it changes the version, CHANGELOG.md must already
+      # have a '## [X.Y.Z]' section for it, so a release PR can't merge with
+      # its notes still under '## [Unreleased]'.
+      - name: Check version bump has release notes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: .github/scripts/release-metadata.sh check-pr "origin/$BASE_REF"

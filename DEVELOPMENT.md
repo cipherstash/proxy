@@ -813,6 +813,11 @@ Open a PR against `main` that:
 Both are required: the release tooling (and the release workflow) will refuse to
 publish a tag whose version isn't reflected in `Cargo.toml` and `CHANGELOG.md`.
 
+The `Release metadata` check enforces this on the PR itself.
+Any PR that changes the workspace version fails until `CHANGELOG.md` has a `## [X.Y.Z]` heading for the new version, usually by renaming `## [Unreleased]` to `## [X.Y.Z] - <release date>`.
+PRs that leave the version alone pass without checking anything.
+The PR check, the release workflow and `mise run release` all use `.github/scripts/release-metadata.sh`, tested by `mise run test:release-metadata`.
+
 ### 2. Cut the release (recommended)
 
 Once the prepare-release PR is merged, from an up-to-date `main`:
