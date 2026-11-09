@@ -474,6 +474,10 @@ echo "cargo fmt --version     = " $(cargo fmt --version)
 echo "cargo clippy --version  = " $(cargo clippy --version)
 """
 
+[tasks."test:release-metadata"]
+description = "Tests the release version/changelog check script"
+run = ".github/scripts/release-metadata.test.sh"
+
 [tasks."test:format"]
 description = "Runs cargo fmt"
 run = 'cargo fmt --all -- --check'
@@ -725,13 +729,6 @@ set -euo pipefail
 
 VERSION="${1:?Version required, e.g., mise run release v2.2.2}"
 
-# Tag must be vMAJOR.MINOR.PATCH with an optional pre-release suffix.
-if [[ ! "$VERSION" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-  echo "error: version must look like v2.2.2 (got '$VERSION')" >&2
-  exit 1
-fi
-BARE="${VERSION#v}"
-
 # Releases are cut from a clean, up-to-date main.
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$BRANCH" != "main" ]; then
@@ -748,19 +745,10 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   exit 1
 fi
 
-# The prepare-release PR must have bumped the version and added release notes.
-CARGO_VERSION="$(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml | head -1)"
-if [ "$CARGO_VERSION" != "$BARE" ]; then
-  echo "error: Cargo.toml workspace version ($CARGO_VERSION) does not match $VERSION" >&2
-  echo "       bump the version in a prepare-release PR and merge it before releasing" >&2
-  exit 1
-fi
-# Fixed-string match so dots in the version aren't treated as regex wildcards.
-if ! grep -qF "## [$BARE]" CHANGELOG.md; then
-  echo "error: CHANGELOG.md has no '## [$BARE]' section" >&2
-  echo "       add release notes in a prepare-release PR and merge it before releasing" >&2
-  exit 1
-fi
+# The prepare-release PR must have bumped the version and added release notes,
+# and the tag must look like vMAJOR.MINOR.PATCH. Same check as the release
+# workflow's verify-release job.
+.github/scripts/release-metadata.sh check "$VERSION"
 if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
   echo "error: tag $VERSION already exists locally" >&2
   exit 1
