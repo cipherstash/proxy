@@ -23,8 +23,8 @@ impl-trait-for-tuples = "0.2.3"
 sqltk = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 topological-sort = "0.2.2"
 
 [dev-dependencies]
 pretty_assertions = "^1.0"
+tracing-subscriber = { workspace = true }
