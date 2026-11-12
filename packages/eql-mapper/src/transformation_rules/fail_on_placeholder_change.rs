@@ -67,12 +67,7 @@ impl<'ast> TransformationRule<'ast> for FailOnPlaceholderChange<'ast> {
         node_path: &sqltk::NodePath<'ast>,
         target_node: &N,
     ) -> bool {
-        if self
-            .check_no_placeholders_have_been_modified(node_path, target_node)
+        self.check_no_placeholders_have_been_modified(node_path, target_node)
             .is_err()
-        {
-            return true;
-        }
-        false
     }
 }

@@ -4472,7 +4472,6 @@ version = "3.0.1"
 dependencies = [
  "cipherstash-client",
  "cipherstash-config",
- "rand 0.9.3",
  "rustls",
  "serde",
  "serde_json",
