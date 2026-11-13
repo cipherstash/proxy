@@ -47,6 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Active connections metric**: `cipherstash_proxy_clients_active_connections` now goes down when a client connection ends because of a panic or because Proxy is shutting down. It previously went down only when the connection ended normally, so the gauge could drift upwards over time.
+
 - **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
 - **Unknown column error message**: the type-checking error for a column a table does not have now names the column and the table the right way round, for example `Column: email not found for table: users`. It previously swapped them.
