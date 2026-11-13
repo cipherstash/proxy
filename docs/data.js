@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794530255297,
+  "lastUpdate": 1794605976671,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30176,6 +30176,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.990592,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6811109679bc0b9696e5307b98206b07db75957e",
+          "message": "Merge pull request #501 from cipherstash/prepare-release-v3.0.2",
+          "timestamp": "2026-11-14T08:34:10+11:00",
+          "tree_id": "87904753cb187f3abcdd42b32cb2a473e9985488",
+          "url": "https://github.com/cipherstash/proxy/commit/6811109679bc0b9696e5307b98206b07db75957e"
+        },
+        "date": 1794605975056,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.918355,
             "unit": "Number"
           }
         ]
