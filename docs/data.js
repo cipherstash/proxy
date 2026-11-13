@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794528130823,
+  "lastUpdate": 1794529399357,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30126,6 +30126,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.561733,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "547fc966825ded9aed350d17fd98cb62572a9b24",
+          "message": "chore: raise MSRV to Rust 1.100.0 and adopt new std APIs",
+          "timestamp": "2026-11-06T01:39:25Z",
+          "url": "https://github.com/cipherstash/proxy/pull/508/commits/547fc966825ded9aed350d17fd98cb62572a9b24"
+        },
+        "date": 1794529397754,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.348541,
             "unit": "Number"
           }
         ]
