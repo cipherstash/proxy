@@ -149,7 +149,8 @@ CI uses three Rust toolchains:
 
 The MSRV build and stable lint jobs need no PostgreSQL or credentials. Locally, rustup selects the pinned toolchain automatically from `rust-toolchain.toml`.
 
-The MSRV is 1.100.0 because Proxy uses standard library APIs stabilized in that release, such as `str::trim_prefix`, `Vec::from_fn` and `core::mem::DropGuard`. The MSRV and the pinned toolchain are currently the same version, so the two jobs differ only in what they run.
+The MSRV is 1.100.0 because Proxy uses standard library APIs stabilized in that release, such as `str::trim_prefix`, `Vec::from_fn` and `core::mem::DropGuard`.
+The MSRV and the pinned toolchain are currently the same version, so the two jobs differ only in what they run.
 
 To run those checks locally:
 
