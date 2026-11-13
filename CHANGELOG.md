@@ -47,7 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Active connections metric**: `cipherstash_proxy_clients_active_connections` now goes down when a client connection ends because of a panic or because Proxy is shutting down. It previously went down only when the connection ended normally, so the gauge could drift upwards over time.
+- **Active connections metric**: `cipherstash_proxy_clients_active_connections` now goes down when a client connection's handler panics. It previously went down only when the handler returned, so a panic left the gauge permanently higher.
 
 - **`--db-user`**: the flag now sets the database username. It previously set an unused variable, so it had no effect.
 
