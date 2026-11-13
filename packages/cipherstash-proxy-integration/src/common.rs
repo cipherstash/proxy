@@ -588,21 +588,8 @@ where
 /// Returns indices in zigzag order so insertion is never accidentally sorted.
 /// For len=5: [4, 0, 3, 1, 2]
 pub fn interleaved_indices(len: usize) -> Vec<usize> {
-    let mut indices = Vec::with_capacity(len);
-    let mut lo = 0;
-    let mut hi = len;
-    let mut take_hi = true;
-    while lo < hi {
-        if take_hi {
-            hi -= 1;
-            indices.push(hi);
-        } else {
-            indices.push(lo);
-            lo += 1;
-        }
-        take_hi = !take_hi;
-    }
-    indices
+    // Even positions count down from the end, odd positions count up from 0.
+    Vec::from_fn(len, |i| if i % 2 == 0 { len - 1 - i / 2 } else { i / 2 })
 }
 
 /// Asserts that `result` failed with a PostgreSQL `ErrorResponse` carrying
@@ -707,5 +694,19 @@ impl ServerCertVerifier for DangerousTestCertVerifier {
         default_provider()
             .signature_verification_algorithms
             .supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interleaved_indices;
+
+    #[test]
+    fn interleaved_indices_alternate_from_the_ends() {
+        assert_eq!(interleaved_indices(0), Vec::<usize>::new());
+        assert_eq!(interleaved_indices(1), vec![0]);
+        assert_eq!(interleaved_indices(2), vec![1, 0]);
+        assert_eq!(interleaved_indices(5), vec![4, 0, 3, 1, 2]);
+        assert_eq!(interleaved_indices(6), vec![5, 0, 4, 1, 3, 2]);
     }
 }

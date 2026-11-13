@@ -338,12 +338,12 @@ impl EncryptionService for ZeroKms {
 
         // If no plaintexts to encrypt, return all None.
         //
-        // Built by iteration rather than `vec![None; n]`: that needs `Clone`,
-        // and `EqlOutputV3` does not derive it (neither does the v2
+        // Built with `Vec::from_fn` rather than `vec![None; n]`: that needs
+        // `Clone`, and `EqlOutputV3` does not derive it (neither does the v2
         // `EqlOutput` — the ciphertext types are `Clone`, the output wrappers
         // are not).
         if prepared_plaintexts.is_empty() {
-            return Ok((0..plaintexts.len()).map(|_| None).collect());
+            return Ok(Vec::from_fn(plaintexts.len(), |_| None));
         }
 
         // Use default opts since cipher is already initialized with the correct keyset
@@ -506,7 +506,7 @@ fn place_ciphertexts<T>(
         }
         .into());
     }
-    let mut result: Vec<Option<T>> = (0..len).map(|_| None).collect();
+    let mut result: Vec<Option<T>> = Vec::from_fn(len, |_| None);
     for (idx, ciphertext) in indices.into_iter().zip(ciphertexts) {
         result[idx] = Some(ciphertext);
     }
