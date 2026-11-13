@@ -15,6 +15,7 @@ use pg_proto::{
 };
 use std::{
     convert::Infallible,
+    mem::DropGuard,
     sync::{Arc, LazyLock},
 };
 use tokio::net::TcpStream;
@@ -25,23 +26,20 @@ use tracing::info;
 static CANCELLATION_REGISTRY: LazyLock<InMemoryCancellationRegistry> =
     LazyLock::new(InMemoryCancellationRegistry::default);
 
-struct CancellationRegistrationGuard {
+/// A session's cancellation key and the registry it is attached to.
+type CancellationRegistration = (InMemoryCancellationRegistry, Option<CancelKey>);
+
+/// Detaches a session's cancellation key from the registry when dropped, so a
+/// closed session can no longer be cancelled through its old key.
+fn cancellation_registration_guard(
     registry: InMemoryCancellationRegistry,
     key: Option<CancelKey>,
-}
-
-impl CancellationRegistrationGuard {
-    fn new(registry: InMemoryCancellationRegistry, key: Option<CancelKey>) -> Self {
-        Self { registry, key }
-    }
-}
-
-impl Drop for CancellationRegistrationGuard {
-    fn drop(&mut self) {
-        if let Some(key) = self.key.take() {
-            let _ = self.registry.detach(&key);
+) -> DropGuard<CancellationRegistration, impl FnOnce(CancellationRegistration)> {
+    DropGuard::new((registry, key), |(registry, key)| {
+        if let Some(key) = key {
+            let _ = registry.detach(&key);
         }
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -122,7 +120,7 @@ where
                 pg_proto::IntermediaryAccept::Session(session) => session,
                 pg_proto::IntermediaryAccept::CancellationForwarded => return Ok(()),
             };
-            let _cancellation_guard = CancellationRegistrationGuard::new(
+            let _cancellation_guard = cancellation_registration_guard(
                 CANCELLATION_REGISTRY.clone(),
                 session.cancellation_key().cloned(),
             );
@@ -422,8 +420,7 @@ mod tests {
             );
 
             {
-                let _guard =
-                    CancellationRegistrationGuard::new(registry.clone(), Some(key.clone()));
+                let _guard = cancellation_registration_guard(registry.clone(), Some(key.clone()));
                 let _ = result;
             }
             assert_eq!(registry.register(route), Ok(key));
