@@ -8,7 +8,7 @@ edition = "2021"
 # Minimum supported Rust version (MSRV). CI builds the production binary on
 # exactly this toolchain. See "Supported Rust versions" in DEVELOPMENT.md
 # before changing it.
-rust-version = "1.89.0"
+rust-version = "1.100.0"
 
 [profile.dev]
 incremental = true
