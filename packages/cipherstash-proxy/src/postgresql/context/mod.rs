@@ -21,7 +21,7 @@ use crate::{
         STATEMENTS_SESSION_DURATION_SECONDS,
     },
     proxy::{
-        schema::{CommittedSchemaStore, SchemaMiddleware},
+        schema::{CommittedSchemaStore, SchemaIntent, SchemaMiddleware},
         EncryptConfig, EncryptionService, ReloadCommand, ReloadSender,
     },
 };
@@ -162,11 +162,13 @@ struct ConnectionProtocolState<K = OperationId> {
     portal_operations: HashMap<Name, PortalOwner<K>>,
 }
 
-/// The Bind operation that created a portal, and the SQL deallocation it runs when executed
+/// The Bind operation that created a portal, and the SQL deallocation and schema intent of
+/// the statement it executes
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PortalOwner<K = OperationId> {
     operation: K,
     deallocation: Option<Deallocation>,
+    schema: Option<Arc<SchemaIntent>>,
 }
 
 impl<K> Default for ConnectionProtocolState<K> {
@@ -207,6 +209,7 @@ impl ConnectionProtocolState {
             PortalOwner {
                 operation,
                 deallocation: None,
+                schema: None,
             },
         );
         self.portals.insert(name, Arc::new(portal));
@@ -228,6 +231,10 @@ impl ConnectionProtocolState {
                 if let Some(deallocation) = restore.metadata.statement_deallocation {
                     self.prepared_statements
                         .set_deallocation(restore.name.clone(), deallocation);
+                }
+                if let Some(schema) = restore.metadata.statement_schema {
+                    self.prepared_statements
+                        .set_schema(restore.name.clone(), schema);
                 }
                 if let Some(statement) = restore.metadata.statement {
                     self.prepared_statements
@@ -274,6 +281,7 @@ impl ConnectionProtocolState {
             statement_metrics: self.prepared_statements.metrics_scope(name),
             statement_operation: self.prepared_statements.parse(name),
             statement_deallocation: self.prepared_statements.deallocation(name),
+            statement_schema: self.prepared_statements.schema(name),
             ..Default::default()
         }
     }
@@ -810,15 +818,18 @@ where
         Ok(())
     }
 
-    /// Carry the deallocation of `statement`, if any, onto the portal just bound from it.
+    /// Carry the deallocation and schema intent of `statement`, if any, onto the portal just
+    /// bound from it.
     pub fn bind_statement_effects(&self, portal: &Name, statement: &Name) -> Result<(), Error> {
         let mut state = self
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         let deallocation = state.prepared_statements.deallocation(statement);
+        let schema = state.prepared_statements.schema(statement);
         if let Some(owner) = state.portal_operations.get_mut(portal) {
             owner.deallocation = deallocation;
+            owner.schema = schema;
         }
         Ok(())
     }
@@ -1353,18 +1364,30 @@ where
     }
 
     /// Records schema intent for a parsed prepared statement.
-    fn prepare_schema_statement(&self, name: Name, statement: sqltk::parser::ast::Statement) {
-        self.schema_middleware.prepare(name, statement);
+    fn prepare_schema_statement(
+        &self,
+        name: Name,
+        statement: sqltk::parser::ast::Statement,
+    ) -> Result<(), Error> {
+        let intent = self.schema_middleware.intent(statement);
+        if !intent.affects_schema() {
+            return Ok(());
+        }
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .prepared_statements
+            .set_schema(name, Arc::new(intent));
+        Ok(())
     }
 
-    /// Associates a bound portal with its prepared statement's schema intent.
-    fn bind_schema_statement(&self, portal: Name, prepared_statement: &Name) {
-        self.schema_middleware.bind(portal, prepared_statement);
-    }
-
-    /// Records a portal execution and returns whether its DDL needs an injected flush.
-    fn execute_schema_portal(&self, portal: &Name) -> bool {
-        self.schema_middleware.execute(portal)
+    /// Records a portal execution, with the schema intent of its prepared statement, and
+    /// returns whether its DDL needs an injected flush.
+    fn execute_schema_portal(
+        &self,
+        intent: Option<Arc<crate::proxy::schema::SchemaIntent>>,
+    ) -> bool {
+        self.schema_middleware.execute(intent)
     }
 
     /// Records statements in one simple-query protocol message.
@@ -1492,11 +1515,13 @@ where
         crate::error::MappingError::PreparedSettingsChanged.into()
     }
 
+    /// Records a portal execution's settings effect. Returns whether it needs an injected
+    /// flush, and the schema intent of the portal's statement, read under the same lock.
     fn execute_settings_portal(
         &self,
         operation: OperationId,
         portal: &Name,
-    ) -> Result<bool, Error> {
+    ) -> Result<(bool, Option<Arc<crate::proxy::schema::SchemaIntent>>), Error> {
         let mut state = self
             .protocol_state
             .write()
@@ -1504,11 +1529,16 @@ where
         let ConnectionProtocolState {
             settings,
             settings_protocol,
+            portal_operations,
             ..
         } = &mut *state;
-        settings_protocol
+        let flush = settings_protocol
             .execute(operation, portal, settings)
-            .map_err(|refusal| self.prepared_settings_changed(refusal))
+            .map_err(|refusal| self.prepared_settings_changed(refusal))?;
+        let schema = portal_operations
+            .get(portal)
+            .and_then(|owner| owner.schema.clone());
+        Ok((flush, schema))
     }
 
     fn execute_simple_settings_statements(

@@ -563,6 +563,45 @@ mod tests {
         }
     }
 
+    both_configs! {
+        async fn closed_statements_and_portals_retain_nothing(connect) {
+            let mut connection = connect();
+            for i in 0..ITERATIONS {
+                let name = Bytes::from(format!("s{i}"));
+                let portal = Bytes::from(format!("p{i}"));
+                let parse = connection.parse_named(format!("s{i}")).await;
+                let bind = connection.bind(name.clone(), portal.clone()).await;
+                let close_portal = connection
+                    .client(FrontendMessage::Close(Close {
+                        target: DescribeTarget::Portal,
+                        name: portal,
+                    }))
+                    .await;
+                let close_statement = connection
+                    .client(FrontendMessage::Close(Close {
+                        target: DescribeTarget::Statement,
+                        name,
+                    }))
+                    .await;
+                let sync = connection.client(FrontendMessage::Sync).await;
+                connection
+                    .server(parse, BackendMessage::ParseComplete)
+                    .await;
+                connection.server(bind, BackendMessage::BindComplete).await;
+                connection
+                    .server(close_portal, BackendMessage::CloseComplete)
+                    .await;
+                connection
+                    .server(close_statement, BackendMessage::CloseComplete)
+                    .await;
+                connection
+                    .server(sync, ready(TransactionStatus::Idle))
+                    .await;
+            }
+            assert_eq!(connection.sizes(), ProtocolStateSizes::default());
+        }
+    }
+
     /// Parse and Sync each named statement, with PostgreSQL's responses
     async fn prepare(connection: &mut Connection, names: &[&str]) {
         for name in names {
@@ -971,6 +1010,80 @@ mod tests {
                 .server(sync, ready(TransactionStatus::Idle))
                 .await;
             assert_eq!(statement_names(&connection), vec!["d".to_owned()]);
+        }
+    }
+
+    /// Prepares `d` as DDL, has PostgreSQL acknowledge it, then re-prepares `d` as `sql`,
+    /// which never reaches PostgreSQL or is rejected by it
+    async fn reprepare_ddl(connection: &mut Connection, sql: &str, rejected_by_postgresql: bool) {
+        let parse = connection
+            .parse_sql(b"d", "CREATE TABLE reparsed (id int)".to_owned())
+            .await;
+        let sync = connection.client(FrontendMessage::Sync).await;
+        connection
+            .server(parse, BackendMessage::ParseComplete)
+            .await;
+        connection
+            .server(sync, ready(TransactionStatus::Idle))
+            .await;
+
+        let parse = connection.parse_sql(b"d", sql.to_owned()).await;
+        let sync = connection.client(FrontendMessage::Sync).await;
+        if rejected_by_postgresql {
+            connection.server(parse, error()).await;
+        }
+        connection
+            .server(sync, ready(TransactionStatus::Idle))
+            .await;
+    }
+
+    /// Executing `d` must still be known to run its DDL
+    async fn assert_executes_ddl(connection: &mut Connection) {
+        connection
+            .bind(Bytes::from_static(b"d"), Bytes::new())
+            .await;
+        connection.execute(Bytes::new()).await;
+        assert!(connection.context.schema_ddl_in_flight());
+    }
+
+    both_configs! {
+        async fn executing_a_prepared_ddl_statement_waits_for_its_outcome(connect) {
+            let mut connection = connect();
+            let parse = connection
+                .parse_sql(b"d", "CREATE TABLE reparsed (id int)".to_owned())
+                .await;
+            let sync = connection.client(FrontendMessage::Sync).await;
+            connection
+                .server(parse, BackendMessage::ParseComplete)
+                .await;
+            connection
+                .server(sync, ready(TransactionStatus::Idle))
+                .await;
+            assert_executes_ddl(&mut connection).await;
+        }
+    }
+
+    both_configs! {
+        async fn reparse_rejected_by_postgresql_keeps_the_schema_intent_of_the_retained_statement(connect) {
+            let mut connection = connect();
+            // PostgreSQL rejects a second Parse of `d` and keeps the DDL
+            reprepare_ddl(&mut connection, "SELECT 1", true).await;
+            assert_executes_ddl(&mut connection).await;
+        }
+    }
+
+    both_configs! {
+        async fn reparse_refused_by_proxy_refuses_the_retained_statement(connect) {
+            let mut connection = connect();
+            // Proxy refuses the second Parse of `d` before forwarding it, and forgets `d`
+            reprepare_ddl(&mut connection, "SET CIPHERSTASH.KEYSET_ID = 'not-a-uuid'", false).await;
+
+            // So it cannot run the DDL PostgreSQL still holds as `d` without knowing
+            let (_, output) = connection.client_output(bind_message(b"d")).await;
+            let FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(forwarded)) = output else {
+                panic!("expected a Bind, got {output:?}");
+            };
+            assert_ne!(forwarded.statement, Bytes::from_static(b"d"));
         }
     }
 
