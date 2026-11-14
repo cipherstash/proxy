@@ -64,8 +64,12 @@ The Product Engineering workflow:
 
 ## Linking PRs to issues
 
-Reference the issue key in the PR title or body (e.g. `CIP-3233`) so Linear's GitHub
-integration attaches the PR to the issue automatically.
+This repository is public and Linear is private.
+Never put a Linear issue key (`CIP-####`) or a `linear.app` link in a PR title, PR body, PR comment, commit message, branch name or code comment.
+Describe the change in its own words instead.
+
+Link the other way: add the PR URL to the Linear issue as a link.
+Before opening a PR or pushing, check the PR text and `git log <base>..HEAD --format=%B` for `CIP-`.
 
 ## PRs as a request surface
 

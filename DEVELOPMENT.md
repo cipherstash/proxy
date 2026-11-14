@@ -436,6 +436,13 @@ To run integration tests:
 mise run test:integration
 ```
 
+`mise run test` (which CI runs) stops at the first stage that fails.
+The stages run in this order: hygiene, unit tests, then the integration stages (psql, Rust integration, multitenant, showcase, Go, Python).
+A failing unit test therefore means no integration test runs, so a red CI run says nothing about the integration suite.
+To show that an integration test fails on its own, push it in a commit without any failing unit test.
+
+Integration tests run Proxy with `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` unset, which is the production default (off).
+
 #### Integration tests
 
 Integration tests are defined in `tests/tasks/test/`.
@@ -795,6 +802,17 @@ Struct definitions make error message strings slightly clearer.
 
 Note: not all errors do this at the moment, and we will change over time.
 
+## Merging into main
+
+A pull request into `main` needs:
+
+- the `Build (Rust MSRV)` check from `test.yml` to pass on the PR. A manually dispatched run of the workflow does not satisfy it;
+- one approving review;
+- signed commits.
+
+Pushing after an approval does not dismiss it.
+The ruleset also requires an extra approval for unattributed changes, so a commit pushed after the approval by an account other than the PR's author can leave the PR blocked until it is approved again.
+
 ## Releasing
 
 Releases are published via GitHub Actions when a GitHub release is created.
@@ -844,6 +862,20 @@ git push origin vX.Y.Z
 
 # Create the GitHub release
 gh release create vX.Y.Z --generate-notes
+```
+
+### Patch releases of an older line (for example 2.2.x)
+
+Patch releases of an older major or minor line are cut from its maintenance branch (for example `release/2.2`), not from `main`.
+`mise run release` refuses any branch but `main`, so use the manual steps, with the prepare-release PR opened against the maintenance branch and the tag created on its merged commit.
+
+The release workflow runs from the tagged commit, so it uses that branch's `release.yml`.
+`docker/metadata-action` defaults to `latest=auto`, which tags the image `cipherstash/proxy:latest` for a release tag.
+Unless the branch's `release.yml` sets `flavor: latest=false` on its metadata steps, an older-line release moves `latest` off the current line.
+Create the GitHub release with `--latest=false`, and pass `--notes-start-tag` with the previous tag on that line so the generated notes do not diff against a newer line's tag:
+
+```bash
+gh release create v2.2.6 --target release/2.2 --latest=false --generate-notes --notes-start-tag v2.2.5
 ```
 
 ### Re-releasing a version

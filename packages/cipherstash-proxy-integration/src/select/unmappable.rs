@@ -5,7 +5,9 @@ mod tests {
     ///
     /// Tests unmappble statements return an error in tests.
     ///
-    /// `enable_mapping_errors` should be `true` in the test configuration.`
+    /// Integration tests run with `enable_mapping_errors` off (the default), so the type
+    /// check failure is not raised by Proxy; the statement is forwarded and PostgreSQL
+    /// rejects it because the table does not exist.
     ///
     /// Test ensures that unmappable SQL statements return an error
     ///
