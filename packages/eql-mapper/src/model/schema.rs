@@ -21,6 +21,9 @@ pub struct Schema {
     pub name: Ident,
     pub tables: Vec<Arc<Table>>,
     pub aggregates: Vec<Arc<String>>,
+    /// Whether the database has encrypted columns in tables this schema does
+    /// not hold, such as tables in schemas off the loader's search path.
+    pub encrypted_columns_elsewhere: bool,
 }
 
 /// A table (or view).
@@ -142,14 +145,15 @@ pub enum UnresolvedTable<'a> {
 
 impl Schema {
     /// Whether any column holds encrypted data, including one this build
-    /// cannot map.
+    /// cannot map and one in a table this schema does not hold.
     pub fn has_encrypted_columns(&self) -> bool {
-        self.tables.iter().any(|table| {
-            table
-                .columns
-                .iter()
-                .any(|column| column.kind != ColumnKind::Native)
-        })
+        self.encrypted_columns_elsewhere
+            || self.tables.iter().any(|table| {
+                table
+                    .columns
+                    .iter()
+                    .any(|column| column.kind != ColumnKind::Native)
+            })
     }
 
     /// Creates a new named empty schema.
@@ -163,6 +167,7 @@ impl Schema {
             name,
             tables: Default::default(),
             aggregates: Default::default(),
+            encrypted_columns_elsewhere: false,
         }
     }
 

@@ -348,6 +348,13 @@ fn is_legacy_eql_v2(column_type_name: Option<&str>, column_domain_name: Option<&
         || column_domain_name == Some(EQL_V2_ENCRYPTED_TYPE)
 }
 
+/// Whether a column is encrypted, as [`classify_column`] decides, without
+/// logging: for a table that is not loaded.
+fn is_encrypted(column_type_name: Option<&str>, column_domain_name: Option<&str>) -> bool {
+    column_domain_name.and_then(eql_domains::resolve).is_some()
+        || is_legacy_eql_v2(column_type_name, column_domain_name)
+}
+
 /// Decides what a single catalog row means for the type checker.
 ///
 /// Split out from [`load_schema`] so the classification — the security-relevant
@@ -389,6 +396,9 @@ fn classify_column(
 /// One row of [`SCHEMA_QUERY`]: a table and its columns.
 struct TableRow {
     table_schema: String,
+    /// Whether `table_schema` is on the loader's search path. Only those
+    /// tables are loaded.
+    on_search_path: bool,
     table_name: String,
     columns: Vec<String>,
     column_type_names: Vec<Option<String>>,
@@ -405,6 +415,18 @@ fn build_snapshot(tables: impl IntoIterator<Item = TableRow>) -> (Schema, Encryp
     let mut conflicting: HashSet<Identifier> = HashSet::new();
 
     for row in tables {
+        if !row.on_search_path {
+            // Not loaded, but its encrypted columns still count, so that a
+            // write to a table Proxy cannot resolve fails closed.
+            schema.encrypted_columns_elsewhere |= row
+                .column_type_names
+                .iter()
+                .zip(&row.column_domain_names)
+                .any(|(column_type_name, column_domain_name)| {
+                    is_encrypted(column_type_name.as_deref(), column_domain_name.as_deref())
+                });
+            continue;
+        }
         let table_name = row.table_name;
         let mut table = Table::in_schema(
             Ident::with_quote('"', &row.table_schema),
@@ -475,6 +497,7 @@ async fn load_snapshot(config: &DatabaseConfig) -> Result<(Schema, EncryptConfig
 
     let (mut schema, encrypt_config) = build_snapshot(tables.into_iter().map(|table| TableRow {
         table_schema: table.get("table_schema"),
+        on_search_path: table.get("on_search_path"),
         table_name: table.get("table_name"),
         columns: table.get("columns"),
         column_type_names: table.get("column_type_names"),
@@ -565,10 +588,27 @@ mod test {
     fn users_row(table_schema: &str, email_domain: Option<&str>) -> TableRow {
         TableRow {
             table_schema: table_schema.to_owned(),
+            on_search_path: true,
             table_name: "users".to_owned(),
             columns: vec!["id".to_owned(), "email".to_owned()],
             column_type_names: vec![Some("int4".to_owned()), Some("jsonb".to_owned())],
             column_domain_names: vec![None, email_domain.map(str::to_owned)],
+        }
+    }
+
+    /// A table off the loader's search path is not loaded, but its encrypted
+    /// columns still count.
+    #[test]
+    fn table_off_the_search_path_is_not_loaded_but_its_encrypted_columns_count() {
+        for (domain, expected) in [(Some("eql_v3_text_search"), true), (None, false)] {
+            let (schema, encrypt_config) = build_snapshot([TableRow {
+                on_search_path: false,
+                ..users_row("hidden", domain)
+            }]);
+
+            assert!(schema.tables.is_empty());
+            assert!(encrypt_config.is_empty());
+            assert_eq!(schema.has_encrypted_columns(), expected, "{domain:?}");
         }
     }
 

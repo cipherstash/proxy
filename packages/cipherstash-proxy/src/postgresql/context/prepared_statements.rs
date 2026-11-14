@@ -12,6 +12,9 @@ struct PreparedStatement<K> {
     parse: Option<K>,
     /// Set when the statement's SQL is a `DEALLOCATE` or `DISCARD ALL`
     deallocation: Option<Deallocation>,
+    /// Set when the statement's SQL is a `PREPARE` of an unmapped statement
+    /// that writes data: the name it prepares
+    preparation: Option<Name>,
 }
 
 impl<K> Default for PreparedStatement<K> {
@@ -21,6 +24,7 @@ impl<K> Default for PreparedStatement<K> {
             metrics_scope: None,
             parse: None,
             deallocation: None,
+            preparation: None,
         }
     }
 }
@@ -80,6 +84,14 @@ where
 
     pub fn set_deallocation(&mut self, name: Name, deallocation: Deallocation) {
         self.statements.entry(name).or_default().deallocation = Some(deallocation);
+    }
+
+    pub fn preparation(&self, name: &Name) -> Option<Name> {
+        self.statements.get(name)?.preparation.clone()
+    }
+
+    pub fn set_preparation(&mut self, name: Name, prepares: Name) {
+        self.statements.entry(name).or_default().preparation = Some(prepares);
     }
 
     /// Remove the statement, returning its metrics scope.
