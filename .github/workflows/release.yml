@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - { os: blacksmith-16vcpu-ubuntu-2404, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
+          - { os: "runs-on=${{ github.run_id }}/family=c8a+m8a/cpu=8/image=ubuntu24-full-x64/volume=80gb/extras=s3-cache", docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
           - { os: linux-arm64-public,            docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu" }
     env:
       CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
@@ -72,6 +72,13 @@ jobs:
           CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
           CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+
+      # Log in before `mise run build`. It pulls the image's base from Docker Hub.
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_PASSWORD }}
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -101,12 +108,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY_IMAGE }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKER_HUB_USERNAME }}
-          password: ${{ env.DOCKER_HUB_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -138,7 +139,7 @@ jobs:
 
   merge:
     name: Publish multi-platform image
-    runs-on: blacksmith-16vcpu-ubuntu-2404-arm
+    runs-on: runs-on=${{ github.run_id }}/family=c8a+m8a/cpu=8/image=ubuntu24-full-x64/volume=80gb/extras=s3-cache
     timeout-minutes: 30
     needs:
       - build
