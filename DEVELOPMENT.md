@@ -143,7 +143,7 @@ CI uses three Rust toolchains:
 
 | Toolchain | Declared in | What CI runs on it |
 |---|---|---|
-| **Pinned** (currently 1.99.0) | `rust-toolchain.toml` | Formatting, Clippy, unit and integration tests across the full PostgreSQL matrix, burn-in, benchmarks, and release binaries (`mise run build:binary`). |
+| **Pinned** (currently 1.100.0) | `rust-toolchain.toml` | Formatting, Clippy, unit and integration tests across the full PostgreSQL matrix, burn-in, benchmarks, and release binaries (`mise run build:binary`). |
 | **Latest stable** | floating `stable` channel | `Lint (Rust stable)`: formatting and Clippy only. |
 | **Minimum supported (MSRV)** (currently 1.89.0) | `rust-version` under `[workspace.package]` in `Cargo.toml` | `Build (Rust MSRV)`: builds the production binary with `cargo build --locked --release --package cipherstash-proxy`. |
 

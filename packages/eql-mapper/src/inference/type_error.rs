@@ -109,11 +109,7 @@ pub enum TypeError {
     /// This is a refusal, not a coverage gap: serving the statement would mean
     /// treating the column as plaintext.
     #[error(
-        "Column `{}.{}` is declared as `{}`, which this build of CipherStash Proxy cannot encrypt or decrypt. Statements referencing `{}` are refused so that plaintext is never written to it. Migrate the column to an EQL v3 domain type.",
-        table,
-        column,
-        column_type,
-        table
+        "Column `{table}.{column}` is declared as `{column_type}`, which this build of CipherStash Proxy cannot encrypt or decrypt. Statements referencing `{table}` are refused so that plaintext is never written to it. Migrate the column to an EQL v3 domain type."
     )]
     UnmappableEncryptedColumn {
         table: String,
