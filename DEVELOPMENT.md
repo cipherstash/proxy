@@ -145,19 +145,20 @@ CI uses three Rust toolchains:
 |---|---|---|
 | **Pinned** (currently 1.100.0) | `rust-toolchain.toml` | Formatting, Clippy, unit and integration tests across the full PostgreSQL matrix, burn-in, benchmarks, and release binaries (`mise run build:binary`). |
 | **Latest stable** | floating `stable` channel | `Lint (Rust stable)`: formatting and Clippy only. |
-| **Minimum supported (MSRV)** (currently 1.89.0) | `rust-version` under `[workspace.package]` in `Cargo.toml` | `Build (Rust MSRV)`: builds the production binary with `cargo build --locked --release --package cipherstash-proxy`. |
+| **Minimum supported (MSRV)** (currently 1.100.0) | `rust-version` under `[workspace.package]` in `Cargo.toml` | `Build (Rust MSRV)`: builds the production binary with `cargo build --locked --release --package cipherstash-proxy`. |
 
 The MSRV build and stable lint jobs need no PostgreSQL or credentials. Locally, rustup selects the pinned toolchain automatically from `rust-toolchain.toml`.
 
-Rust 1.88 cannot build Proxy: a transitive dependency (`stack-profile`, via `cipherstash-client`) uses `std::fs::File::lock`, which stabilized in 1.89, without declaring that requirement.
+The MSRV is 1.100.0 because Proxy uses standard library APIs stabilized in that release, such as `str::trim_prefix`, `Vec::from_fn` and `core::mem::DropGuard`.
+The MSRV and the pinned toolchain are currently the same version, so the two jobs differ only in what they run.
 
 To run those checks locally:
 
 ```shell
 cargo +stable clippy --all --no-deps --all-targets --all-features -- -D warnings
 
-rustup toolchain install 1.89.0 --profile minimal
-cargo +1.89.0 build --locked --release --package cipherstash-proxy
+rustup toolchain install 1.100.0 --profile minimal
+cargo +1.100.0 build --locked --release --package cipherstash-proxy
 ```
 
 #### Bumping the pinned toolchain

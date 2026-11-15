@@ -761,13 +761,13 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
 
 /// Whether a `CommandComplete` tag confirms a `DEALLOCATE` or `DISCARD ALL`
 pub(super) fn is_deallocation(tag: &[u8]) -> bool {
-    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    let tag = tag.trim_suffix(b"\0");
     matches!(tag, b"DEALLOCATE" | b"DEALLOCATE ALL" | b"DISCARD ALL")
 }
 
 /// Whether a deallocation command tag removes every prepared statement
 fn removes_all_statements(tag: &[u8]) -> bool {
-    let tag = tag.strip_suffix(b"\0").unwrap_or(tag);
+    let tag = tag.trim_suffix(b"\0");
     matches!(tag, b"DEALLOCATE ALL" | b"DISCARD ALL")
 }
 

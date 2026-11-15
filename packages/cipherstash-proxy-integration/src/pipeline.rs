@@ -190,7 +190,7 @@ mod tests {
             .iter()
             .map(|sql| Box::pin(client.simple_query(sql)) as Pending<'_>)
             .collect();
-        let mut results = (0..pending.len()).map(|_| None).collect::<Vec<_>>();
+        let mut results = Vec::from_fn(pending.len(), |_| None);
 
         // Poll every query in order on each wake, so all requests are written
         // in order before any response arrives.
