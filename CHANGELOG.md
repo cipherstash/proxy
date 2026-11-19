@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.6] - 2026-11-19
+
 ### Fixed
 
 - **Memory and file descriptor growth as client connections close**: Proxy now releases a client connection when it ends. Previously every authenticated connection stayed in memory after it ended, along with its socket and the copy of the database schema it was using, until Proxy was restarted. This happened whether the client closed the connection, PostgreSQL closed it, or Proxy closed it after the connection timeout. Memory and open file descriptors therefore grew with the number of connections opened rather than with query volume, so a deployment whose connection pool replaces connections regularly saw steady growth even when idle. The `cipherstash_proxy_clients_active_connections` metric also never went down, and a client was not disconnected when PostgreSQL closed its connection or when Proxy timed it out. Affects versions 2.2.1 to 2.2.5. No configuration change is required.
@@ -303,7 +305,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.5...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.6...HEAD
+[2.2.6]: https://github.com/cipherstash/proxy/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/cipherstash/proxy/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
