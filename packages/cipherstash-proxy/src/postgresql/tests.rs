@@ -2963,3 +2963,122 @@ mod type_check_fallback {
         forwarded_unchanged(&mut connection, sql).await;
     }
 }
+
+/// Proxy finishes with a connection when it ends, however it ends, so that a connection that is
+/// over holds no socket, task or memory.
+mod connection_close {
+    use super::*;
+    use crate::postgresql::handler::relay;
+    use std::time::Duration;
+    use tokio::{task::JoinHandle, time::timeout};
+
+    /// How long Proxy has to finish with a connection
+    const PROMPTLY: Duration = Duration::from_secs(5);
+
+    /// The client's and PostgreSQL's ends of one authenticated connection through Proxy
+    struct Relayed {
+        client: DuplexStream,
+        server: DuplexStream,
+        relay: JoinHandle<Result<(), Error>>,
+    }
+
+    fn relayed(config: TandemConfig) -> Relayed {
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(config),
+            Arc::new(EncryptConfig::default()),
+            Arc::new(Schema::new("public")),
+            TestService::default(),
+            reload_sender,
+        );
+
+        let (client, proxy_client) = tokio::io::duplex(64 * 1024);
+        let (client_reader, client_writer) = tokio::io::split(proxy_client);
+        let (server, proxy_server) = tokio::io::duplex(64 * 1024);
+        let (server_reader, server_writer) = tokio::io::split(proxy_server);
+
+        Relayed {
+            client,
+            server,
+            relay: tokio::spawn(relay(
+                client_reader,
+                client_writer,
+                server_reader,
+                server_writer,
+                context,
+            )),
+        }
+    }
+
+    /// The error the connection ended with
+    async fn ended_with(relay: JoinHandle<Result<(), Error>>) -> Error {
+        timeout(PROMPTLY, relay)
+            .await
+            .expect("Proxy is still holding the connection")
+            .unwrap()
+            .unwrap_err()
+    }
+
+    /// Everything `stream` receives until Proxy closes its end
+    async fn received_until_closed(stream: &mut DuplexStream) -> Vec<u8> {
+        let mut received = Vec::new();
+        timeout(PROMPTLY, stream.read_to_end(&mut received))
+            .await
+            .expect("Proxy is still holding the connection open")
+            .unwrap();
+        received
+    }
+
+    #[tokio::test]
+    async fn a_connection_the_client_closes_is_finished_with() {
+        let Relayed {
+            client,
+            mut server,
+            relay,
+        } = relayed(TandemConfig::for_testing());
+
+        drop(client);
+
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+        // PostgreSQL is told that the client has gone, and its connection is closed
+        assert_eq!(
+            received_until_closed(&mut server).await,
+            message(b'X', &[]).to_vec()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_postgresql_closes_is_closed_for_the_client() {
+        let Relayed {
+            mut client,
+            server,
+            relay,
+        } = relayed(TandemConfig::for_testing());
+
+        drop(server);
+
+        assert_eq!(received_until_closed(&mut client).await, Vec::<u8>::new());
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_times_out_is_closed_after_the_client_is_told() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            server: _server,
+            relay,
+        } = relayed(config);
+
+        let received = received_until_closed(&mut client).await;
+
+        assert_eq!(received.first(), Some(&b'E'));
+        assert!(String::from_utf8_lossy(&received).contains("FATAL"));
+        assert!(matches!(
+            ended_with(relay).await,
+            Error::ConnectionTimeout { .. }
+        ));
+    }
+}

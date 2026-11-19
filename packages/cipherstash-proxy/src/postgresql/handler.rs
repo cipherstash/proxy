@@ -324,9 +324,13 @@ where
     // The async blocks above captured frontend/backend by reference, so they're still alive
     drop(frontend);
     drop(backend);
+    // The timeout sender is a sender of the same channel. While it is alive the channel stays
+    // open, the writer task never finishes, and the wait below never ends, so the connection's
+    // socket, task and memory are held until Proxy restarts.
+    drop(timeout_sender);
 
     // Wait for channel writer to finish shutdown sequence
-    // The senders are now dropped, which closes the channel and allows
+    // Every sender is now dropped, which closes the channel and allows
     // the writer task to complete its shutdown
     if let Err(err) = channel_writer_task.await {
         error!(
