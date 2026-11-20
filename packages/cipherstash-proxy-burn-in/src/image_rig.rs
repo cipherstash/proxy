@@ -10,11 +10,15 @@
 //! The idle scenario opens zero client connections. The only activity is
 //! Proxy's own periodic schema and encrypt-config reloads, so any growth is
 //! time-driven. A run can add a Prometheus scraper, which is also periodic and
-//! independent of client traffic.
+//! independent of client traffic, or one of the client workloads in
+//! [`crate::client`], which the rig process drives through a port published on
+//! the host's loopback interface.
 
 use std::{
+    net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -23,7 +27,7 @@ use serde::Serialize;
 use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
 
 use crate::{
-    slope,
+    client, slope,
     soak::{preflight_output, write_report_atomic},
 };
 
@@ -36,6 +40,8 @@ const DATABASE_USER: &str = "cipherstash";
 const DATABASE_PASSWORD: &str = "burn-in-rss-rig";
 /// The kernel truncates `/proc/<pid>/comm` to 15 bytes.
 const PROXY_COMM: &str = "cipherstash-pro";
+/// Proxy's default listener port.
+const PROXY_PORT: u16 = 6432;
 /// Proxy's default Prometheus port.
 const PROMETHEUS_PORT: u16 = 9930;
 const PG_HBA: &str = "local all all trust\nhostssl all all all scram-sha-256\n";
@@ -65,6 +71,8 @@ pub struct Config {
     pub reload_intervals: Vec<u64>,
     /// Enables Proxy's Prometheus exporter and scrapes it at this interval.
     pub scrape_interval: Option<Duration>,
+    /// Drives a client workload through Proxy. Without it nothing connects.
+    pub client: Option<client::Config>,
     pub memory_limit: String,
     pub proxy_env: Vec<(String, String)>,
     pub output: PathBuf,
@@ -75,7 +83,7 @@ pub struct Config {
 struct Report {
     status: &'static str,
     scenario: String,
-    client_connections: u32,
+    client_connections: usize,
     started_at_unix_seconds: u64,
     requested_duration_seconds: u64,
     warmup_seconds: u64,
@@ -119,6 +127,8 @@ struct RunReport {
     postgres_connections: Connections,
     /// Present only when the run scrapes Proxy's Prometheus exporter.
     prometheus_scrapes: Option<Scrapes>,
+    /// Present only when the run drives a client workload.
+    client: Option<ClientActivity>,
     rss: Option<Growth>,
     anonymous: Option<Growth>,
     samples: Vec<Sample>,
@@ -148,6 +158,25 @@ struct Scrapes {
     successful_in_fit_window: u64,
 }
 
+/// What the client workload did. An operation is one connect for the churn
+/// workloads and one query for the pooled workload.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct ClientActivity {
+    workload: client::Workload,
+    unit: &'static str,
+    connections: usize,
+    interval_millis: u128,
+    operations_total: u64,
+    errors_total: u64,
+    last_error: Option<String>,
+    operations_in_fit_window: u64,
+    errors_in_fit_window: u64,
+    /// The rate `projected_mib_per_day_at_assumed_client_rate` is computed at.
+    assumed_operations_per_day: f64,
+    /// Whether that rate was given, or is the rate this run achieved.
+    assumed_rate_source: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Sample {
     pub elapsed_millis: u128,
@@ -169,6 +198,10 @@ struct Growth {
     bytes_per_connection: Option<f64>,
     /// Growth per successful Prometheus scrape observed in the fit window.
     bytes_per_scrape: Option<f64>,
+    /// Growth per client operation observed in the fit window.
+    bytes_per_client_operation: Option<f64>,
+    /// `bytes_per_client_operation` at the assumed production rate.
+    projected_mib_per_day_at_assumed_client_rate: Option<f64>,
     /// The fitted slope of this run, extrapolated to a day.
     observed_mib_per_day: f64,
     /// The slope fitted to the second half of the fit window only. Startup
@@ -225,7 +258,7 @@ pub async fn run(config: Config) -> Result<()> {
     let report = Report {
         status: if completed { "completed" } else { "failed" },
         scenario: config.name.clone(),
-        client_connections: 0,
+        client_connections: config.client.as_ref().map_or(0, |client| client.connections),
         started_at_unix_seconds,
         requested_duration_seconds: config.duration.as_secs(),
         warmup_seconds: config.warmup.as_secs(),
@@ -273,6 +306,18 @@ fn validate(config: &Config) -> Result<()> {
             .is_none_or(|interval| !interval.is_zero()),
         "--scrape-interval-seconds must be positive"
     );
+    if let Some(client) = &config.client {
+        anyhow::ensure!(
+            !client.interval.is_zero() && client.connections > 0,
+            "--client-interval-millis and --client-connections must be positive"
+        );
+        anyhow::ensure!(
+            client
+                .assumed_operations_per_day
+                .is_none_or(|rate| rate > 0.0),
+            "--client-operations-per-day must be positive"
+        );
+    }
     anyhow::ensure!(
         !config.sample_interval.is_zero(),
         "--sample-interval-seconds must be positive"
@@ -384,6 +429,7 @@ impl Rig {
             fit_window_seconds: 0.0,
             postgres_connections: Connections::default(),
             prometheus_scrapes: None,
+            client: None,
             rss: None,
             anonymous: None,
             samples: Vec::new(),
@@ -416,6 +462,16 @@ impl Rig {
         if let Some(interval) = self.config.scrape_interval {
             self.start_scraper(interval).await?;
         }
+        let counters = Arc::new(client::Counters::default());
+        let _workload = match &self.config.client {
+            Some(config) => {
+                let target = self.client_target().await?;
+                client::wait_until_ready(&target, PROXY_START_TIMEOUT).await?;
+                let workload = client::run(config.clone(), target, Arc::clone(&counters));
+                Some(AbortOnDrop(tokio::spawn(workload)))
+            }
+            None => None,
+        };
         println!("[{}] Proxy started; sampling", self.label);
 
         let mut series = tokio::fs::File::create(self.dir.join("samples.jsonl")).await?;
@@ -424,6 +480,7 @@ impl Rig {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut connections_at_warmup = None;
         let mut scrapes_at_warmup = None;
+        let mut client_at_warmup = None;
         let mut next_progress = Duration::ZERO;
         let status = loop {
             tokio::select! {
@@ -457,6 +514,7 @@ impl Rig {
             report.samples.push(sample);
             if connections_at_warmup.is_none() && elapsed >= self.config.warmup {
                 connections_at_warmup = Some(self.count_connections().await?);
+                client_at_warmup = Some(counters.snapshot());
                 if self.config.scrape_interval.is_some() {
                     scrapes_at_warmup = Some(self.count_scrapes().await?);
                 }
@@ -482,7 +540,48 @@ impl Rig {
                 ..total
             });
         }
+        if let Some(config) = &self.config.client {
+            let total = counters.snapshot();
+            let warm = client_at_warmup.unwrap_or(total);
+            let operations_in_fit_window = total.operations.saturating_sub(warm.operations);
+            let fit_seconds = report
+                .samples
+                .last()
+                .map_or(0.0, |sample| sample.elapsed_millis as f64 / 1000.0)
+                - self.config.warmup.as_secs_f64();
+            let achieved_per_day = if fit_seconds > 0.0 {
+                operations_in_fit_window as f64 / fit_seconds * SECONDS_PER_DAY
+            } else {
+                0.0
+            };
+            report.client = Some(ClientActivity {
+                workload: config.workload,
+                unit: config.workload.unit(),
+                connections: config.connections,
+                interval_millis: config.interval.as_millis(),
+                operations_total: total.operations,
+                errors_total: total.errors,
+                last_error: counters.last_error(),
+                operations_in_fit_window,
+                errors_in_fit_window: total.errors.saturating_sub(warm.errors),
+                assumed_operations_per_day: config
+                    .assumed_operations_per_day
+                    .unwrap_or(achieved_per_day),
+                assumed_rate_source: if config.assumed_operations_per_day.is_some() {
+                    "given"
+                } else {
+                    "achieved by this run"
+                },
+            });
+        }
         if status == "completed" {
+            anyhow::ensure!(
+                report
+                    .client
+                    .as_ref()
+                    .is_none_or(|client| client.operations_in_fit_window > 0),
+                "the client workload completed no operation after warm-up"
+            );
             // A reload interval longer than the run is the control: Proxy
             // loads once at startup and never reloads while it is measured.
             let reloads_expected = Duration::from_secs(self.reload_interval)
@@ -522,6 +621,14 @@ impl Rig {
             scrapes: report
                 .prometheus_scrapes
                 .map_or(0, |scrapes| scrapes.successful_in_fit_window),
+            client_operations: report
+                .client
+                .as_ref()
+                .map_or(0, |client| client.operations_in_fit_window),
+            assumed_client_operations_per_day: report
+                .client
+                .as_ref()
+                .map_or(0.0, |client| client.assumed_operations_per_day),
         };
         report.rss = growth(&fitted, |sample| sample.rss_bytes, drivers);
         report.anonymous = growth(&fitted, |sample| sample.anonymous_bytes, drivers);
@@ -725,6 +832,11 @@ impl Rig {
         .into_iter()
         .map(str::to_string)
         .collect();
+        if self.config.client.is_some() {
+            // The rig process is the client, so it needs a route to Proxy. The
+            // port is bound to loopback only and chosen by Docker.
+            args.extend(["--publish".to_string(), format!("127.0.0.1::{PROXY_PORT}")]);
+        }
         for (name, value) in env {
             args.extend(["--env".to_string(), format!("{name}={value}")]);
         }
@@ -767,6 +879,23 @@ impl Rig {
             );
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
+    }
+
+    /// Resolves the loopback port Docker published for Proxy's listener.
+    async fn client_target(&self) -> Result<client::Target> {
+        let published = docker(&["port", &self.proxy, &format!("{PROXY_PORT}/tcp")]).await?;
+        let address: SocketAddr = published
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .parse()
+            .with_context(|| format!("unexpected docker port output: {published}"))?;
+        Ok(client::Target {
+            address,
+            user: DATABASE_USER.to_string(),
+            password: DATABASE_PASSWORD.to_string(),
+            database: DATABASE_NAME.to_string(),
+        })
     }
 
     /// Scrapes Proxy's Prometheus exporter from a separate container on the rig
@@ -873,6 +1002,15 @@ impl Rig {
     }
 }
 
+/// Stops the client workload when the measurement ends, however it ends.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// The periodic activity counted in a run's fit window, which growth is
 /// expressed per unit of.
 #[derive(Debug, Clone, Copy)]
@@ -880,6 +1018,8 @@ struct Drivers {
     reload_interval: u64,
     connections: u64,
     scrapes: u64,
+    client_operations: u64,
+    assumed_client_operations_per_day: f64,
 }
 
 fn growth(samples: &[&Sample], value: impl Fn(&Sample) -> u64, drivers: Drivers) -> Option<Growth> {
@@ -899,6 +1039,7 @@ fn growth(samples: &[&Sample], value: impl Fn(&Sample) -> u64, drivers: Drivers)
     let total_growth = fit.slope_per_second * fit_window_seconds;
     let per = |count: u64| (count > 0).then(|| total_growth / count as f64);
     let bytes_per_reload = fit.slope_per_second * drivers.reload_interval as f64;
+    let bytes_per_client_operation = per(drivers.client_operations);
     Some(Growth {
         first_bytes: value(samples.first()?),
         last_bytes: value(samples.last()?),
@@ -908,6 +1049,9 @@ fn growth(samples: &[&Sample], value: impl Fn(&Sample) -> u64, drivers: Drivers)
         bytes_per_reload,
         bytes_per_connection: per(drivers.connections),
         bytes_per_scrape: per(drivers.scrapes),
+        bytes_per_client_operation,
+        projected_mib_per_day_at_assumed_client_rate: bytes_per_client_operation
+            .map(|bytes| bytes * drivers.assumed_client_operations_per_day / MIB),
         observed_mib_per_day: fit.slope_per_second * SECONDS_PER_DAY / MIB,
         second_half_mib_per_day: slope::fit(&second_half)
             .map(|fit| fit.slope_per_second * SECONDS_PER_DAY / MIB),
@@ -1004,8 +1148,11 @@ async fn docker_output(args: &[&str]) -> Result<std::process::Output> {
 
 fn print_summary(report: &Report, output: &Path) {
     println!(
-        "\n{} RSS growth of {} (Proxy {}), TLS verified, zero client connections",
-        report.scenario, report.image.reference, report.image.proxy_version
+        "\n{} RSS growth of {} (Proxy {}), TLS verified, {} client connections",
+        report.scenario,
+        report.image.reference,
+        report.image.proxy_version,
+        report.client_connections
     );
     for run in &report.runs {
         println!(
@@ -1022,8 +1169,32 @@ fn print_summary(report: &Report, output: &Path) {
                 scrapes.successful_in_fit_window, scrapes.failed_total
             );
         }
+        if let Some(client) = &run.client {
+            println!(
+                "  {:?}: {} operations ({} each) in the fit window, {} errors; projecting at {:.0} per day ({})",
+                client.workload,
+                client.operations_in_fit_window,
+                client.unit,
+                client.errors_in_fit_window,
+                client.assumed_operations_per_day,
+                client.assumed_rate_source
+            );
+            if let Some(error) = &client.last_error {
+                println!("  last client error: {error}");
+            }
+        }
         for (name, growth) in [("rss", &run.rss), ("anonymous", &run.anonymous)] {
             let Some(growth) = growth else { continue };
+            if let (Some(bytes), Some(projected), Some(client)) = (
+                growth.bytes_per_client_operation,
+                growth.projected_mib_per_day_at_assumed_client_rate,
+                &run.client,
+            ) {
+                println!(
+                    "  {name:<9} {bytes:>10.1} bytes/{}  {projected:>8.2} MiB/day at the assumed client rate",
+                    client.unit
+                );
+            }
             println!(
                 "  {name:<9} {:>10.1} bytes/reload  {:>8.2} MiB/day observed  {:>8.2} MiB/day second half  {:>8.2} MiB/day at 60s reloads  R² {}",
                 growth.bytes_per_reload,
@@ -1103,12 +1274,17 @@ LOG:  connection authorized: user=cipherstash database=cipherstash SSL enabled (
             reload_interval: 1,
             connections: 200,
             scrapes: 50,
+            client_operations: 400,
+            assumed_client_operations_per_day: 8_192.0,
         };
         let growth = growth(&fitted, |sample| sample.rss_bytes, drivers).unwrap();
         assert!((growth.slope_bytes_per_second - 1024.0).abs() < 1e-6);
         assert!((growth.bytes_per_reload - 1024.0).abs() < 1e-6);
         assert!((growth.bytes_per_connection.unwrap() - 512.0).abs() < 1e-6);
         assert!((growth.bytes_per_scrape.unwrap() - 2048.0).abs() < 1e-6);
+        // 256 bytes per client operation at 8,192 operations per day is 2 MiB.
+        assert!((growth.bytes_per_client_operation.unwrap() - 256.0).abs() < 1e-6);
+        assert!((growth.projected_mib_per_day_at_assumed_client_rate.unwrap() - 2.0).abs() < 1e-6);
         assert!((growth.observed_mib_per_day - 84.375).abs() < 1e-6);
         assert!((growth.second_half_mib_per_day.unwrap() - 84.375).abs() < 1e-6);
         // 1024 bytes per reload at 1,440 reloads per day.
@@ -1130,12 +1306,16 @@ LOG:  connection authorized: user=cipherstash database=cipherstash SSL enabled (
             reload_interval: 60,
             connections: 0,
             scrapes: 0,
+            client_operations: 0,
+            assumed_client_operations_per_day: 0.0,
         };
         let growth = growth(&fitted, |sample| sample.rss_bytes, drivers).unwrap();
         assert!(growth.observed_mib_per_day > 20.0);
         assert_eq!(growth.second_half_mib_per_day, Some(0.0));
         assert_eq!(growth.bytes_per_connection, None);
         assert_eq!(growth.bytes_per_scrape, None);
+        assert_eq!(growth.bytes_per_client_operation, None);
+        assert_eq!(growth.projected_mib_per_day_at_assumed_client_rate, None);
     }
 
     #[test]

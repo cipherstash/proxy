@@ -6,6 +6,7 @@
 //! resolves a flat table namespace; changing either invariant can silently
 //! turn this into a passthrough workload that never exercises encryption.
 
+pub mod client;
 pub mod conformance;
 pub mod database;
 pub mod image_rig;

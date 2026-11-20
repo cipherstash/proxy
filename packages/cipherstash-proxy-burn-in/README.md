@@ -42,7 +42,7 @@ CI runs a bounded PostgreSQL 17 soak with `mise run test:burn-in` and uploads
 
 ## Idle RSS growth of a released image
 
-`rss-idle` measures how fast the resident memory of a released Proxy image grows while nothing is connected to it.
+`rss-idle` measures how fast the resident memory of a released Proxy image grows while nothing is connected to it, or under one client workload.
 It never builds Proxy: the measured binary is the one in the image, running in a Linux container on the same glibc allocator as production.
 It needs Docker, `openssl`, and the same CipherStash credentials as the soak.
 
@@ -67,7 +67,7 @@ The rig sets up the following for each run:
 - Proxy runs with `CS_DATABASE__WITH_TLS_VERIFICATION=true` and trusts a throwaway CA installed by the image's own entrypoint through `CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE`.
 - The entrypoint installs the EQL bundled in the image and its example schema, so the encrypt configuration has encrypted columns.
 - The Proxy container has a memory limit (`--memory-limit`, default `512m`).
-- No client ever connects to Proxy, including for readiness checks.
+- Unless a client workload is requested, no client ever connects to Proxy, including for readiness checks.
 
 The rig samples `/proc/1/smaps_rollup` in the Proxy container every 10 seconds and records total RSS and anonymous memory.
 Samples in the first 120 seconds are recorded but excluded from the fit, so startup allocation does not read as growth.
@@ -95,6 +95,51 @@ Pass `--scrape-interval-seconds` to enable Proxy's Prometheus exporter and scrap
 The scraper reuses the Proxy image for its `curl`, with the entrypoint replaced, and logs one HTTP status per scrape.
 The report then adds `prometheus_scrapes` to the run and `bytes_per_scrape` to each growth figure, and the run fails if no scrape succeeds after warm-up.
 For the exporter enabled but never scraped, pass `--proxy-env CS_PROMETHEUS__ENABLED=true` instead.
+
+### Client workloads
+
+Pass `--client-workload` to drive one kind of client activity through Proxy for the whole run.
+The rig process is the client, and reaches Proxy through a port Docker publishes on the host's loopback interface.
+
+| Workload | What each loop does | Unit |
+|---|---|---|
+| `tcp-probe` | Opens a TCP connection and closes it, as a Kubernetes `tcpSocket` probe does. | connect |
+| `startup-probe` | Sends a startup message, reads the authentication request and closes, as `pg_isready` does. | connect |
+| `login-churn` | Authenticates fully, then sends `Terminate`, as an unpooled client does. | connect |
+| `idle-pool` | Authenticates, then holds the connection idle until Proxy closes it at `connection_timeout` (120 seconds by default), and reconnects, as a pool that keeps idle connections does. | connect |
+| `pooled-queries` | Keeps the connection open and runs an insert, two selects, an update and a delete over the example `users` table. | query |
+
+Proxy 2.2.5 opens its PostgreSQL connection as soon as it accepts a client's TCP connection, so even `tcp-probe` costs Proxy a TLS connect to the database.
+`pooled-queries` reads and writes `encrypted_email` and `encrypted_salary`, which the image's example schema configures as EQL v2 encrypted columns, and checks that each row decrypts to what was inserted.
+A pooled connection that fails is replaced, so read `errors_total` before reading its slope: a run with errors is partly a `login-churn` run.
+
+`--client-interval-millis` (default 1000) is the period of each loop, and `--client-connections` (default 1) is the number of concurrent loops, which is the pool size for `idle-pool` and `pooled-queries`.
+For `idle-pool` the interval only bounds how fast a failed connect is retried.
+
+The report adds a `client` section with the operations and errors counted over the whole run and in the fit window.
+Each growth figure adds `bytes_per_client_operation` and `projected_mib_per_day_at_assumed_client_rate`.
+The assumed rate is the rate the run achieved, unless `--client-operations-per-day` gives a production rate to project at.
+
+```bash
+cargo run -p cipherstash-proxy-burn-in -- rss-idle --name login-churn \
+  --duration-seconds 3600 --warmup-seconds 600 --reload-interval-seconds 60 \
+  --client-workload login-churn --client-operations-per-day 8640 \
+  --output target/burn-in/login-churn-report.json
+```
+
+Run client workloads on a Linux host.
+On macOS, Colima reaches a published port through an SSH forward, and a churn workload breaks that forward along with the Docker socket that shares it.
+
+### Measuring a patched binary
+
+To compare a fix against a release, build an image that differs from the released one only in the Proxy binary, and pass it with `--image`:
+
+```dockerfile
+FROM cipherstash/proxy:2.2.5
+COPY cipherstash-proxy /usr/local/bin/cipherstash-proxy
+```
+
+The report records the image identifier and the version the binary prints, so the two runs cannot be confused.
 
 ### Running variants side by side
 
