@@ -76,6 +76,10 @@ struct SoakArgs {
 
 #[derive(Debug, Args)]
 struct RssIdleArgs {
+    /// Scenario name. It names the containers and the working directory, so
+    /// invocations with different names can run at the same time.
+    #[arg(long, default_value = "idle")]
+    name: String,
     /// Released Proxy image to measure, unmodified.
     #[arg(long, default_value = "cipherstash/proxy:2.2.5")]
     image: String,
@@ -95,6 +99,10 @@ struct RssIdleArgs {
     /// Each value is a separate run with its own containers; runs execute concurrently.
     #[arg(long = "reload-interval-seconds", default_values_t = [60, 1])]
     reload_intervals: Vec<u64>,
+    /// Enable Proxy's Prometheus exporter and scrape it at this interval from
+    /// a separate container. Without it the exporter stays off.
+    #[arg(long)]
+    scrape_interval_seconds: Option<u64>,
     /// Memory limit of each Proxy container, in `docker run --memory` syntax.
     #[arg(long, default_value = "512m")]
     memory_limit: String,
@@ -149,12 +157,14 @@ async fn main() -> Result<()> {
         Command::RssIdle(args) => {
             cipherstash_proxy_burn_in::image_rig::run(
                 cipherstash_proxy_burn_in::image_rig::Config {
+                    name: args.name,
                     image: args.image,
                     postgres_image: args.postgres_image,
                     duration: Duration::from_secs(args.duration_seconds),
                     warmup: Duration::from_secs(args.warmup_seconds),
                     sample_interval: Duration::from_secs(args.sample_interval_seconds),
                     reload_intervals: args.reload_intervals,
+                    scrape_interval: args.scrape_interval_seconds.map(Duration::from_secs),
                     memory_limit: args.memory_limit,
                     proxy_env: args.proxy_env,
                     output: args.output,

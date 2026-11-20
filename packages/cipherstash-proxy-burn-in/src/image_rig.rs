@@ -9,7 +9,8 @@
 //!
 //! The idle scenario opens zero client connections. The only activity is
 //! Proxy's own periodic schema and encrypt-config reloads, so any growth is
-//! time-driven.
+//! time-driven. A run can add a Prometheus scraper, which is also periodic and
+//! independent of client traffic.
 
 use std::{
     path::{Path, PathBuf},
@@ -23,7 +24,7 @@ use tokio::{io::AsyncWriteExt, process::Command, task::JoinSet};
 
 use crate::{
     slope,
-    soak::{preflight_output, workspace_root, write_report_atomic},
+    soak::{preflight_output, write_report_atomic},
 };
 
 /// Reload cadence Proxy uses when neither reload interval is configured.
@@ -35,6 +36,8 @@ const DATABASE_USER: &str = "cipherstash";
 const DATABASE_PASSWORD: &str = "burn-in-rss-rig";
 /// The kernel truncates `/proc/<pid>/comm` to 15 bytes.
 const PROXY_COMM: &str = "cipherstash-pro";
+/// Proxy's default Prometheus port.
+const PROMETHEUS_PORT: u16 = 9930;
 const PG_HBA: &str = "local all all trust\nhostssl all all all scram-sha-256\n";
 const REQUIRED_CREDENTIALS: [&str; 5] = [
     "CS_WORKSPACE_CRN",
@@ -51,12 +54,17 @@ const MIB: f64 = 1_048_576.0;
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Names the report's scenario, the containers and the working directory,
+    /// so differently named invocations can run at the same time.
+    pub name: String,
     pub image: String,
     pub postgres_image: String,
     pub duration: Duration,
     pub warmup: Duration,
     pub sample_interval: Duration,
     pub reload_intervals: Vec<u64>,
+    /// Enables Proxy's Prometheus exporter and scrapes it at this interval.
+    pub scrape_interval: Option<Duration>,
     pub memory_limit: String,
     pub proxy_env: Vec<(String, String)>,
     pub output: PathBuf,
@@ -66,12 +74,13 @@ pub struct Config {
 #[derive(Debug, Serialize)]
 struct Report {
     status: &'static str,
-    scenario: &'static str,
+    scenario: String,
     client_connections: u32,
     started_at_unix_seconds: u64,
     requested_duration_seconds: u64,
     warmup_seconds: u64,
     sample_interval_seconds: u64,
+    scrape_interval_seconds: Option<u64>,
     image: ImageIdentity,
     postgres_image: String,
     docker_server: String,
@@ -108,6 +117,8 @@ struct RunReport {
     elapsed_seconds: f64,
     fit_window_seconds: f64,
     postgres_connections: Connections,
+    /// Present only when the run scrapes Proxy's Prometheus exporter.
+    prometheus_scrapes: Option<Scrapes>,
     rss: Option<Growth>,
     anonymous: Option<Growth>,
     samples: Vec<Sample>,
@@ -129,6 +140,14 @@ struct Connections {
     tls_in_fit_window: u64,
 }
 
+/// Scrapes of Proxy's Prometheus exporter that returned HTTP 200.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+struct Scrapes {
+    successful_total: u64,
+    failed_total: u64,
+    successful_in_fit_window: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Sample {
     pub elapsed_millis: u128,
@@ -148,8 +167,14 @@ struct Growth {
     bytes_per_reload: f64,
     /// Growth per PostgreSQL connection observed in the fit window.
     bytes_per_connection: Option<f64>,
+    /// Growth per successful Prometheus scrape observed in the fit window.
+    bytes_per_scrape: Option<f64>,
     /// The fitted slope of this run, extrapolated to a day.
     observed_mib_per_day: f64,
+    /// The slope fitted to the second half of the fit window only. Startup
+    /// settling that outlasts the warm-up inflates `observed_mib_per_day` but
+    /// not this.
+    second_half_mib_per_day: Option<f64>,
     /// `bytes_per_reload` at the default 60s reload cadence. Equal to
     /// `observed_mib_per_day` only if growth scales with reload count.
     projected_mib_per_day_at_default_intervals: f64,
@@ -199,12 +224,13 @@ pub async fn run(config: Config) -> Result<()> {
     let completed = reports.iter().all(|report| report.status == "completed");
     let report = Report {
         status: if completed { "completed" } else { "failed" },
-        scenario: "idle",
+        scenario: config.name.clone(),
         client_connections: 0,
         started_at_unix_seconds,
         requested_duration_seconds: config.duration.as_secs(),
         warmup_seconds: config.warmup.as_secs(),
         sample_interval_seconds: config.sample_interval.as_secs(),
+        scrape_interval_seconds: config.scrape_interval.map(|interval| interval.as_secs()),
         image,
         postgres_image: config.postgres_image.clone(),
         docker_server,
@@ -233,6 +259,20 @@ pub async fn run(config: Config) -> Result<()> {
 }
 
 fn validate(config: &Config) -> Result<()> {
+    anyhow::ensure!(
+        !config.name.is_empty()
+            && config
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+        "--name must be lowercase letters, digits and hyphens, because it names containers"
+    );
+    anyhow::ensure!(
+        config
+            .scrape_interval
+            .is_none_or(|interval| !interval.is_zero()),
+        "--scrape-interval-seconds must be positive"
+    );
     anyhow::ensure!(
         !config.sample_interval.is_zero(),
         "--sample-interval-seconds must be positive"
@@ -312,12 +352,14 @@ struct Rig {
     network: String,
     postgres: String,
     proxy: String,
+    scraper: String,
     dir: PathBuf,
 }
 
 impl Rig {
     fn new(config: &Config, reload_interval: u64, work_dir: &Path) -> Self {
         let label = format!("reload-{reload_interval}s");
+        let label = format!("{}-{label}", config.name);
         let prefix = format!("burn-in-rss-{label}");
         Self {
             config: config.clone(),
@@ -325,6 +367,7 @@ impl Rig {
             network: prefix.clone(),
             postgres: format!("{prefix}-postgres"),
             proxy: format!("{prefix}-proxy"),
+            scraper: format!("{prefix}-scraper"),
             dir: work_dir.join(&label),
             label,
         }
@@ -340,6 +383,7 @@ impl Rig {
             elapsed_seconds: 0.0,
             fit_window_seconds: 0.0,
             postgres_connections: Connections::default(),
+            prometheus_scrapes: None,
             rss: None,
             anonymous: None,
             samples: Vec::new(),
@@ -369,6 +413,9 @@ impl Rig {
         self.start_postgres().await?;
         self.start_proxy().await?;
         self.wait_for_proxy_process().await?;
+        if let Some(interval) = self.config.scrape_interval {
+            self.start_scraper(interval).await?;
+        }
         println!("[{}] Proxy started; sampling", self.label);
 
         let mut series = tokio::fs::File::create(self.dir.join("samples.jsonl")).await?;
@@ -376,6 +423,7 @@ impl Rig {
         let mut ticker = tokio::time::interval(self.config.sample_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut connections_at_warmup = None;
+        let mut scrapes_at_warmup = None;
         let mut next_progress = Duration::ZERO;
         let status = loop {
             tokio::select! {
@@ -409,6 +457,9 @@ impl Rig {
             report.samples.push(sample);
             if connections_at_warmup.is_none() && elapsed >= self.config.warmup {
                 connections_at_warmup = Some(self.count_connections().await?);
+                if self.config.scrape_interval.is_some() {
+                    scrapes_at_warmup = Some(self.count_scrapes().await?);
+                }
             }
             if elapsed >= self.config.duration {
                 break "completed";
@@ -422,10 +473,29 @@ impl Rig {
                 .map_or(0, |warm| total.tls_total.saturating_sub(warm.tls_total)),
             ..total
         };
+        if self.config.scrape_interval.is_some() {
+            let total = self.count_scrapes().await?;
+            report.prometheus_scrapes = Some(Scrapes {
+                successful_in_fit_window: scrapes_at_warmup.map_or(0, |warm: Scrapes| {
+                    total.successful_total.saturating_sub(warm.successful_total)
+                }),
+                ..total
+            });
+        }
         if status == "completed" {
+            // A reload interval longer than the run is the control: Proxy
+            // loads once at startup and never reloads while it is measured.
+            let reloads_expected = Duration::from_secs(self.reload_interval)
+                < self.config.duration - self.config.warmup;
             anyhow::ensure!(
-                report.postgres_connections.tls_in_fit_window > 0,
+                !reloads_expected || report.postgres_connections.tls_in_fit_window > 0,
                 "Proxy opened no TLS connections to PostgreSQL after warm-up, so its reloaders did not run"
+            );
+            anyhow::ensure!(
+                report
+                    .prometheus_scrapes
+                    .is_none_or(|scrapes| scrapes.successful_in_fit_window > 0),
+                "no Prometheus scrape succeeded after warm-up, so the exporter was not exercised"
             );
         }
         Ok(status)
@@ -446,21 +516,15 @@ impl Rig {
             return;
         };
         report.fit_window_seconds = (last.elapsed_millis - first.elapsed_millis) as f64 / 1000.0;
-        let connections = report.postgres_connections.tls_in_fit_window;
-        report.rss = growth(
-            &fitted,
-            |sample| sample.rss_bytes,
-            self.reload_interval,
-            report.fit_window_seconds,
-            connections,
-        );
-        report.anonymous = growth(
-            &fitted,
-            |sample| sample.anonymous_bytes,
-            self.reload_interval,
-            report.fit_window_seconds,
-            connections,
-        );
+        let drivers = Drivers {
+            reload_interval: self.reload_interval,
+            connections: report.postgres_connections.tls_in_fit_window,
+            scrapes: report
+                .prometheus_scrapes
+                .map_or(0, |scrapes| scrapes.successful_in_fit_window),
+        };
+        report.rss = growth(&fitted, |sample| sample.rss_bytes, drivers);
+        report.anonymous = growth(&fitted, |sample| sample.anonymous_bytes, drivers);
     }
 
     /// Generates a throwaway CA and a server certificate for the PostgreSQL
@@ -639,6 +703,9 @@ impl Rig {
         .into_iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
+        if self.config.scrape_interval.is_some() {
+            env.push(("CS_PROMETHEUS__ENABLED".to_string(), "true".to_string()));
+        }
         env.extend(self.config.proxy_env.iter().cloned());
 
         let mut args: Vec<String> = [
@@ -702,6 +769,40 @@ impl Rig {
         }
     }
 
+    /// Scrapes Proxy's Prometheus exporter from a separate container on the rig
+    /// network, as a remote scraper would, and logs one HTTP status per scrape.
+    ///
+    /// The scraper reuses the Proxy image because it ships `curl`. Its
+    /// entrypoint is replaced, so no second Proxy runs.
+    async fn start_scraper(&self, interval: Duration) -> Result<()> {
+        let script = format!(
+            "while true; do curl --silent --output /dev/null --max-time 5 \
+             --write-out '%{{http_code}}\\n' http://{}:{PROMETHEUS_PORT}/metrics; sleep {}; done",
+            self.proxy,
+            interval.as_secs()
+        );
+        docker(&[
+            "run",
+            "--detach",
+            "--name",
+            &self.scraper,
+            "--network",
+            &self.network,
+            "--entrypoint",
+            "sh",
+            &self.config.image,
+            "-c",
+            &script,
+        ])
+        .await?;
+        Ok(())
+    }
+
+    async fn count_scrapes(&self) -> Result<Scrapes> {
+        let logs = docker(&["logs", &self.scraper]).await?;
+        Ok(count_scrapes(&logs))
+    }
+
     async fn sample(&self, started_at: Instant) -> Result<Sample> {
         let rollup = docker(&[
             "exec",
@@ -747,7 +848,11 @@ impl Rig {
     }
 
     async fn save_logs(&self) {
-        for (container, file) in [(&self.proxy, "proxy.log"), (&self.postgres, "postgres.log")] {
+        for (container, file) in [
+            (&self.proxy, "proxy.log"),
+            (&self.postgres, "postgres.log"),
+            (&self.scraper, "scraper.log"),
+        ] {
             if let Ok(logs) = docker_combined(&["logs", container]).await {
                 let _ = tokio::fs::write(self.dir.join(file), logs).await;
             }
@@ -755,24 +860,45 @@ impl Rig {
     }
 
     async fn remove(&self) {
-        let _ = docker(&["rm", "--force", "--volumes", &self.proxy, &self.postgres]).await;
+        let _ = docker(&[
+            "rm",
+            "--force",
+            "--volumes",
+            &self.scraper,
+            &self.proxy,
+            &self.postgres,
+        ])
+        .await;
         let _ = docker(&["network", "rm", &self.network]).await;
     }
 }
 
-fn growth(
-    samples: &[&Sample],
-    value: impl Fn(&Sample) -> u64,
+/// The periodic activity counted in a run's fit window, which growth is
+/// expressed per unit of.
+#[derive(Debug, Clone, Copy)]
+struct Drivers {
     reload_interval: u64,
-    fit_window_seconds: f64,
     connections: u64,
-) -> Option<Growth> {
+    scrapes: u64,
+}
+
+fn growth(samples: &[&Sample], value: impl Fn(&Sample) -> u64, drivers: Drivers) -> Option<Growth> {
     let points: Vec<(f64, f64)> = samples
         .iter()
         .map(|sample| (sample.elapsed_millis as f64 / 1000.0, value(sample) as f64))
         .collect();
     let fit = slope::fit(&points)?;
-    let bytes_per_reload = fit.slope_per_second * reload_interval as f64;
+    let (first_second, last_second) = (points.first()?.0, points.last()?.0);
+    let fit_window_seconds = last_second - first_second;
+    let midpoint = first_second + fit_window_seconds / 2.0;
+    let second_half: Vec<(f64, f64)> = points
+        .iter()
+        .copied()
+        .filter(|(second, _)| *second >= midpoint)
+        .collect();
+    let total_growth = fit.slope_per_second * fit_window_seconds;
+    let per = |count: u64| (count > 0).then(|| total_growth / count as f64);
+    let bytes_per_reload = fit.slope_per_second * drivers.reload_interval as f64;
     Some(Growth {
         first_bytes: value(samples.first()?),
         last_bytes: value(samples.last()?),
@@ -780,9 +906,11 @@ fn growth(
         slope_bytes_per_second: fit.slope_per_second,
         r_squared: fit.r_squared,
         bytes_per_reload,
-        bytes_per_connection: (connections > 0)
-            .then(|| fit.slope_per_second * fit_window_seconds / connections as f64),
+        bytes_per_connection: per(drivers.connections),
+        bytes_per_scrape: per(drivers.scrapes),
         observed_mib_per_day: fit.slope_per_second * SECONDS_PER_DAY / MIB,
+        second_half_mib_per_day: slope::fit(&second_half)
+            .map(|fit| fit.slope_per_second * SECONDS_PER_DAY / MIB),
         projected_mib_per_day_at_default_intervals: bytes_per_reload
             * (SECONDS_PER_DAY / DEFAULT_RELOAD_INTERVAL_SECONDS as f64)
             / MIB,
@@ -818,6 +946,19 @@ fn count_authorized_connections(postgres_logs: &str) -> Connections {
     connections
 }
 
+/// Counts the HTTP statuses the scraper logged, one line per scrape.
+fn count_scrapes(scraper_logs: &str) -> Scrapes {
+    let mut scrapes = Scrapes::default();
+    for line in scraper_logs.lines().map(str::trim) {
+        match line {
+            "200" => scrapes.successful_total += 1,
+            "" => {}
+            _ => scrapes.failed_total += 1,
+        }
+    }
+    scrapes
+}
+
 fn absolute(path: &Path) -> Result<String> {
     let path = if path.is_absolute() {
         path.to_path_buf()
@@ -842,10 +983,12 @@ async fn docker_combined(args: &[&str]) -> Result<String> {
     Ok(combined)
 }
 
+/// Every path passed to Docker is absolute, so the working directory is left
+/// alone. That keeps a cross-compiled rig binary usable on another host, where
+/// the build machine's workspace path does not exist.
 async fn docker_output(args: &[&str]) -> Result<std::process::Output> {
     let output = Command::new("docker")
         .args(args)
-        .current_dir(workspace_root())
         .stdin(Stdio::null())
         .output()
         .await
@@ -861,8 +1004,8 @@ async fn docker_output(args: &[&str]) -> Result<std::process::Output> {
 
 fn print_summary(report: &Report, output: &Path) {
     println!(
-        "\nidle RSS growth of {} (Proxy {}), TLS verified, zero client connections",
-        report.image.reference, report.image.proxy_version
+        "\n{} RSS growth of {} (Proxy {}), TLS verified, zero client connections",
+        report.scenario, report.image.reference, report.image.proxy_version
     );
     for run in &report.runs {
         println!(
@@ -873,12 +1016,19 @@ fn print_summary(report: &Report, output: &Path) {
             run.postgres_connections.tls_in_fit_window,
             run.fit_window_seconds
         );
+        if let Some(scrapes) = run.prometheus_scrapes {
+            println!(
+                "  {} Prometheus scrapes in the fit window ({} failed in total)",
+                scrapes.successful_in_fit_window, scrapes.failed_total
+            );
+        }
         for (name, growth) in [("rss", &run.rss), ("anonymous", &run.anonymous)] {
             let Some(growth) = growth else { continue };
             println!(
-                "  {name:<9} {:>10.1} bytes/reload  {:>8.2} MiB/day observed  {:>8.2} MiB/day at 60s reloads  R² {}",
+                "  {name:<9} {:>10.1} bytes/reload  {:>8.2} MiB/day observed  {:>8.2} MiB/day second half  {:>8.2} MiB/day at 60s reloads  R² {}",
                 growth.bytes_per_reload,
                 growth.observed_mib_per_day,
+                growth.second_half_mib_per_day.unwrap_or(f64::NAN),
                 growth.projected_mib_per_day_at_default_intervals,
                 growth
                     .r_squared
@@ -949,12 +1099,55 @@ LOG:  connection authorized: user=cipherstash database=cipherstash SSL enabled (
             })
             .collect();
         let fitted: Vec<&Sample> = samples.iter().collect();
-        let growth = growth(&fitted, |sample| sample.rss_bytes, 1, 100.0, 200).unwrap();
+        let drivers = Drivers {
+            reload_interval: 1,
+            connections: 200,
+            scrapes: 50,
+        };
+        let growth = growth(&fitted, |sample| sample.rss_bytes, drivers).unwrap();
         assert!((growth.slope_bytes_per_second - 1024.0).abs() < 1e-6);
         assert!((growth.bytes_per_reload - 1024.0).abs() < 1e-6);
         assert!((growth.bytes_per_connection.unwrap() - 512.0).abs() < 1e-6);
+        assert!((growth.bytes_per_scrape.unwrap() - 2048.0).abs() < 1e-6);
         assert!((growth.observed_mib_per_day - 84.375).abs() < 1e-6);
+        assert!((growth.second_half_mib_per_day.unwrap() - 84.375).abs() < 1e-6);
         // 1024 bytes per reload at 1,440 reloads per day.
         assert!((growth.projected_mib_per_day_at_default_intervals - 1.40625).abs() < 1e-6);
+    }
+
+    #[test]
+    fn second_half_slope_ignores_settling_that_outlasts_warmup() {
+        // Rises for the first half of the window, then stays flat.
+        let samples: Vec<Sample> = (0..=20u64)
+            .map(|step| Sample {
+                elapsed_millis: u128::from(step) * 10_000,
+                rss_bytes: 1_000_000 + step.min(10) * 10_240,
+                anonymous_bytes: 0,
+            })
+            .collect();
+        let fitted: Vec<&Sample> = samples.iter().collect();
+        let drivers = Drivers {
+            reload_interval: 60,
+            connections: 0,
+            scrapes: 0,
+        };
+        let growth = growth(&fitted, |sample| sample.rss_bytes, drivers).unwrap();
+        assert!(growth.observed_mib_per_day > 20.0);
+        assert_eq!(growth.second_half_mib_per_day, Some(0.0));
+        assert_eq!(growth.bytes_per_connection, None);
+        assert_eq!(growth.bytes_per_scrape, None);
+    }
+
+    #[test]
+    fn counts_successful_and_failed_scrapes() {
+        // curl reports 000 when it cannot connect, as before the exporter is up.
+        assert_eq!(
+            count_scrapes("000\n200\n200\n\n503\n200\n"),
+            Scrapes {
+                successful_total: 3,
+                failed_total: 2,
+                successful_in_fit_window: 0,
+            }
+        );
     }
 }

@@ -78,10 +78,40 @@ For each run the report gives, for RSS and for anonymous memory:
 - `bytes_per_reload`, the growth per reload interval, in which the schema and encrypt-config reloaders each fire once.
 - `bytes_per_connection`, using the TLS connections PostgreSQL logged in the fit window.
 - `observed_mib_per_day`, the fitted slope of that run extrapolated to a day.
+- `second_half_mib_per_day`, the slope fitted to the second half of the fit window only.
 - `projected_mib_per_day_at_default_intervals`, which is `bytes_per_reload` at 1,440 reloads per day.
 
 The projection equals the observed rate only if growth scales with the number of reloads.
+At the default 60s cadence RSS can keep settling in steps for most of an hour, which inflates `observed_mib_per_day`.
+Read `second_half_mib_per_day` beside it, or raise `--warmup-seconds`.
 A low `r_squared` means the series is noise or isolated steps rather than steady growth, so read the slope with the raw `samples` beside it.
 
 The raw series is also appended to `target/burn-in/rss-rig/<run>/samples.jsonl` as it is collected, next to the Proxy and PostgreSQL logs, so an interrupted run keeps its evidence.
 Pass `--proxy-env NAME=VALUE` to add environment to Proxy, for example `MALLOC_ARENA_MAX=2`.
+
+### Prometheus scraping
+
+Pass `--scrape-interval-seconds` to enable Proxy's Prometheus exporter and scrape it from a separate container on the rig network.
+The scraper reuses the Proxy image for its `curl`, with the entrypoint replaced, and logs one HTTP status per scrape.
+The report then adds `prometheus_scrapes` to the run and `bytes_per_scrape` to each growth figure, and the run fails if no scrape succeeds after warm-up.
+For the exporter enabled but never scraped, pass `--proxy-env CS_PROMETHEUS__ENABLED=true` instead.
+
+### Running variants side by side
+
+`--name` (default `idle`) names the scenario in the report, the containers, and the directory under `rss-rig/`.
+Invocations with different names can run at the same time, for example a scraped and an unscraped run:
+
+```bash
+cargo run -p cipherstash-proxy-burn-in -- rss-idle --name prom-scraped \
+  --duration-seconds 7200 --reload-interval-seconds 60 --scrape-interval-seconds 15 \
+  --output target/burn-in/prom/scraped-report.json
+```
+
+A reload interval longer than the run is the control: Proxy loads its schema and encrypt configuration once at startup and never reloads while it is measured.
+
+### Measuring on another host
+
+RSS must be measured on the architecture it is reported for.
+Under emulation the container process is the emulator (`qemu-x86_64` on an arm64 Docker host), so its RSS includes the emulator's own memory.
+To measure `linux/amd64` from an arm64 machine, cross-compile the rig, copy the binary to an amd64 Linux host with Docker and `openssl`, and run it there with the CipherStash credentials in its environment.
+The rig sets no working directory and passes only absolute paths to Docker, so the binary does not need a checkout beside it.
