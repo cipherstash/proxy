@@ -451,7 +451,7 @@ fn refresh_counters(report: &mut Report, operations: &AtomicU64, errors: &Atomic
     report.errors = errors.load(Ordering::Relaxed);
 }
 
-async fn preflight_output(path: &Path) -> Result<()> {
+pub(crate) async fn preflight_output(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -463,7 +463,7 @@ async fn preflight_output(path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn write_report_atomic(path: &Path, report: &Report) -> Result<()> {
+pub(crate) async fn write_report_atomic(path: &Path, report: &impl Serialize) -> Result<()> {
     let temporary = temporary_report_path(path);
     tokio::fs::write(&temporary, serde_json::to_vec_pretty(report)?)
         .await
@@ -491,7 +491,7 @@ fn source_commit() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn workspace_root() -> &'static Path {
+pub(crate) fn workspace_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
