@@ -111,7 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         info!(msg = "Database connection closed after cancel request");
                                     }
                                     Error::ConnectionTimeout{..} => {
-                                        warn!(msg = "Database connection timeout", error = err.to_string());
+                                        // A pool's idle connections reach the timeout routinely
+                                        info!(msg = "Database connection timeout", error = err.to_string());
                                     }
                                     _ => {
                                         error!(msg = "Database connection error", error = %ErrorChain(&err));
