@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795135686777,
+  "lastUpdate": 1795143158347,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30230,6 +30230,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 34.373474,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ca82d68e016a09e2215e0254558d4888b49f1e9e",
+          "message": "docs: add audit context dossiers for cipherstash-proxy",
+          "timestamp": "2026-11-17T09:48:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/513/commits/ca82d68e016a09e2215e0254558d4888b49f1e9e"
+        },
+        "date": 1795143156737,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 29.156187,
             "unit": "Number"
           }
         ]
