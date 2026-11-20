@@ -311,13 +311,10 @@ where
     if let Err(ref err @ Error::ConnectionTimeout { .. }) = &result {
         let error_response = ErrorResponse::connection_timeout(err.to_string());
         if let Ok(bytes) = BytesMut::try_from(error_response) {
+            // The writer task sends everything queued before it closes the connection, and the
+            // wait below lets it finish, so the client receives this before the connection closes.
             let _ = timeout_sender.send(bytes);
         }
-        // Best-effort yield to allow ChannelWriter to flush the error response
-        // before the connection tears down. Not guaranteed — if the runtime doesn't
-        // schedule the writer task before teardown, the client may see a connection
-        // reset instead of the ErrorResponse.
-        tokio::task::yield_now().await;
     }
 
     // Drop frontend and backend to drop their senders and close the channel
