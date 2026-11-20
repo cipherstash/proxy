@@ -25,7 +25,7 @@ enum Command {
     Conformance(DatabaseArgs),
     /// Build and start the proxy in release mode, then run a timed stress workload.
     Soak(SoakArgs),
-    /// Measure idle RSS growth of a released Proxy image, with zero client connections.
+    /// Measure RSS growth of a released Proxy image, idle or under one client workload.
     RssIdle(RssIdleArgs),
 }
 
@@ -103,6 +103,20 @@ struct RssIdleArgs {
     /// a separate container. Without it the exporter stays off.
     #[arg(long)]
     scrape_interval_seconds: Option<u64>,
+    /// Drive one client workload through Proxy: `tcp-probe`, `startup-probe`,
+    /// `login-churn`, `idle-pool` or `pooled-queries`. Without it nothing connects.
+    #[arg(long)]
+    client_workload: Option<cipherstash_proxy_burn_in::client::Workload>,
+    /// Period of each client connection's loop: one connect, or one query.
+    #[arg(long, default_value_t = 1000)]
+    client_interval_millis: u64,
+    /// Concurrent client loops. For `idle-pool` and `pooled-queries` this is the pool size.
+    #[arg(long, default_value_t = 1)]
+    client_connections: usize,
+    /// Production rate, in connects or queries per day, at which growth per
+    /// client operation is projected. Defaults to the rate the run achieved.
+    #[arg(long)]
+    client_operations_per_day: Option<f64>,
     /// Memory limit of each Proxy container, in `docker run --memory` syntax.
     #[arg(long, default_value = "512m")]
     memory_limit: String,
@@ -165,6 +179,14 @@ async fn main() -> Result<()> {
                     sample_interval: Duration::from_secs(args.sample_interval_seconds),
                     reload_intervals: args.reload_intervals,
                     scrape_interval: args.scrape_interval_seconds.map(Duration::from_secs),
+                    client: args.client_workload.map(|workload| {
+                        cipherstash_proxy_burn_in::client::Config {
+                            workload,
+                            interval: Duration::from_millis(args.client_interval_millis),
+                            connections: args.client_connections,
+                            assumed_operations_per_day: args.client_operations_per_day,
+                        }
+                    }),
                     memory_limit: args.memory_limit,
                     proxy_env: args.proxy_env,
                     output: args.output,
