@@ -8,7 +8,9 @@
 
 pub mod conformance;
 pub mod database;
+pub mod image_rig;
 pub mod resource;
+pub mod slope;
 pub mod soak;
 
 pub const SCHEMA_MIGRATION: &str = include_str!("../migrations/0001_schema.sql");
