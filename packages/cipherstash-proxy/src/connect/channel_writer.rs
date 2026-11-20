@@ -1,4 +1,11 @@
 use bytes::BytesMut;
+use std::{
+    io,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -18,6 +25,7 @@ where
     writer: W,
     receiver: Receiver,
     sender: Sender,
+    bytes_written: Arc<AtomicU64>,
     client_id: i32,
 }
 
@@ -33,6 +41,7 @@ where
             writer,
             receiver,
             sender,
+            bytes_written: Arc::new(AtomicU64::new(0)),
             client_id,
         }
     }
@@ -55,7 +64,7 @@ where
                 ?bytes
             );
 
-            match self.writer.write_all(&bytes).await {
+            match write_all(&mut self.writer, &self.bytes_written, &bytes).await {
                 Ok(_) => {
                     debug!(target: PROTOCOL,
                         client_id = self.client_id,
@@ -110,4 +119,29 @@ where
     pub fn sender(&self) -> Sender {
         self.sender.clone()
     }
+
+    /// A count of the bytes the writer has accepted so far.
+    ///
+    /// The count goes up each time the writer accepts some bytes, even part of a message, so it
+    /// shows whether a client is still reading. It stops going up when the client stops reading
+    /// and the buffers between Proxy and the client are full.
+    pub fn bytes_written(&self) -> Arc<AtomicU64> {
+        self.bytes_written.clone()
+    }
+}
+
+/// Writes all of `bytes`, adding to `bytes_written` as the writer accepts them
+async fn write_all<W>(writer: &mut W, bytes_written: &AtomicU64, mut bytes: &[u8]) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    while !bytes.is_empty() {
+        let written = writer.write(bytes).await?;
+        if written == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
+        }
+        bytes_written.fetch_add(written as u64, Ordering::Relaxed);
+        bytes = &bytes[written..];
+    }
+    Ok(())
 }

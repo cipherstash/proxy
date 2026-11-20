@@ -1612,6 +1612,10 @@ where
         self.config.database.connection_timeout()
     }
 
+    pub fn client_close_timeout(&self) -> std::time::Duration {
+        self.config.database.client_close_timeout()
+    }
+
     pub fn mapping_disabled(&self) -> bool {
         self.config.mapping_disabled()
     }

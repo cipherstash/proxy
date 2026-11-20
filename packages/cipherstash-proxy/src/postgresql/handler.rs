@@ -22,7 +22,9 @@ use bytes::BytesMut;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
+use std::sync::atomic::Ordering;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 ///
 ///
@@ -250,6 +252,10 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 /// Relays messages between an authenticated client and PostgreSQL until either side closes the
 /// connection or the connection times out, then closes the client's side of the connection.
 ///
+/// A client that reads slowly still receives everything Proxy has for it before its side closes.
+/// A client that has stopped reading does not hold the connection: once it has read nothing for
+/// the connection timeout, Proxy closes its side without sending the rest.
+///
 /// Always returns the error that ended the connection.
 ///
 pub(super) async fn relay<CR, CW, SR, SW, S>(
@@ -279,7 +285,8 @@ where
     let mut backend = Backend::new(channel_writer.sender(), server_reader, context.clone());
 
     let timeout_sender = channel_writer.sender();
-    let channel_writer_task = tokio::spawn(channel_writer.receive());
+    let bytes_written = channel_writer.bytes_written();
+    let mut channel_writer_task = tokio::spawn(channel_writer.receive());
 
     let client_to_server = async {
         loop {
@@ -329,12 +336,41 @@ where
     // Wait for channel writer to finish shutdown sequence
     // Every sender is now dropped, which closes the channel and allows
     // the writer task to complete its shutdown
-    if let Err(err) = channel_writer_task.await {
-        error!(
-            client_id,
-            msg = "Channel writer task panicked",
-            error = ?err
-        );
+    //
+    // The writer task cannot finish while the client is not reading, so the wait is limited. The
+    // limit is on how long the client goes without reading, not on the whole wait, so that a slow
+    // client still receives everything that is queued for it. A client that stops reading is
+    // found after one to two timeouts, because the count is only read once per timeout.
+    let close_timeout = context.client_close_timeout();
+    let mut written = bytes_written.load(Ordering::Relaxed);
+    loop {
+        match timeout(close_timeout, &mut channel_writer_task).await {
+            Ok(Ok(())) => break,
+            Ok(Err(err)) => {
+                error!(
+                    client_id,
+                    msg = "Channel writer task panicked",
+                    error = ?err
+                );
+                break;
+            }
+            Err(_) => {
+                let written_now = bytes_written.load(Ordering::Relaxed);
+                if written_now == written {
+                    // Nothing is wrong with Proxy, and the connection has already ended
+                    info!(
+                        client_id,
+                        msg = "Client stopped reading, closing its connection without sending the rest",
+                        timeout_ms = close_timeout.as_millis(),
+                    );
+                    // Ending the task drops the client's side of the connection, which closes it
+                    channel_writer_task.abort();
+                    let _ = channel_writer_task.await;
+                    break;
+                }
+                written = written_now;
+            }
+        }
     }
 
     result?;

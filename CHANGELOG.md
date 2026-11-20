@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Connections held by a client that has stopped reading**: Proxy now releases a connection that has ended when the client is no longer reading from it. Previously, if a client stopped reading while Proxy still had data to send it, for example a client that hung or lost its network part-way through a large result, the connection stayed in memory with its socket after PostgreSQL closed it or Proxy timed it out, until Proxy was restarted. The `cipherstash_proxy_clients_active_connections` metric also stayed up. Proxy now closes the client's side of such a connection once the client has read nothing for the connection timeout (`connection_timeout`, 120 seconds by default), and logs `Client stopped reading, closing its connection without sending the rest` at `info` level. Proxy can take up to twice the connection timeout to close it. When the connection timeout is disabled with `0`, the limit is 120 seconds, because the connection has already ended. A slow client that is still reading is not cut off: it receives everything Proxy has for it before the connection closes, including the error that reports a connection timeout. Affects versions from 2.2.1. No configuration change is required.
+
 ## [2.2.6] - 2026-11-19
 
 ### Changed
