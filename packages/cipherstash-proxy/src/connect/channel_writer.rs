@@ -79,9 +79,13 @@ where
             msg = "Recv loop exited - channel closed, beginning shutdown",
         );
 
+        // The connection is ending, and the usual cause of a failure from here on is a client that
+        // has already gone, for example one that crashed or was killed. There is nothing to act
+        // on, so these failures are logged at debug level.
+
         // Flush any pending writes before shutdown
         if let Err(err) = self.writer.flush().await {
-            error!(target: PROTOCOL,
+            debug!(target: PROTOCOL,
                 client_id = self.client_id,
                 msg = "Error flushing writer during shutdown",
                 error = ?err
@@ -90,7 +94,7 @@ where
 
         // Shutdown the write half to send FIN and properly close the connection
         if let Err(err) = self.writer.shutdown().await {
-            error!(target: PROTOCOL,
+            debug!(target: PROTOCOL,
                 client_id = self.client_id,
                 msg = "Error shutting down writer",
                 error = ?err

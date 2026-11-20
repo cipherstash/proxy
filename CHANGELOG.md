@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.2.6] - 2026-11-19
 
+### Changed
+
+- **Log messages when a connection ends**: Proxy now logs a message each time an authenticated client connection ends: `Database connection closed by client` or `Database connection timeout` at `info` level, or `Database connection error` at `error` level. These appear at the default log level. Versions 2.2.1 to 2.2.5 did not log them, because Proxy never released the connection (see the fix below). `Database connection timeout` is now logged at `info` level instead of `warn`, because the idle connections of a connection pool reach the timeout routinely. With the default `connection_timeout` of 120 seconds, expect one message for each connection that stays idle for that long.
+
 ### Fixed
 
 - **Memory and file descriptor growth as client connections close**: Proxy now releases a client connection when it ends. Previously every authenticated connection stayed in memory after it ended, along with its socket and the copy of the database schema it was using, until Proxy was restarted. This happened whether the client closed the connection, PostgreSQL closed it, or Proxy closed it after the connection timeout. Memory and open file descriptors therefore grew with the number of connections opened rather than with query volume, so a deployment whose connection pool replaces connections regularly saw steady growth even when idle. The `cipherstash_proxy_clients_active_connections` metric also never went down, and a client was not disconnected when PostgreSQL closed its connection or when Proxy timed it out. Affects versions 2.2.1 to 2.2.5. No configuration change is required.
