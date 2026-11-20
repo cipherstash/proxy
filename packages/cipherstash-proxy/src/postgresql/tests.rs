@@ -2963,3 +2963,282 @@ mod type_check_fallback {
         forwarded_unchanged(&mut connection, sql).await;
     }
 }
+
+/// Proxy finishes with a connection when it ends, however it ends, so that a connection that is
+/// over holds no socket, task or memory.
+mod connection_close {
+    use super::*;
+    use crate::postgresql::handler::relay;
+    use std::time::Duration;
+    use tokio::{task::JoinHandle, time::timeout};
+
+    /// How long Proxy has to finish with a connection
+    const PROMPTLY: Duration = Duration::from_secs(5);
+
+    /// The client's and PostgreSQL's ends of one authenticated connection through Proxy
+    struct Relayed {
+        client: DuplexStream,
+        server: DuplexStream,
+        relay: JoinHandle<Result<(), Error>>,
+    }
+
+    fn relayed(config: TandemConfig) -> Relayed {
+        relayed_with_client_buffer(64 * 1024, config)
+    }
+
+    /// As `relayed`, for a client whose connection holds at most `client_buffer` bytes that the
+    /// client has not read yet
+    fn relayed_with_client_buffer(client_buffer: usize, config: TandemConfig) -> Relayed {
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(config),
+            Arc::new(EncryptConfig::default()),
+            Arc::new(Schema::new("public")),
+            TestService::default(),
+            reload_sender,
+        );
+
+        let (client, proxy_client) = tokio::io::duplex(client_buffer);
+        let (client_reader, client_writer) = tokio::io::split(proxy_client);
+        let (server, proxy_server) = tokio::io::duplex(64 * 1024);
+        let (server_reader, server_writer) = tokio::io::split(proxy_server);
+
+        Relayed {
+            client,
+            server,
+            relay: tokio::spawn(relay(
+                client_reader,
+                client_writer,
+                server_reader,
+                server_writer,
+                context,
+            )),
+        }
+    }
+
+    /// The error the connection ended with
+    async fn ended_with(relay: JoinHandle<Result<(), Error>>) -> Error {
+        ended_within(PROMPTLY, relay).await
+    }
+
+    /// The error the connection ended with, when Proxy has `limit` to finish with it
+    async fn ended_within(limit: Duration, relay: JoinHandle<Result<(), Error>>) -> Error {
+        timeout(limit, relay)
+            .await
+            .expect("Proxy is still holding the connection")
+            .unwrap()
+            .unwrap_err()
+    }
+
+    /// Everything `stream` receives until Proxy closes its end
+    async fn received_until_closed(stream: &mut DuplexStream) -> Vec<u8> {
+        let mut received = Vec::new();
+        timeout(PROMPTLY, stream.read_to_end(&mut received))
+            .await
+            .expect("Proxy is still holding the connection open")
+            .unwrap();
+        received
+    }
+
+    /// The most that a stalled client's connection holds before Proxy can send it nothing more
+    const STALLED_CLIENT_BUFFER: usize = 64;
+
+    /// A message from PostgreSQL that Proxy passes on to the client as it is, and that is several
+    /// times larger than a stalled client's connection holds
+    fn more_than_a_stalled_client_holds() -> BytesMut {
+        message(b'N', &[0; 16 * STALLED_CLIENT_BUFFER])
+    }
+
+    /// Everything a client receives until Proxy closes its end, when the client reads a little
+    /// at a time and waits for `pause` before each read
+    async fn received_slowly_until_closed(stream: &mut DuplexStream, pause: Duration) -> Vec<u8> {
+        let mut received = Vec::new();
+        let mut chunk = [0; STALLED_CLIENT_BUFFER];
+        timeout(PROMPTLY, async {
+            loop {
+                tokio::time::sleep(pause).await;
+                match stream.read(&mut chunk).await.unwrap() {
+                    0 => break,
+                    read => received.extend_from_slice(&chunk[..read]),
+                }
+            }
+        })
+        .await
+        .expect("Proxy is still holding the connection open");
+        received
+    }
+
+    #[tokio::test]
+    async fn a_connection_the_client_closes_is_finished_with() {
+        let Relayed {
+            client,
+            mut server,
+            relay,
+        } = relayed(TandemConfig::for_testing());
+
+        drop(client);
+
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+        // PostgreSQL is told that the client has gone, and its connection is closed
+        assert_eq!(
+            received_until_closed(&mut server).await,
+            message(b'X', &[]).to_vec()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_postgresql_closes_is_closed_for_the_client() {
+        let Relayed {
+            mut client,
+            server,
+            relay,
+        } = relayed(TandemConfig::for_testing());
+
+        drop(server);
+
+        assert_eq!(received_until_closed(&mut client).await, Vec::<u8>::new());
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_times_out_is_closed_after_the_client_is_told() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            server: _server,
+            relay,
+        } = relayed(config);
+
+        let received = received_until_closed(&mut client).await;
+
+        assert_eq!(received.first(), Some(&b'E'));
+        assert!(String::from_utf8_lossy(&received).contains("FATAL"));
+        assert!(matches!(
+            ended_with(relay).await,
+            Error::ConnectionTimeout { .. }
+        ));
+    }
+
+    // The tests of a client that stops reading run on paused time, which moves on only when
+    // Proxy has nothing left to do, so they do not depend on how fast the test machine is.
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connection_postgresql_closes_is_finished_with_when_the_client_has_stopped_reading() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            mut server,
+            relay,
+        } = relayed_with_client_buffer(STALLED_CLIENT_BUFFER, config);
+
+        let sent = more_than_a_stalled_client_holds();
+        server.write_all(&sent).await.unwrap();
+        drop(server);
+
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+        // The client's connection is closed, holding only what it had room for
+        assert_eq!(
+            received_until_closed(&mut client).await,
+            sent[..STALLED_CLIENT_BUFFER].to_vec()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connection_that_times_out_is_finished_with_when_the_client_has_stopped_reading() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            mut server,
+            relay,
+        } = relayed_with_client_buffer(STALLED_CLIENT_BUFFER, config);
+
+        let sent = more_than_a_stalled_client_holds();
+        server.write_all(&sent).await.unwrap();
+
+        assert!(matches!(
+            ended_with(relay).await,
+            Error::ConnectionTimeout { .. }
+        ));
+        // The client's connection is closed, holding only what it had room for
+        assert_eq!(
+            received_until_closed(&mut client).await,
+            sent[..STALLED_CLIENT_BUFFER].to_vec()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connection_with_no_timeout_is_finished_with_when_the_client_has_stopped_reading() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(0);
+        let Relayed {
+            client: _client,
+            mut server,
+            relay,
+        } = relayed_with_client_buffer(STALLED_CLIENT_BUFFER, config);
+
+        server
+            .write_all(&more_than_a_stalled_client_holds())
+            .await
+            .unwrap();
+        drop(server);
+
+        // Longer than the default connection timeout, which is the limit when there is no timeout
+        let limit = Duration::from_secs(600);
+        assert!(matches!(
+            ended_within(limit, relay).await,
+            Error::ConnectionClosed
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_client_receives_everything_before_a_connection_postgresql_closes_is_closed() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            mut server,
+            relay,
+        } = relayed_with_client_buffer(STALLED_CLIENT_BUFFER, config);
+
+        let sent = more_than_a_stalled_client_holds();
+        server.write_all(&sent).await.unwrap();
+        drop(server);
+
+        // The client takes several times the connection timeout to read it all, and never goes
+        // as long as the timeout without reading
+        let received = received_slowly_until_closed(&mut client, Duration::from_millis(30)).await;
+
+        assert_eq!(received, sent.to_vec());
+        assert!(matches!(ended_with(relay).await, Error::ConnectionClosed));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_client_receives_everything_before_a_connection_that_times_out_is_closed() {
+        let mut config = TandemConfig::for_testing();
+        config.database.connection_timeout = Some(50);
+        let Relayed {
+            mut client,
+            mut server,
+            relay,
+        } = relayed_with_client_buffer(STALLED_CLIENT_BUFFER, config);
+
+        let sent = more_than_a_stalled_client_holds();
+        server.write_all(&sent).await.unwrap();
+
+        let received = received_slowly_until_closed(&mut client, Duration::from_millis(30)).await;
+
+        // What PostgreSQL sent, then the error that tells the client the connection timed out
+        let (relayed, error) = received.split_at(sent.len());
+        assert_eq!(relayed, &sent[..]);
+        assert_eq!(error.first(), Some(&b'E'));
+        assert!(String::from_utf8_lossy(error).contains("FATAL"));
+        assert!(matches!(
+            ended_with(relay).await,
+            Error::ConnectionTimeout { .. }
+        ));
+    }
+}

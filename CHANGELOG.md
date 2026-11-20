@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Connections held by a client that has stopped reading**: Proxy now releases a connection that has ended when the client is no longer reading from it. Previously, if a client stopped reading while Proxy still had data to send it, for example a client that hung or lost its network part-way through a large result, the connection stayed in memory with its socket after PostgreSQL closed it or Proxy timed it out, until Proxy was restarted. The `cipherstash_proxy_clients_active_connections` metric also stayed up. Proxy now closes the client's side of such a connection once the client has read nothing for the connection timeout (`connection_timeout`, 120 seconds by default), and logs `Client stopped reading, closing its connection without sending the rest` at `info` level. Proxy can take up to twice the connection timeout to close it. When the connection timeout is disabled with `0`, the limit is 120 seconds, because the connection has already ended. A slow client that is still reading is not cut off: it receives everything Proxy has for it before the connection closes, including the error that reports a connection timeout. Affects versions from 2.2.1. No configuration change is required.
+
+## [2.2.6] - 2026-11-19
+
+### Changed
+
+- **Log messages when a connection ends**: Proxy now logs a message each time an authenticated client connection ends: `Database connection closed by client` or `Database connection timeout` at `info` level, or `Database connection error` at `error` level. These appear at the default log level. Versions 2.2.1 to 2.2.5 did not log them, because Proxy never released the connection (see the fix below). `Database connection timeout` is now logged at `info` level instead of `warn`, because the idle connections of a connection pool reach the timeout routinely. With the default `connection_timeout` of 120 seconds, expect one message for each connection that stays idle for that long.
+
+### Fixed
+
+- **Memory and file descriptor growth as client connections close**: Proxy now releases a client connection when it ends. Previously every authenticated connection stayed in memory after it ended, along with its socket and the copy of the database schema it was using, until Proxy was restarted. This happened whether the client closed the connection, PostgreSQL closed it, or Proxy closed it after the connection timeout. Memory and open file descriptors therefore grew with the number of connections opened rather than with query volume, so a deployment whose connection pool replaces connections regularly saw steady growth even when idle. The `cipherstash_proxy_clients_active_connections` metric also never went down, and a client was not disconnected when PostgreSQL closed its connection or when Proxy timed it out. Affects versions 2.2.1 to 2.2.5. No configuration change is required.
+
 ## [2.2.5] - 2026-11-02
 
 ### Fixed
@@ -299,7 +313,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.5...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.6...HEAD
+[2.2.6]: https://github.com/cipherstash/proxy/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/cipherstash/proxy/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
