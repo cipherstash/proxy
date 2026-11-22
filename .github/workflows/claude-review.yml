@@ -1,0 +1,64 @@
+# Asks Claude for a code review of this repository's pull requests by calling the shared workflow in cipherstash/workflows.
+# This file is that repository's examples/claude-review.yml with a newer pin and a filter on pull_request events.
+#
+# Reviews a non-draft pull request when it is opened or reopened, or when a draft is marked ready for review, if its
+# author is a member of the @cipherstash/developers team. A team member can also ask for a review, on drafts too, by
+# commenting on a pull request with a first line starting `@cipherstash-agent review`; the rest of the comment is passed
+# on as instructions, and the comment gets a 👀 reaction once the request is sent. A team member can also request a
+# review from cipherstash-agent in a pull request's Reviewers box, on drafts too. The rules live in the shared
+# workflow, pinned below by commit.
+#
+# Comments run this file from the default branch, so the comment command works only once this file is merged there.
+#
+# Needs, as organisation or repository settings:
+#   secret CLAUDE_ROUTINE_TOKEN           the code-review routine's bearer token
+#   secret CLAUDE_REVIEW_APP_PRIVATE_KEY  the membership GitHub App's private key
+#   variable CLAUDE_ROUTINE_TRIGGER_ID    the routine's trigger id (`trig_…`)
+#   variable CLAUDE_REVIEW_APP_CLIENT_ID  the membership GitHub App's client ID (`Iv…`)
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, review_requested]
+  # zizmor flags issue_comment because anyone who can comment can start this workflow. Accepted: the shared
+  # workflow acts only on a comment command from a team member, checked by its decide job, and never runs code from
+  # the pull request.
+  issue_comment: # zizmor: ignore[dangerous-triggers] only a team member's comment command is acted on
+    types: [created]
+
+permissions: {}
+
+jobs:
+  review:
+    # Saves starting runners for comments that cannot be a comment command: only comments on pull requests that mention
+    # the review agent (contains ignores case) go on. The shared workflow still checks every rule itself.
+    # The mention must match the shared workflow's `review-agent` input: change it here too if you change that input.
+    # There is no filter on the commenter's author_association: GitHub reports a team member whose organisation
+    # membership is private as CONTRIBUTOR or NONE, so such a filter would silently skip their commands. The shared
+    # workflow's team membership check is the gate, and the mention is the only filter on comments.
+    # A review request for any reviewer other than the review agent does not start the workflow.
+    # Pull requests from forks, including deleted forks, do not start it, and nor do bots' pull requests (Dependabot's)
+    # except when a person requests the review agent as a reviewer. The shared workflow would skip them anyway; this
+    # only saves starting a runner.
+    if: >-
+      (github.event_name != 'issue_comment' || (
+      github.event.issue.pull_request
+      && contains(github.event.comment.body, '@cipherstash-agent')
+      ))
+      && (github.event.action != 'review_requested' || github.event.requested_reviewer.login == 'cipherstash-agent')
+      && (github.event_name != 'pull_request' || (
+      github.event.pull_request.head.repo.full_name == github.repository
+      && (github.event.action == 'review_requested' || github.event.pull_request.user.type != 'Bot')
+      ))
+    # The shared workflow's jobs can hold no more than this. Only its reaction job uses it, to add 👀 to a comment
+    # command; its other jobs hold no permissions.
+    permissions:
+      issues: write
+      pull-requests: write
+    uses: cipherstash/workflows/.github/workflows/claude-review.yml@38f13f4210ddc6e81d4e8ac69011ceb1069880c6 # main (cipherstash/workflows#41)
+    with:
+      routine-trigger-id: ${{ vars.CLAUDE_ROUTINE_TRIGGER_ID }}
+      app-client-id: ${{ vars.CLAUDE_REVIEW_APP_CLIENT_ID }}
+    secrets:
+      CLAUDE_ROUTINE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_TOKEN }}
+      CLAUDE_REVIEW_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_REVIEW_APP_PRIVATE_KEY }}
