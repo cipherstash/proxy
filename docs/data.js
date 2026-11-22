@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795143158347,
+  "lastUpdate": 1795387501413,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30255,6 +30255,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 29.156187,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "4407f3f8d4dc1033e2147fe66578ee8f7dc12050",
+          "message": "CIP-5493: idle RSS growth rig for released Proxy images",
+          "timestamp": "2026-11-17T09:48:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/512/commits/4407f3f8d4dc1033e2147fe66578ee8f7dc12050"
+        },
+        "date": 1795387499891,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.361535,
             "unit": "Number"
           }
         ]
