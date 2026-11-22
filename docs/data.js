@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795388166816,
+  "lastUpdate": 1795388579453,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30305,6 +30305,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.377359,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "450d65bed88d9857f1b578958ca8c8270794a156",
+          "message": "fix(eql-mapper): satisfy clippy lints added in Rust 1.100.0",
+          "timestamp": "2026-11-17T09:48:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/515/commits/450d65bed88d9857f1b578958ca8c8270794a156"
+        },
+        "date": 1795388577904,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.415671,
             "unit": "Number"
           }
         ]
