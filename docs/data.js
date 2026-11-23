@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795400099942,
+  "lastUpdate": 1795401102204,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30405,6 +30405,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.993715,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f68708732a13f9831bd1c6a2daec2758414dafc7",
+          "message": "Merge pull request #515 from cipherstash/fix/clippy-1-100-eql-mapper\n\nfix(eql-mapper): satisfy clippy lints added in Rust 1.100.0",
+          "timestamp": "2026-11-23T13:26:12+11:00",
+          "tree_id": "35bc79c6686e025c20a007f7fca01efc667f520c",
+          "url": "https://github.com/cipherstash/proxy/commit/f68708732a13f9831bd1c6a2daec2758414dafc7"
+        },
+        "date": 1795401100686,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.807635,
             "unit": "Number"
           }
         ]
