@@ -147,6 +147,33 @@ mod tests {
         }
     }
 
+    mod given_handler_is_running {
+        use super::*;
+
+        #[test]
+        fn counts_the_connection_as_active() {
+            let recorder = TestRecorder::default();
+            let active_connections = recorder.active_connections.clone();
+            let observed = Arc::new(Mutex::new(None));
+
+            let handler = {
+                let observed = observed.clone();
+                async move {
+                    *observed.lock().unwrap() = Some(active_connections.value());
+                    Ok(())
+                }
+            };
+
+            run_with_recorder(&recorder, track_connection(handler));
+
+            assert_eq!(
+                *observed.lock().unwrap(),
+                Some(1.0),
+                "active connections should count the connection while its handler runs"
+            );
+        }
+    }
+
     mod given_handler_returns_connection_closed {
         use super::*;
 
