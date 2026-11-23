@@ -143,12 +143,7 @@ mod tests {
 
             run_with_recorder(&recorder, track_connection(async { Ok(()) }));
 
-            assert_eq!(
-                recorder.active_connections.value(),
-                0.0,
-                "active connections should return to zero after a successful connection, ops: {:?}",
-                recorder.active_connections.ops()
-            );
+            assertions::returned_to_start(&recorder);
         }
     }
 
@@ -221,8 +216,38 @@ mod tests {
         }
     }
 
+    mod given_several_connections_in_sequence {
+        use super::*;
+
+        #[test]
+        fn returns_active_connections_to_start() {
+            let recorder = TestRecorder::default();
+
+            run_with_recorder(&recorder, async {
+                track_connection(async { Ok(()) }).await;
+                track_connection(async { Err(Error::ConnectionClosed) }).await;
+                track_connection(async { Ok(()) }).await;
+                track_connection(async { Err(Error::DatabaseConnection) }).await;
+                track_connection(async { Ok(()) }).await;
+            });
+
+            assertions::returned_to_start(&recorder);
+        }
+    }
+
     mod assertions {
         use super::*;
+
+        /// Every connection that incremented the gauge has decremented it again.
+        #[track_caller]
+        pub(super) fn returned_to_start(recorder: &TestRecorder) {
+            assert_eq!(
+                recorder.active_connections.value(),
+                0.0,
+                "active connections should return to zero once every connection has ended, ops: {:?}",
+                recorder.active_connections.ops()
+            );
+        }
 
         /// The connection incremented the gauge once and decremented it once.
         #[track_caller]
