@@ -1,11 +1,9 @@
 use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
-use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
 use clap::Parser;
-use metrics::gauge;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
@@ -73,8 +71,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-    loop {
-        tokio::select! {
+        loop {
+            tokio::select! {
             _ = sigint() => {
                 info!(msg = "Received SIGINT");
                 break;
@@ -93,33 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let context = proxy.context(client_id);
 
-                    tracker.spawn(async move {
-
-                        gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
-
-                        match pg::handler(client_stream,context).await {
-                            Ok(_) => (),
-                            Err(err) => {
-
-                                gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
-
-                                match err {
-                                    Error::ConnectionClosed => {
-                                        info!(msg = "Database connection closed by client");
-                                    }
-                                    Error::CancelRequest => {
-                                        info!(msg = "Database connection closed after cancel request");
-                                    }
-                                    Error::ConnectionTimeout{..} => {
-                                        warn!(msg = "Database connection timeout", error = err.to_string());
-                                    }
-                                    _ => {
-                                        error!(msg = "Database connection error", error = %ErrorChain(&err));
-                                    }
-                                }
-                            },
-                        }
-                    });
+                    tracker.spawn(pg::track_connection(pg::handler(client_stream, context)));
                 },
             }
         }
