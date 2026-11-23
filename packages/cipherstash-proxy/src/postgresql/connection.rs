@@ -151,4 +151,34 @@ mod tests {
             );
         }
     }
+
+    mod given_handler_returns_connection_closed {
+        use super::*;
+
+        #[test]
+        fn decrements_active_connections_once() {
+            let recorder = TestRecorder::default();
+
+            run_with_recorder(
+                &recorder,
+                track_connection(async { Err(Error::ConnectionClosed) }),
+            );
+
+            assertions::tracked_once(&recorder);
+        }
+    }
+
+    mod assertions {
+        use super::*;
+
+        /// The connection incremented the gauge once and decremented it once.
+        #[track_caller]
+        pub(super) fn tracked_once(recorder: &TestRecorder) {
+            assert_eq!(
+                recorder.active_connections.ops(),
+                vec![GaugeOp::Increment(1.0), GaugeOp::Decrement(1.0)],
+                "active connections should be incremented once and decremented once"
+            );
+        }
+    }
 }
