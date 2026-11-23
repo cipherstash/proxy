@@ -22,9 +22,8 @@ where
     let result = handler.await;
     gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
 
-    match result {
-        Ok(_) => (),
-        Err(err) => match err {
+    if let Err(err) = result {
+        match err {
             Error::ConnectionClosed => {
                 info!(msg = "Database connection closed by client");
             }
@@ -37,25 +36,25 @@ where
             _ => {
                 error!(msg = "Database connection error", error = %ErrorChain(&err));
             }
-        },
+        }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use metrics::{
         Counter, Gauge, GaugeFn, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit,
     };
+    use std::cell::Cell;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     /// A change made to the active connections gauge.
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum GaugeOp {
         Increment(f64),
         Decrement(f64),
-        Set(f64),
     }
 
     /// Records every change made to the active connections gauge, in order.
@@ -73,7 +72,6 @@ mod tests {
             self.ops().iter().fold(0.0, |value, op| match op {
                 GaugeOp::Increment(n) => value + n,
                 GaugeOp::Decrement(n) => value - n,
-                GaugeOp::Set(n) => *n,
             })
         }
     }
@@ -87,8 +85,8 @@ mod tests {
             self.ops.lock().unwrap().push(GaugeOp::Decrement(value));
         }
 
-        fn set(&self, value: f64) {
-            self.ops.lock().unwrap().push(GaugeOp::Set(value));
+        fn set(&self, _: f64) {
+            unimplemented!("track_connection never sets the active connections gauge");
         }
     }
 
@@ -120,169 +118,78 @@ mod tests {
         }
     }
 
-    /// Drives `future` to completion with `recorder` installed as the metrics recorder.
-    ///
-    /// The local recorder is thread-local, so the future runs on a current-thread
-    /// runtime inside the recorder's scope.
-    fn run_with_recorder<F: Future>(recorder: &TestRecorder, future: F) -> F::Output {
-        metrics::with_local_recorder(recorder, || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(future)
-        })
-    }
+    const TRACKED_ONCE: [GaugeOp; 2] = [GaugeOp::Increment(1.0), GaugeOp::Decrement(1.0)];
+
+    // `#[tokio::test]` runs on a current-thread runtime, so the thread-local recorder
+    // installed by `set_default_local_recorder` sees every gauge change.
 
     mod given_handler_returns_ok {
         use super::*;
 
-        #[test]
-        fn returns_active_connections_to_start() {
+        #[tokio::test]
+        async fn decrements_active_connections_once() {
             let recorder = TestRecorder::default();
+            let _guard = metrics::set_default_local_recorder(&recorder);
 
-            run_with_recorder(&recorder, track_connection(async { Ok(()) }));
+            track_connection(async { Ok(()) }).await;
 
-            assertions::returned_to_start(&recorder);
+            assert_eq!(
+                recorder.active_connections.ops(),
+                TRACKED_ONCE,
+                "active connections should be incremented once and decremented once"
+            );
+        }
+    }
+
+    mod given_handler_returns_an_error {
+        use super::*;
+
+        #[tokio::test]
+        async fn decrements_active_connections_once() {
+            let errors = [
+                Error::ConnectionClosed,
+                Error::CancelRequest,
+                Error::ConnectionTimeout {
+                    duration: Duration::from_millis(5000),
+                },
+                Error::DatabaseConnection,
+            ];
+
+            for err in errors {
+                let description = format!("{err:?}");
+                let recorder = TestRecorder::default();
+                let _guard = metrics::set_default_local_recorder(&recorder);
+
+                track_connection(async { Err(err) }).await;
+
+                assert_eq!(
+                    recorder.active_connections.ops(),
+                    TRACKED_ONCE,
+                    "active connections should be incremented once and decremented once for {description}"
+                );
+            }
         }
     }
 
     mod given_handler_is_running {
         use super::*;
 
-        #[test]
-        fn counts_the_connection_as_active() {
+        #[tokio::test]
+        async fn counts_the_connection_as_active() {
             let recorder = TestRecorder::default();
-            let active_connections = recorder.active_connections.clone();
-            let observed = Arc::new(Mutex::new(None));
+            let _guard = metrics::set_default_local_recorder(&recorder);
+            let observed = Cell::new(None);
 
-            let handler = {
-                let observed = observed.clone();
-                async move {
-                    *observed.lock().unwrap() = Some(active_connections.value());
-                    Ok(())
-                }
-            };
-
-            run_with_recorder(&recorder, track_connection(handler));
+            track_connection(async {
+                observed.set(Some(recorder.active_connections.value()));
+                Ok(())
+            })
+            .await;
 
             assert_eq!(
-                *observed.lock().unwrap(),
+                observed.get(),
                 Some(1.0),
                 "active connections should count the connection while its handler runs"
-            );
-        }
-    }
-
-    mod given_handler_returns_connection_closed {
-        use super::*;
-
-        #[test]
-        fn decrements_active_connections_once() {
-            let recorder = TestRecorder::default();
-
-            run_with_recorder(
-                &recorder,
-                track_connection(async { Err(Error::ConnectionClosed) }),
-            );
-
-            assertions::tracked_once(&recorder);
-        }
-    }
-
-    mod given_handler_returns_connection_timeout {
-        use super::*;
-        use std::time::Duration;
-
-        #[test]
-        fn decrements_active_connections_once() {
-            let recorder = TestRecorder::default();
-
-            run_with_recorder(
-                &recorder,
-                track_connection(async {
-                    Err(Error::ConnectionTimeout {
-                        duration: Duration::from_millis(5000),
-                    })
-                }),
-            );
-
-            assertions::tracked_once(&recorder);
-        }
-    }
-
-    mod given_handler_returns_cancel_request {
-        use super::*;
-
-        #[test]
-        fn decrements_active_connections_once() {
-            let recorder = TestRecorder::default();
-
-            run_with_recorder(
-                &recorder,
-                track_connection(async { Err(Error::CancelRequest) }),
-            );
-
-            assertions::tracked_once(&recorder);
-        }
-    }
-
-    mod given_handler_returns_other_error {
-        use super::*;
-
-        #[test]
-        fn decrements_active_connections_once() {
-            let recorder = TestRecorder::default();
-
-            run_with_recorder(
-                &recorder,
-                track_connection(async { Err(Error::DatabaseConnection) }),
-            );
-
-            assertions::tracked_once(&recorder);
-        }
-    }
-
-    mod given_several_connections_in_sequence {
-        use super::*;
-
-        #[test]
-        fn returns_active_connections_to_start() {
-            let recorder = TestRecorder::default();
-
-            run_with_recorder(&recorder, async {
-                track_connection(async { Ok(()) }).await;
-                track_connection(async { Err(Error::ConnectionClosed) }).await;
-                track_connection(async { Ok(()) }).await;
-                track_connection(async { Err(Error::DatabaseConnection) }).await;
-                track_connection(async { Ok(()) }).await;
-            });
-
-            assertions::returned_to_start(&recorder);
-        }
-    }
-
-    mod assertions {
-        use super::*;
-
-        /// Every connection that incremented the gauge has decremented it again.
-        #[track_caller]
-        pub(super) fn returned_to_start(recorder: &TestRecorder) {
-            assert_eq!(
-                recorder.active_connections.value(),
-                0.0,
-                "active connections should return to zero once every connection has ended, ops: {:?}",
-                recorder.active_connections.ops()
-            );
-        }
-
-        /// The connection incremented the gauge once and decremented it once.
-        #[track_caller]
-        pub(super) fn tracked_once(recorder: &TestRecorder) {
-            assert_eq!(
-                recorder.active_connections.ops(),
-                vec![GaugeOp::Increment(1.0), GaugeOp::Decrement(1.0)],
-                "active connections should be incremented once and decremented once"
             );
         }
     }

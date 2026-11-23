@@ -86,13 +86,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             },
             Ok(client_stream) = AsyncStream::accept(&listener) => {
+                client_id += 1;
 
-                    client_id += 1;
+                let context = proxy.context(client_id);
 
-                    let context = proxy.context(client_id);
-
-                    tracker.spawn(pg::track_connection(pg::handler(client_stream, context)));
-                },
+                tracker.spawn(pg::track_connection(pg::handler(client_stream, context)));
+            },
             }
         }
 
