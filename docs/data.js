@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795401403076,
+  "lastUpdate": 1795401408650,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30534,6 +30534,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.317833,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "cb58cb715a62a00adb387242ec4417a74d59f697",
+          "message": "chore: pin Rust 1.100.0",
+          "timestamp": "2026-11-17T09:48:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/507/commits/cb58cb715a62a00adb387242ec4417a74d59f697"
+        },
+        "date": 1795401407009,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.078503,
             "unit": "Number"
           }
         ]
