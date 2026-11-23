@@ -1,5 +1,6 @@
 mod backend;
 mod column_mapper;
+mod connection;
 mod context;
 mod data;
 mod error_handler;
@@ -14,6 +15,7 @@ mod startup;
 #[cfg(test)]
 mod tests;
 
+pub use connection::track_connection;
 pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;

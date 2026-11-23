@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Active connections metric**: `cipherstash_proxy_clients_active_connections` now goes down when a client connection ends cleanly.
+Previously it went down only when a connection ended with an error, so the value grew for as long as Proxy ran and did not show how many clients were connected.
+
 ## [2.2.5] - 2026-11-02
 
 ### Fixed
