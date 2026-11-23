@@ -85,6 +85,15 @@ impl DatabaseConfig {
         }
     }
 
+    /// How long a client can go without reading while Proxy closes its connection.
+    ///
+    /// This is the connection timeout. When the connection timeout is disabled, it is the default
+    /// connection timeout, because a connection that is closing must not wait for ever.
+    pub fn client_close_timeout(&self) -> Duration {
+        self.connection_timeout()
+            .unwrap_or(Duration::from_millis(Self::DEFAULT_CONNECTION_TIMEOUT_MS))
+    }
+
     pub fn server_name(&self) -> Result<ServerName<'_>, Error> {
         let name = ServerName::try_from(self.host.as_str()).map_err(|_| {
             ConfigError::InvalidServerName {
@@ -138,6 +147,20 @@ mod tests {
         let mut config = DatabaseConfig::for_testing();
         config.connection_timeout = Some(0);
         assert_eq!(config.connection_timeout(), None);
+    }
+
+    #[test]
+    fn client_close_timeout_is_the_connection_timeout() {
+        let mut config = DatabaseConfig::for_testing();
+        config.connection_timeout = Some(5000);
+        assert_eq!(config.client_close_timeout(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn client_close_timeout_is_the_default_when_the_connection_timeout_is_disabled() {
+        let mut config = DatabaseConfig::for_testing();
+        config.connection_timeout = Some(0);
+        assert_eq!(config.client_close_timeout(), Duration::from_secs(120));
     }
 
     #[test]
