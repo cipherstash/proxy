@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795405422444,
+  "lastUpdate": 1795405445068,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30609,6 +30609,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.773518,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "33272d1a67b1872bfbaf8d8c18ec438aa8782aec",
+          "message": "Merge pull request #507 from cipherstash/claude/project-thread-1zdzbq\n\nchore: pin Rust 1.100.0",
+          "timestamp": "2026-11-23T14:39:04+11:00",
+          "tree_id": "5b0c1b2d12da7f81cdaba841aa717efaf61384da",
+          "url": "https://github.com/cipherstash/proxy/commit/33272d1a67b1872bfbaf8d8c18ec438aa8782aec"
+        },
+        "date": 1795405443612,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.717341,
             "unit": "Number"
           }
         ]
