@@ -11,7 +11,7 @@ use crate::postgresql::messages::authentication::{
 };
 use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::{protocol, startup};
-use crate::proxy::ZeroKms;
+use crate::proxy::{EncryptionService, ZeroKms};
 use crate::{
     connect::AsyncStream,
     error::{Error, ProtocolError},
@@ -224,16 +224,6 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
     let (client_reader, client_writer) = client_stream.split();
     let (server_reader, server_writer) = database_stream.split();
 
-    let channel_writer = ChannelWriter::new(client_writer, client_id);
-
-    let mut frontend = Frontend::new(
-        client_reader,
-        channel_writer.sender(),
-        server_writer,
-        context.clone(),
-    );
-    let mut backend = Backend::new(channel_writer.sender(), server_reader, context.clone());
-
     if context.is_passthrough() {
         if context.use_structured_logging() {
             warn!(msg = "RUNNING IN PASSTHROUGH MODE");
@@ -245,6 +235,48 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
             warn!(msg = "========================================");
         }
     }
+
+    relay(
+        client_reader,
+        client_writer,
+        server_reader,
+        server_writer,
+        context,
+    )
+    .await
+}
+
+///
+/// Relays messages between an authenticated client and PostgreSQL until either side closes the
+/// connection or the connection times out, then closes the client's side of the connection.
+///
+/// Always returns the error that ended the connection.
+///
+pub(super) async fn relay<CR, CW, SR, SW, S>(
+    client_reader: CR,
+    client_writer: CW,
+    server_reader: SR,
+    server_writer: SW,
+    context: Context<S>,
+) -> Result<(), Error>
+where
+    CR: AsyncRead + Unpin,
+    CW: AsyncWrite + Unpin + Send + 'static,
+    SR: AsyncRead + Unpin,
+    SW: AsyncWrite + Unpin,
+    S: EncryptionService + Clone,
+{
+    let client_id = context.client_id;
+
+    let channel_writer = ChannelWriter::new(client_writer, client_id);
+
+    let mut frontend = Frontend::new(
+        client_reader,
+        channel_writer.sender(),
+        server_writer,
+        context.clone(),
+    );
+    let mut backend = Backend::new(channel_writer.sender(), server_reader, context.clone());
 
     let timeout_sender = channel_writer.sender();
     let channel_writer_task = tokio::spawn(channel_writer.receive());
@@ -279,22 +311,23 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
     if let Err(ref err @ Error::ConnectionTimeout { .. }) = &result {
         let error_response = ErrorResponse::connection_timeout(err.to_string());
         if let Ok(bytes) = BytesMut::try_from(error_response) {
+            // The writer task sends everything queued before it closes the connection, and the
+            // wait below lets it finish, so the client receives this before the connection closes.
             let _ = timeout_sender.send(bytes);
         }
-        // Best-effort yield to allow ChannelWriter to flush the error response
-        // before the connection tears down. Not guaranteed — if the runtime doesn't
-        // schedule the writer task before teardown, the client may see a connection
-        // reset instead of the ErrorResponse.
-        tokio::task::yield_now().await;
     }
 
     // Drop frontend and backend to drop their senders and close the channel
     // The async blocks above captured frontend/backend by reference, so they're still alive
     drop(frontend);
     drop(backend);
+    // The timeout sender is a sender of the same channel. While it is alive the channel stays
+    // open, the writer task never finishes, and the wait below never ends, so the connection's
+    // socket, task and memory are held until Proxy restarts.
+    drop(timeout_sender);
 
     // Wait for channel writer to finish shutdown sequence
-    // The senders are now dropped, which closes the channel and allows
+    // Every sender is now dropped, which closes the channel and allows
     // the writer task to complete its shutdown
     if let Err(err) = channel_writer_task.await {
         error!(
