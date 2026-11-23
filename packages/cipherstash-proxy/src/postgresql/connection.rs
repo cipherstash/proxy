@@ -168,6 +168,27 @@ mod tests {
         }
     }
 
+    mod given_handler_returns_connection_timeout {
+        use super::*;
+        use std::time::Duration;
+
+        #[test]
+        fn decrements_active_connections_once() {
+            let recorder = TestRecorder::default();
+
+            run_with_recorder(
+                &recorder,
+                track_connection(async {
+                    Err(Error::ConnectionTimeout {
+                        duration: Duration::from_millis(5000),
+                    })
+                }),
+            );
+
+            assertions::tracked_once(&recorder);
+        }
+    }
+
     mod assertions {
         use super::*;
 
