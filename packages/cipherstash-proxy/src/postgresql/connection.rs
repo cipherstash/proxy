@@ -189,6 +189,22 @@ mod tests {
         }
     }
 
+    mod given_handler_returns_cancel_request {
+        use super::*;
+
+        #[test]
+        fn decrements_active_connections_once() {
+            let recorder = TestRecorder::default();
+
+            run_with_recorder(
+                &recorder,
+                track_connection(async { Err(Error::CancelRequest) }),
+            );
+
+            assertions::tracked_once(&recorder);
+        }
+    }
+
     mod given_handler_returns_other_error {
         use super::*;
 
