@@ -60,6 +60,7 @@ statement is forwarded only for a named reason: `SET CIPHERSTASH.UNSAFE_DISABLE_
 was issued on this connection, EQL Mapper does not type check its kind, it touches no
 encrypted column, or the **type-check fallback**. These are not interchangeable.
 Name the condition rather than saying "passthrough" alone.
+Kinds EQL Mapper does not type check include `DO` and `CALL`: Proxy cannot see the SQL their bodies run, so they are forwarded as written, which is a known limitation.
 
 **Route**:
 What Proxy does with one statement from a Query or Parse: map it, forward it for a named
@@ -155,6 +156,8 @@ state.
 An immutable, monotonically versioned pair of database structure and column encryption
 metadata loaded from PostgreSQL. The pair is published atomically because a table without its
 encryption policy (or an encryption policy without its table) is not a valid observable state.
+It holds the tables in the schemas on the search path of Proxy's own loading connection, each recorded with its schema.
+A bare table name found in more than one of those schemas does not resolve, because a client can change its `search_path` without Proxy seeing it; when encrypted columns are configured, a write that uses it is refused.
 
 **Transaction schema overlay**:
 The confirmed effects of successful DDL executions in one connection's current transaction.

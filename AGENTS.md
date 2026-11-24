@@ -35,12 +35,36 @@ before completion.
 - Write Markdown prose one sentence per line, with no hard wrapping, so diffs
   stay readable.
 
+### Fixing bugs
+
+Reproduce a bug with a failing test before fixing it, including bugs raised in review.
+Show the test failing without the fix and passing with it.
+
+### Design before implementation
+
+Once a design is agreed, write it up as a spec and break it into tickets before opening an implementation PR.
+
+### Maintenance branches
+
+`release/2.2` is maintained separately from `main` and has a different architecture.
+A fix needed on both is implemented and reviewed against each branch, not cherry-picked.
+
 ### Release documentation
 
 For user-facing or notable changes, update the `CHANGELOG.md` `[Unreleased]`
 section using Keep a Changelog categories and user-facing language. For a
 significant release, prepare `ANNOUNCEMENT.md` for GitHub Discussions and
 remove that temporary file after publishing it.
+
+## Commits and pull requests
+
+This repository is public.
+
+- Never put private Linear issue keys (`CIP-####`) or Linear links in PR titles, PR bodies, PR comments, commit messages, branch names or code comments. See `docs/agents/issue-tracker.md`.
+- Never put links to private agent sessions or threads (for example claude.ai session or project URLs, or `Claude-Session:` trailers) in PRs, PR comments or commit messages.
+- Every commit pushed to a PR must be signed and show as verified on GitHub; `main` requires it. This is separate from the DCO sign-off in `CONTRIBUTING.md`.
+- Never rewrite history with `git filter-branch`, which drops signatures. To reword or re-sign your own branch, use `git rebase --force-rebase --gpg-sign <base>` and check each commit with `git cat-file commit <sha>` before force-pushing with a lease.
+- When a PR has a review in progress, comment on it before pushing: say what is coming and whether it is a fast-forward.
 
 ## Pull request CI ownership
 
@@ -53,8 +77,11 @@ After every push:
 1. The main agent must spawn a background subagent whose role is **monitor
    only**. The monitor may inspect the PR, wait for checks with
    `gh pr checks --watch`, and collect failed-run logs with read-only `gh`
-   commands. It must not edit files, run formatting that changes files, commit,
-   push, or perform any other repository mutation.
+   commands. Where GitHub's GraphQL API is unavailable (`gh pr checks` then
+   fails), read check state over REST with
+   `gh api repos/cipherstash/proxy/commits/<sha>/check-runs`. It must not
+   edit files, run formatting that changes files, commit, push, or perform any
+   other repository mutation.
 2. The monitor must return the final check state and, for failures, the failed
    check names, run identifiers, and relevant failure output to the main agent.
 3. The main agent is the sole writer. It must diagnose the failure, edit the
