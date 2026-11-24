@@ -7,6 +7,7 @@ use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, Args};
 use clap::Parser;
 use metrics::gauge;
 use std::io::IsTerminal;
+use std::mem::DropGuard;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
@@ -112,9 +113,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracker.spawn(async move {
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
+                        // Decrements even if the handler panics or the task
+                        // is dropped, so the gauge cannot drift upwards.
+                        let active_connection = DropGuard::new((), |()| {
+                            gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+                        });
 
                         let result = pg::handler(client_stream,context).await;
-                        gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+                        drop(active_connection);
 
                         match result {
                             Ok(_) => (),

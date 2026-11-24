@@ -1650,9 +1650,7 @@ where
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         if plaintexts.iter().all(Option::is_none) {
-            return Ok(std::iter::repeat_with(|| None)
-                .take(plaintexts.len())
-                .collect());
+            return Ok(Vec::from_fn(plaintexts.len(), |_| None));
         }
 
         let keyset_id = self.keyset_identifier()?;

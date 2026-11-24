@@ -434,7 +434,7 @@ impl DomainIdentity {
         self.domain
             .value
             .get(prefix_len..)
-            .map(|rest| rest.strip_prefix('_').unwrap_or(rest))
+            .map(|rest| rest.trim_prefix('_'))
             .unwrap_or("")
     }
 
@@ -515,11 +515,7 @@ impl DomainIdentity {
         if self.token == TokenType::Json {
             return ("eql_v3", "query_json".to_string());
         }
-        let bare = self
-            .domain
-            .value
-            .strip_prefix("eql_v3_")
-            .unwrap_or(&self.domain.value);
+        let bare = self.domain.value.trim_prefix("eql_v3_");
         ("eql_v3", format!("query_{bare}"))
     }
 
