@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Only enforced for numbered releases. On push/PR/workflow_dispatch this
       # job is a no-op so it can still gate the build matrix below.
@@ -47,7 +47,7 @@ jobs:
 
     runs-on: ${{matrix.build.os}}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Decrypt secrets
         uses: cipherstash/secrets-action@main
@@ -131,7 +131,7 @@ jobs:
     env:
       publish: ${{contains(fromJSON('["push", "release"]'), github.event_name)}}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Decrypt secrets
         uses: cipherstash/secrets-action@main

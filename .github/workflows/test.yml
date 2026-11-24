@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-test
 
       - name: Decrypt secrets
@@ -78,7 +78,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Read MSRV from Cargo.toml
         id: msrv
@@ -131,7 +131,7 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install latest stable Rust
         shell: /bin/bash -l {0}
@@ -163,7 +163,7 @@ jobs:
       RUST_BACKTRACE: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-test
 
       - name: Decrypt secrets
@@ -210,7 +210,7 @@ jobs:
       POOLERS_GOLANG: supported
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-test
 
       - name: Decrypt secrets
