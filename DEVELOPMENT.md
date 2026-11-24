@@ -804,7 +804,21 @@ version and notes, then **tagging** that merged commit.
 
 ### 1. Prepare-release PR
 
-Open a PR against `main` that:
+On `main`, [release-plz](https://release-plz.dev) opens this PR for you and keeps it up to date.
+After every push to `main`, the `Release-plz` workflow opens or updates one PR, titled like `chore: release v3.1.0`, on a `release-plz-*` branch.
+It bumps the workspace version (and `Cargo.lock`) from the conventional commits since the last `v*` tag.
+To use it:
+
+1. Check the proposed version.
+   If it's wrong, for example because a breaking change wasn't marked `feat!:`, edit the version in the PR.
+2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - <release date>`, and add a new empty `## [Unreleased]` above it.
+   Make your edits (this one and any version change) the last commits before merging.
+   If `main` moves after a person has committed to the PR, release-plz closes it and opens a fresh one without those edits, so check the version again before approving.
+3. Approve and merge in one sitting.
+   release-plz rebuilds the PR whenever `main` moves, and `main` keeps approvals, so an older approval can cover changes you haven't seen.
+
+release-plz never generates changelog entries for Proxy, and the configuration is explained in [ADR 0001](docs/adr/0001-release-plz-release-pr.md).
+To prepare a release by hand instead (always the case on `release/2.2`), open a PR that:
 
 1. Bumps `version` under `[workspace.package]` in the root `Cargo.toml` (and runs
    `cargo update --workspace` so `Cargo.lock` matches).

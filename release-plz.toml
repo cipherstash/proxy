@@ -1,0 +1,29 @@
+# release-plz configuration for CipherStash Proxy.
+# Why it looks like this, and how it differs from other CipherStash repos:
+# docs/adr/0001-release-plz-release-pr.md
+
+[workspace]
+# Proxy ships as a binary and Docker image, never to crates.io.
+publish = false
+# Only cipherstash-proxy is released (below). Members that inherit
+# `version.workspace` move with it.
+release = false
+# When the release job runs, release only if a release-plz release PR has
+# just merged, never on other pushes to main.
+release_always = false
+# CHANGELOG.md is written by hand. A person renames `## [Unreleased]` in the
+# release PR; the "Release metadata" check fails the PR until they do.
+changelog_update = false
+# Existing tags, release.yml and the Docker tags all use vX.Y.Z.
+git_tag_name = "v{{ version }}"
+# Proxy's library target is internal, not a public API. Semver checks would
+# turn internal refactors into major version bumps.
+semver_check = false
+
+[[package]]
+name = "cipherstash-proxy"
+release = true
+# Read the last released version from `v*` git tags instead of a registry.
+# Set here, not under [workspace]: workspace-wide, release-plz also looks up
+# every other member at the last tag and fails on members added since then.
+git_only = true
