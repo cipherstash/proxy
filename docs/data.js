@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795560104816,
+  "lastUpdate": 1795561751402,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30846,6 +30846,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.038192,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f2aab89763d827b84a8c04ab0bf849b24b928d1",
+          "message": "Merge pull request #518 from cipherstash/claude/project-thread-sz21gl\n\nci: call the shared Claude review workflow, pinned to v1.0.0",
+          "timestamp": "2026-11-25T10:03:48+11:00",
+          "tree_id": "625f324bad4252aaedc912a4692410b9a208ce7d",
+          "url": "https://github.com/cipherstash/proxy/commit/3f2aab89763d827b84a8c04ab0bf849b24b928d1"
+        },
+        "date": 1795561749662,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.073681,
             "unit": "Number"
           }
         ]
