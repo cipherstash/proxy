@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795482292842,
+  "lastUpdate": 1795482398818,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30713,6 +30713,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.505788,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3c3a0493faf6fb6658d008ac6164dc5efa0267a9",
+          "message": "Merge pull request #503 from cipherstash/claude/project-thread-khlvuq\n\nci: fail version-bump PRs until the changelog has the new section",
+          "timestamp": "2026-11-24T11:59:54+11:00",
+          "tree_id": "61486ff0ae1fc40b4de02b6b24118ae5ed1a5289",
+          "url": "https://github.com/cipherstash/proxy/commit/3c3a0493faf6fb6658d008ac6164dc5efa0267a9"
+        },
+        "date": 1795482397163,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.933174,
             "unit": "Number"
           }
         ]
