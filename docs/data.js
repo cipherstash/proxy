@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795559737986,
+  "lastUpdate": 1795560104816,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30821,6 +30821,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.567614,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "054aab9e70a6b6f46d15c3029687910e4ab7ab3e",
+          "message": "ci: call the shared Claude review workflow, pinned to v1.0.0",
+          "timestamp": "2026-11-17T09:48:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/518/commits/054aab9e70a6b6f46d15c3029687910e4ab7ab3e"
+        },
+        "date": 1795560102693,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.038192,
             "unit": "Number"
           }
         ]
