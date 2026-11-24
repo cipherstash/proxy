@@ -1,5 +1,6 @@
 use super::{Deallocation, SessionId, Statement};
 use crate::postgresql::rewrite::Name;
+use crate::proxy::schema::SchemaIntent;
 use std::{collections::HashMap, sync::Arc};
 
 /// What Proxy holds for one statement prepared on the connection.
@@ -12,6 +13,8 @@ struct PreparedStatement<K> {
     parse: Option<K>,
     /// Set when the statement's SQL is a `DEALLOCATE` or `DISCARD ALL`
     deallocation: Option<Deallocation>,
+    /// What executing the statement does to schema state
+    schema: Option<Arc<SchemaIntent>>,
 }
 
 impl<K> Default for PreparedStatement<K> {
@@ -21,6 +24,7 @@ impl<K> Default for PreparedStatement<K> {
             metrics_scope: None,
             parse: None,
             deallocation: None,
+            schema: None,
         }
     }
 }
@@ -80,6 +84,14 @@ where
 
     pub fn set_deallocation(&mut self, name: Name, deallocation: Deallocation) {
         self.statements.entry(name).or_default().deallocation = Some(deallocation);
+    }
+
+    pub fn schema(&self, name: &Name) -> Option<Arc<SchemaIntent>> {
+        self.statements.get(name)?.schema.clone()
+    }
+
+    pub fn set_schema(&mut self, name: Name, schema: Arc<SchemaIntent>) {
+        self.statements.entry(name).or_default().schema = Some(schema);
     }
 
     /// Remove the statement, returning its metrics scope.
