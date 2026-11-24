@@ -9,6 +9,14 @@ Before exploring or changing package code, read `CONTEXT-MAP.md` and the
 applicable package `CONTEXT.md`. Treat those files as the source of truth for
 architecture, domain boundaries, request flow, and vocabulary.
 
+## Formal models
+
+Before changing `specs/quint/`, or Proxy's statement routing, Parse/Bind
+lifecycle, settings protocol or schema reload (`frontend.rs`,
+`context/{lifecycle,mod,settings_protocol}.rs` and
+`schema/{middleware,manager}.rs` in `packages/cipherstash-proxy/src/`, and
+`packages/eql-mapper/src/eql_mapper.rs`), use the `proxy-quint` skill.
+
 ## Development workflow
 
 Before setting up a local environment; starting or stopping Proxy or
