@@ -5,7 +5,6 @@ use crate::{
     connect,
     error::{ConfigError, Error, ErrorChain, TlsConfigError},
     postgresql::{Column, Context, KeysetIdentifier},
-    proxy::schema::SchemaManager,
     tls,
 };
 use cipherstash_client::encryption::Plaintext;
@@ -19,6 +18,8 @@ pub(crate) mod schema;
 mod zerokms;
 
 pub use encrypt_config::EncryptConfig;
+/// The schema loader, for tests that run it against PostgreSQL.
+pub use schema::SchemaManager;
 pub use zerokms::ZeroKms;
 
 pub type ReloadSender = UnboundedSender<ReloadCommand>;
