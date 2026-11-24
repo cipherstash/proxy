@@ -187,7 +187,7 @@ jobs:
 
       - name: Upload burn-in RSS report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proxy-burn-in-pg17
           path: target/burn-in/soak-report.json
@@ -234,7 +234,7 @@ jobs:
 
       - name: Upload matrix and driver evidence
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proxy-pooler-compatibility-pg17
           path: target/pooler-results/
