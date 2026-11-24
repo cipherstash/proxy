@@ -9,3 +9,7 @@ updates:
     # Waits 7 days after a release before proposing it, so a bad release has time to be found first.
     cooldown:
       default-days: 7
+    ignore:
+      # The action's commit and the release-plz CLI `version:` it installs (release-plz.yml) must move together.
+      # Dependabot would move only the commit, so upgrade both by hand.
+      - dependency-name: "release-plz/action"
