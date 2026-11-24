@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795482398818,
+  "lastUpdate": 1795493161771,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -30742,6 +30742,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.933174,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0ee3a57cf9e251bd3362d3e8f428b3a1a66cf15e",
+          "message": "Merge pull request #505 from cipherstash/claude/release-plz-release-pr\n\nci: keep a release-plz release PR open on main",
+          "timestamp": "2026-11-24T15:00:54+11:00",
+          "tree_id": "1b68c850e5a5242187e3ab0d1bca81f6da390f3c",
+          "url": "https://github.com/cipherstash/proxy/commit/0ee3a57cf9e251bd3362d3e8f428b3a1a66cf15e"
+        },
+        "date": 1795493160149,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.459487,
             "unit": "Number"
           }
         ]
