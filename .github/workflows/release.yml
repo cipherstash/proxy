@@ -146,7 +146,7 @@ jobs:
           CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
