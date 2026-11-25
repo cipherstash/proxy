@@ -25,6 +25,8 @@ enum Command {
     Conformance(DatabaseArgs),
     /// Build and start the proxy in release mode, then run a timed stress workload.
     Soak(SoakArgs),
+    /// Measure RSS growth of a released Proxy image, idle or under one client workload.
+    RssIdle(RssIdleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -72,6 +74,70 @@ struct SoakArgs {
     max_rss_growth_mib: Option<u64>,
 }
 
+#[derive(Debug, Args)]
+struct RssIdleArgs {
+    /// Scenario name. It names the containers and the working directory, so
+    /// invocations with different names can run at the same time.
+    #[arg(long, default_value = "idle")]
+    name: String,
+    /// Released Proxy image to measure, unmodified.
+    #[arg(long, default_value = "cipherstash/proxy:2.2.5")]
+    image: String,
+    /// PostgreSQL image for the TLS-only database Proxy connects to.
+    #[arg(long, default_value = "postgres:17")]
+    postgres_image: String,
+    /// Wall-clock duration of each run, including warm-up.
+    #[arg(long)]
+    duration_seconds: u64,
+    /// Samples before this point are recorded but excluded from the fitted slope.
+    #[arg(long, default_value_t = 120)]
+    warmup_seconds: u64,
+    /// Seconds between `smaps_rollup` samples of the Proxy process.
+    #[arg(long, default_value_t = 10)]
+    sample_interval_seconds: u64,
+    /// Reload interval applied to both the schema and encrypt-config reloaders.
+    /// Each value is a separate run with its own containers; runs execute concurrently.
+    #[arg(long = "reload-interval-seconds", default_values_t = [60, 1])]
+    reload_intervals: Vec<u64>,
+    /// Enable Proxy's Prometheus exporter and scrape it at this interval from
+    /// a separate container. Without it the exporter stays off.
+    #[arg(long)]
+    scrape_interval_seconds: Option<u64>,
+    /// Drive one client workload through Proxy: `tcp-probe`, `startup-probe`,
+    /// `login-churn`, `idle-pool` or `pooled-queries`. Without it nothing connects.
+    #[arg(long)]
+    client_workload: Option<cipherstash_proxy_burn_in::client::Workload>,
+    /// Period of each client connection's loop: one connect, or one query.
+    #[arg(long, default_value_t = 1000)]
+    client_interval_millis: u64,
+    /// Concurrent client loops. For `idle-pool` and `pooled-queries` this is the pool size.
+    #[arg(long, default_value_t = 1)]
+    client_connections: usize,
+    /// Production rate, in connects or queries per day, at which growth per
+    /// client operation is projected. Defaults to the rate the run achieved.
+    #[arg(long)]
+    client_operations_per_day: Option<f64>,
+    /// Memory limit of each Proxy container, in `docker run --memory` syntax.
+    #[arg(long, default_value = "512m")]
+    memory_limit: String,
+    /// Extra `NAME=VALUE` environment for Proxy, for example `MALLOC_ARENA_MAX=2`.
+    #[arg(long = "proxy-env", value_parser = parse_env)]
+    proxy_env: Vec<(String, String)>,
+    /// JSON report containing the fitted slopes and the raw sample series.
+    #[arg(long, default_value = "target/burn-in/rss-idle-report.json")]
+    output: PathBuf,
+    /// Leave the containers running after the measurement, for inspection.
+    #[arg(long)]
+    keep_containers: bool,
+}
+
+fn parse_env(value: &str) -> Result<(String, String), String> {
+    match value.split_once('=') {
+        Some((name, value)) if !name.is_empty() => Ok((name.to_string(), value.to_string())),
+        _ => Err("expected NAME=VALUE".to_string()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
@@ -100,6 +166,33 @@ async fn main() -> Result<()> {
                 output: args.output,
                 max_rss_growth_bytes,
             })
+            .await
+        }
+        Command::RssIdle(args) => {
+            cipherstash_proxy_burn_in::image_rig::run(
+                cipherstash_proxy_burn_in::image_rig::Config {
+                    name: args.name,
+                    image: args.image,
+                    postgres_image: args.postgres_image,
+                    duration: Duration::from_secs(args.duration_seconds),
+                    warmup: Duration::from_secs(args.warmup_seconds),
+                    sample_interval: Duration::from_secs(args.sample_interval_seconds),
+                    reload_intervals: args.reload_intervals,
+                    scrape_interval: args.scrape_interval_seconds.map(Duration::from_secs),
+                    client: args.client_workload.map(|workload| {
+                        cipherstash_proxy_burn_in::client::Config {
+                            workload,
+                            interval: Duration::from_millis(args.client_interval_millis),
+                            connections: args.client_connections,
+                            assumed_operations_per_day: args.client_operations_per_day,
+                        }
+                    }),
+                    memory_limit: args.memory_limit,
+                    proxy_env: args.proxy_env,
+                    output: args.output,
+                    keep_containers: args.keep_containers,
+                },
+            )
             .await
         }
     }

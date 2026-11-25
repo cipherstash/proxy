@@ -190,6 +190,20 @@ CS_PROMETHEUS__ENABLED=false cargo run --locked -p cipherstash-proxy-burn-in -- 
   --output target/burn-in/soak-report.json
 """
 
+[tasks."burn-in:rss-idle"]
+description = "Measure idle RSS growth of a released Proxy image (default 2.2.5) with zero client connections"
+run = """
+set -e
+image="${RSS_IDLE_IMAGE:-cipherstash/proxy:2.2.5}"
+duration="${RSS_IDLE_DURATION_SECONDS:-7200}"
+
+cargo run --locked -p cipherstash-proxy-burn-in -- \
+  rss-idle \
+  --image "${image}" \
+  --duration-seconds "${duration}" \
+  --output target/burn-in/rss-idle-report.json
+"""
+
 [tasks."test:integration:setup:tls"]
 description = "Setup for TLS integration tests: preflight, postgres, proxy"
 run = """
